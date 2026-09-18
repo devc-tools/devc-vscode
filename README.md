@@ -1,71 +1,38 @@
-# devcontainer-filetree README
+# Dev Container File Tree
 
-This is the README for your extension "devcontainer-filetree". After writing up a brief description, we recommend including the following sections.
+Browse and edit files inside a **running dev container** from VS Code running on the host — without using VS Code's Dev Containers extension or attaching a window to the container.
 
-## Features
+The extension registers a `FileSystemProvider` for the `devcontainer-filetree://` scheme. File trees and file contents are sourced from the container by shelling out to `docker exec` on the host, so it works with containers started by the [devcontainer CLI](https://github.com/devcontainers/cli) (`devcontainer up`), plain `docker run`, or anything else — as long as the container is running and reachable via the host's Docker CLI.
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## Usage
 
-For example if there is an image subfolder under your extension project workspace:
+1. Start your dev container on the host, e.g. `devcontainer up --workspace-folder .`
+2. In VS Code (on the host), run **Dev Container FS: Open Folder in Dev Container...**
+   - If the current workspace folder matches a running container's `devcontainer.local_folder` label, that container is used automatically; otherwise you pick from all running dev containers.
+   - Confirm or edit the path inside the container (defaults to `/workspaces/<folder name>`).
+3. The container folder is added to your workspace like any other folder: expand the tree, open files, edit and save — writes go back into the container.
+4. **Dev Container FS: Refresh Container Files** re-reads the tree after changes made inside the container.
 
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+URI shape: `devcontainer-filetree://<container-id>/<absolute path in container>`
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Docker CLI on the host (`docker` on `PATH`, or set `devcontainer-filetree.dockerPath`).
+- A running container with GNU coreutils/findutils (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`, `rmdir`) and `sh` — true for typical dev container images (Debian/Ubuntu based). BusyBox-only images (Alpine) are not supported.
+- Files are read/written as the container's default user (the image's `USER`, e.g. `vscode` in devcontainer images).
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+* `devcontainer-filetree.dockerPath`: Docker CLI command used to talk to containers (a name on `PATH` or an absolute path). Default: `docker`.
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- **No file watching**: changes made inside the container don't appear automatically. Run **Dev Container FS: Refresh Container Files** (or collapse/re-expand the tree) to pick them up.
+- **Latency**: every operation is a separate `docker exec` (~100–300 ms), so expanding large trees feels slower than a local filesystem.
+- Container restarts keep the same container id, but a *recreated* container gets a new id — re-open the folder if that happens.
 
-## Release Notes
+## Development
 
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- `npm run compile` / `npm run watch` — build
+- `npm run lint` — lint
+- `npm test` — runs the integration suite in a real VS Code extension host on the host, against a live container (the one labeled `devcontainer.local_folder=<this repo>`, any other running dev container, or `$DEVCONTAINER_FILETREE_TEST_CONTAINER`). Skips gracefully when no container is available.
