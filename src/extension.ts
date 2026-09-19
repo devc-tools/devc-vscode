@@ -29,6 +29,12 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		})
 	);
+
+	// Auto-detect: if a running container has the current workspace folder
+	// bind-mounted, open its root folder automatically.
+	autoOpenContainer(provider).catch(err => {
+		console.error('devcontainer-filetree: auto-detect failed', err);
+	});
 }
 
 async function openContainerFolder(provider: DevContainerFileSystemProvider): Promise<void> {
@@ -80,6 +86,89 @@ async function openContainerFolder(provider: DevContainerFileSystemProvider): Pr
 		uri,
 		name: `Dev Container (${shortName}): ${remotePath}`,
 	});
+}
+
+/**
+ * On activation, check if any running container has the current workspace
+ * folder bind-mounted. If exactly one match is found, open `/` in that
+ * container automatically without any prompts.
+ */
+async function autoOpenContainer(provider: DevContainerFileSystemProvider): Promise<void> {
+	const hostFolder = vscode.workspace.workspaceFolders
+		?.find(f => f.uri.scheme === 'file')
+		?.uri.fsPath;
+
+	console.log('devcontainer-filetree: autoOpenContainer hostFolder=', hostFolder);
+
+	if (!hostFolder) {
+		console.log('devcontainer-filetree: no hostFolder, skipping');
+		return;
+	}
+
+	// Don't auto-open if we already have a devcontainer folder in the workspace.
+	const alreadyOpen = vscode.workspace.workspaceFolders?.some(f => f.uri.scheme === SCHEME);
+	if (alreadyOpen) {
+		console.log('devcontainer-filetree: already open, skipping');
+		return;
+	}
+
+	const docker = vscode.workspace.getConfiguration('devcontainer-filetree').get<string>('dockerPath') || 'docker';
+	console.log('devcontainer-filetree: docker command=', docker);
+
+	// Get all running container IDs.
+	const idsRes = await execDocker(['ps', '-q'], undefined, docker);
+	console.log('devcontainer-filetree: ps exitCode=', idsRes.exitCode, 'stdout=', idsRes.stdout.toString('utf8'));
+	if (idsRes.exitCode !== 0 || idsRes.stdout.toString('utf8').trim() === '') {
+		return;
+	}
+	const ids = idsRes.stdout.toString('utf8').split('\n').map(s => s.trim()).filter(Boolean);
+	console.log('devcontainer-filetree: container ids=', ids);
+	if (ids.length === 0) {
+		return;
+	}
+
+	// Inspect each container to find bind mounts matching the host folder.
+	for (const id of ids) {
+		const inspectRes = await execDocker(
+			['inspect', '--format', '{{.Name}}{{"\t"}}{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\t"}}{{.Destination}}{{"\t"}}{{end}}{{end}}', id],
+			undefined, docker
+		);
+		console.log('devcontainer-filetree: inspect', id, 'exitCode=', inspectRes.exitCode);
+		if (inspectRes.exitCode !== 0) {
+			continue;
+		}
+
+		const stdout = inspectRes.stdout.toString('utf8');
+		console.log('devcontainer-filetree: inspect output (repr)=', JSON.stringify(stdout));
+
+		for (const line of stdout.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed || !trimmed.startsWith('/')) {
+				continue;
+			}
+			// Format: /containerName\t/source/path\t/dest/path\t...
+			const parts = trimmed.split('\t');
+			const containerName = parts[0];
+			console.log('devcontainer-filetree: containerName=', containerName, 'parts count=', parts.length);
+			// Check pairs: source, dest, source, dest, ...
+			for (let i = 1; i + 1 < parts.length; i += 2) {
+				const source = parts[i];
+				console.log('devcontainer-filetree: checking source=', source, '===', hostFolder, '?', source === hostFolder);
+				if (source === hostFolder) {
+					console.log('devcontainer-filetree: MATCH found, opening container', id);
+					const shortName = containerName.replace(/^\//, '') || id.slice(0, 12);
+					const uri = vscode.Uri.from({ scheme: SCHEME, authority: id, path: '/' });
+					const index = vscode.workspace.workspaceFolders?.length ?? 0;
+					vscode.workspace.updateWorkspaceFolders(index, 0, {
+						uri,
+						name: `Dev Container (${shortName}): /`,
+					});
+					return;
+				}
+			}
+		}
+	}
+	console.log('devcontainer-filetree: no matching container found');
 }
 
 /**

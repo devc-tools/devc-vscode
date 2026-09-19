@@ -10,7 +10,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onFileSystem:devcontainer-filetree"
+    "onFileSystem:devcontainer-filetree",
+    "*"
   ],
   "main": "./out/extension.js",
   "contributes": {
