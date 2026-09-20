@@ -35,8 +35,21 @@
         "command": "devcontainer-filetree.refresh",
         "title": "Refresh Container Files",
         "category": "Dev Container FS"
+      },
+      {
+        "command": "devcontainer-filetree.openInDevContainer",
+        "title": "Open in Dev Container",
+        "category": "Dev Container FS"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "devcontainer-filetree.openInDevContainer",
+          "when": "explorerResourceIsFolder"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
