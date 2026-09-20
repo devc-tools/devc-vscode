@@ -160,9 +160,7 @@ export function deactivate() {
 async function openContainerFolder(
 	provider: DevContainerFileSystemProvider,
 ): Promise<void> {
-	const hostFolder = vscode.workspace.workspaceFolders?.find(
-		(f) => f.uri.scheme === 'file',
-	)?.uri.fsPath;
+	const hostFolder = getHostFolder();
 
 	let container: ContainerInfo | undefined;
 	try {
@@ -224,18 +222,14 @@ async function openContainerFolder(
 async function autoOpenContainer(
 	provider: DevContainerFileSystemProvider,
 ): Promise<void> {
-	const hostFolder = vscode.workspace.workspaceFolders?.find(
-		(f) => f.uri.scheme === 'file',
-	)?.uri.fsPath;
+	const hostFolder = getHostFolder();
 
 	if (!hostFolder) {
 		return;
 	}
 
 	// Don't auto-open if we already have a devcontainer folder in the workspace.
-	const alreadyOpen = vscode.workspace.workspaceFolders?.some(
-		(f) => f.uri.scheme === SCHEME,
-	);
+	const alreadyOpen = hasDevContainerFolder();
 	if (alreadyOpen) {
 		return;
 	}
@@ -352,17 +346,13 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
 }
 
 async function onContainerStarted(containerId: string): Promise<void> {
-	const hostFolder = vscode.workspace.workspaceFolders?.find(
-		(f) => f.uri.scheme === 'file',
-	)?.uri.fsPath;
+	const hostFolder = getHostFolder();
 	if (!hostFolder) {
 		return;
 	}
 
 	// Don't auto-open if we already have a devcontainer folder in the workspace.
-	const alreadyOpen = vscode.workspace.workspaceFolders?.some(
-		(f) => f.uri.scheme === SCHEME,
-	);
+	const alreadyOpen = hasDevContainerFolder();
 	if (alreadyOpen) {
 		return;
 	}
@@ -417,7 +407,21 @@ function getDockerCommand(): string {
 	);
 }
 
-/** Return the first devcontainer container ID from the current workspace folders. */
+/** Return the fsPath of the first file:// workspace folder, if any. */
+function getHostFolder(): string | undefined {
+	return vscode.workspace.workspaceFolders?.find(
+		(f) => f.uri.scheme === 'file',
+	)?.uri.fsPath;
+}
+
+/** Return true if any devcontainer-filetree folder is already in the workspace. */
+function hasDevContainerFolder(): boolean {
+	return !!vscode.workspace.workspaceFolders?.some(
+		(f) => f.uri.scheme === SCHEME,
+	);
+}
+
+/** Return the container ID from the first devcontainer-filetree workspace folder. */
 function getActiveContainerId(): string | undefined {
 	return vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === SCHEME)
 		?.uri.authority;
