@@ -10,8 +10,21 @@ interface ContainerInfo {
 	name: string;
 }
 
+/** Regex for file paths in terminal output: /absolute/path.ext or relative/path.ext, optionally with :line:col */
+const FILE_PATH_RE = /(?:(?:\/[\w.@-]+)+(?:\.\w+)?)|(?:(?:[\w.@-]+\/)+(?:[\w.@-]+\.\w+))(?::\d+)?(?::\d+)?/g;
+
+
+
+class DevContainerTerminalLink extends vscode.TerminalLink {
+	constructor(startIndex: number, length: number, tooltip: string, public readonly data: { path: string; containerId: string }) {
+		super(startIndex, length, tooltip);
+	}
+}
+
+let provider: DevContainerFileSystemProvider;
+
 export function activate(context: vscode.ExtensionContext) {
-	const provider = new DevContainerFileSystemProvider();
+	provider = new DevContainerFileSystemProvider();
 	context.subscriptions.push(
 		vscode.workspace.registerFileSystemProvider(SCHEME, provider, { isCaseSensitive: true })
 	);
@@ -27,6 +40,48 @@ export function activate(context: vscode.ExtensionContext) {
 					provider.refresh(folder.uri);
 				}
 			}
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.window.registerTerminalLinkProvider({
+			async provideTerminalLinks(context) {
+				const containerId = getActiveContainerId();
+				if (!containerId) {
+					return [];
+				}
+				const links: DevContainerTerminalLink[] = [];
+				let match: RegExpExecArray | null;
+				FILE_PATH_RE.lastIndex = 0;
+				while ((match = FILE_PATH_RE.exec(context.line)) !== null) {
+					if (match[0].length < 3) {
+						continue;
+					}
+					// Only claim this link if the file actually exists in the container.
+					const candidatePath = stripLineCol(match[0]);
+					const uri = vscode.Uri.from({ scheme: SCHEME, authority: containerId, path: candidatePath });
+					try {
+						const stat = await provider.stat(uri);
+						if (stat.type === vscode.FileType.File) {
+							links.push(new DevContainerTerminalLink(
+								match.index,
+								match[0].length,
+								`Open in Dev Container`,
+								{ path: match[0], containerId },
+							));
+						}
+					} catch {
+						// Doesn't exist in container — skip, let VS Code's default handler try.
+					}
+				}
+				return links;
+			},
+			async handleTerminalLink(link) {
+				const { path: filePath, containerId } = (link as DevContainerTerminalLink).data;
+				const cleanPath = stripLineCol(filePath);
+				const uri = vscode.Uri.from({ scheme: SCHEME, authority: containerId, path: cleanPath });
+				vscode.window.showTextDocument(uri);
+			},
 		})
 	);
 
@@ -88,6 +143,22 @@ async function openContainerFolder(provider: DevContainerFileSystemProvider): Pr
 	});
 }
 
+/** Strip trailing :line or :line:col from a path string. */
+function stripLineCol(filePath: string): string {
+	const colonIdx = filePath.lastIndexOf(':');
+	if (colonIdx > 0 && /^\d+(:\d+)?$/.test(filePath.slice(colonIdx + 1))) {
+		return filePath.slice(0, colonIdx);
+	}
+	return filePath;
+}
+
+/** Return the first devcontainer container ID from the current workspace folders. */
+function getActiveContainerId(): string | undefined {
+	return vscode.workspace.workspaceFolders
+		?.find(f => f.uri.scheme === SCHEME)
+		?.uri.authority;
+}
+
 /**
  * On activation, check if any running container has the current workspace
  * folder bind-mounted. If exactly one match is found, open `/` in that
@@ -98,31 +169,24 @@ async function autoOpenContainer(provider: DevContainerFileSystemProvider): Prom
 		?.find(f => f.uri.scheme === 'file')
 		?.uri.fsPath;
 
-	console.log('devcontainer-filetree: autoOpenContainer hostFolder=', hostFolder);
-
 	if (!hostFolder) {
-		console.log('devcontainer-filetree: no hostFolder, skipping');
 		return;
 	}
 
 	// Don't auto-open if we already have a devcontainer folder in the workspace.
 	const alreadyOpen = vscode.workspace.workspaceFolders?.some(f => f.uri.scheme === SCHEME);
 	if (alreadyOpen) {
-		console.log('devcontainer-filetree: already open, skipping');
 		return;
 	}
 
 	const docker = vscode.workspace.getConfiguration('devcontainer-filetree').get<string>('dockerPath') || 'docker';
-	console.log('devcontainer-filetree: docker command=', docker);
 
 	// Get all running container IDs.
 	const idsRes = await execDocker(['ps', '-q'], undefined, docker);
-	console.log('devcontainer-filetree: ps exitCode=', idsRes.exitCode, 'stdout=', idsRes.stdout.toString('utf8'));
 	if (idsRes.exitCode !== 0 || idsRes.stdout.toString('utf8').trim() === '') {
 		return;
 	}
 	const ids = idsRes.stdout.toString('utf8').split('\n').map(s => s.trim()).filter(Boolean);
-	console.log('devcontainer-filetree: container ids=', ids);
 	if (ids.length === 0) {
 		return;
 	}
@@ -133,15 +197,11 @@ async function autoOpenContainer(provider: DevContainerFileSystemProvider): Prom
 			['inspect', '--format', '{{.Name}}{{"\t"}}{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\t"}}{{.Destination}}{{"\t"}}{{end}}{{end}}', id],
 			undefined, docker
 		);
-		console.log('devcontainer-filetree: inspect', id, 'exitCode=', inspectRes.exitCode);
 		if (inspectRes.exitCode !== 0) {
 			continue;
 		}
 
-		const stdout = inspectRes.stdout.toString('utf8');
-		console.log('devcontainer-filetree: inspect output (repr)=', JSON.stringify(stdout));
-
-		for (const line of stdout.split('\n')) {
+		for (const line of inspectRes.stdout.toString('utf8').split('\n')) {
 			const trimmed = line.trim();
 			if (!trimmed || !trimmed.startsWith('/')) {
 				continue;
@@ -149,13 +209,10 @@ async function autoOpenContainer(provider: DevContainerFileSystemProvider): Prom
 			// Format: /containerName\t/source/path\t/dest/path\t...
 			const parts = trimmed.split('\t');
 			const containerName = parts[0];
-			console.log('devcontainer-filetree: containerName=', containerName, 'parts count=', parts.length);
 			// Check pairs: source, dest, source, dest, ...
 			for (let i = 1; i + 1 < parts.length; i += 2) {
 				const source = parts[i];
-				console.log('devcontainer-filetree: checking source=', source, '===', hostFolder, '?', source === hostFolder);
 				if (source === hostFolder) {
-					console.log('devcontainer-filetree: MATCH found, opening container', id);
 					const shortName = containerName.replace(/^\//, '') || id.slice(0, 12);
 					const uri = vscode.Uri.from({ scheme: SCHEME, authority: id, path: '/' });
 					const index = vscode.workspace.workspaceFolders?.length ?? 0;
@@ -168,7 +225,6 @@ async function autoOpenContainer(provider: DevContainerFileSystemProvider): Prom
 			}
 		}
 	}
-	console.log('devcontainer-filetree: no matching container found');
 }
 
 /**
