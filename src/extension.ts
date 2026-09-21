@@ -45,8 +45,8 @@ export function activate(context: vscode.ExtensionContext) {
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('devc-vscode.openContainerFolder', () =>
-      openContainerFolder(provider),
+    vscode.commands.registerCommand('devc-vscode.showContainerFileTree', () =>
+      showContainerFileTree(provider),
     ),
   )
 
@@ -62,16 +62,23 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      'devc-vscode.openInDevContainer',
+      'devc-vscode.openFolderInContainer',
       async (uri: vscode.Uri) => {
         const cwd = uri?.fsPath
+        // hideFromUser is the only creationOptions flag the Python extension
+        // checks before injecting `source .../activate` into a new terminal
+        // (see microsoft/vscode-python src/client/terminals/activation.ts). It
+        // reads creationOptions, which never change, so revealing the terminal
+        // with show() right away keeps the activation suppressed.
         const t = vscode.window.createTerminal({
           name: 'devcontainer',
           cwd,
           location: vscode.TerminalLocation.Editor,
           isTransient: true,
+          hideFromUser: true,
         })
-        t.sendText('devc herdr')
+        t.show()
+        t.sendText(getOpenFolderCommand())
       },
     ),
   )
@@ -84,7 +91,13 @@ export function activate(context: vscode.ExtensionContext) {
         if (!('name' in opts) || opts.name !== 'devcontainer') {
           return []
         }
+        // Tracked containers first, plus the container this terminal belongs to —
+        // its file tree may not be attached yet (lazy-attached on folder click).
         const containerIds = getTrackedContainerIds()
+        const terminalContainer = await resolveTerminalContainer(context.terminal)
+        if (terminalContainer) {
+          containerIds.add(terminalContainer)
+        }
         if (containerIds.size === 0) {
           return []
         }
@@ -134,6 +147,14 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           const stat = await provider.stat(uri)
           if (stat.type === vscode.FileType.Directory) {
+            // The explorer can only reveal a path that lives under a workspace
+            // folder, so attach the container's file tree first if needed.
+            if (!(await ensureFolderVisible(containerId, cleanPath))) {
+              vscode.window.showErrorMessage(
+                `Could not show ${cleanPath} — the container file tree was not attached.`,
+              )
+              return
+            }
             await vscode.commands.executeCommand('revealInExplorer', uri)
           } else {
             vscode.window.showTextDocument(uri)
@@ -169,7 +190,7 @@ export function deactivate() {
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
-async function openContainerFolder(
+async function showContainerFileTree(
   provider: DevContainerFileSystemProvider,
 ): Promise<void> {
   const hostFolder = getHostFolders()[0]
@@ -240,6 +261,10 @@ async function openContainerFolder(
 async function autoOpenContainers(
   _provider: DevContainerFileSystemProvider,
 ): Promise<void> {
+  if (!isAutoAttachEnabled()) {
+    return
+  }
+
   const hostFolders = getHostFolders()
   if (hostFolders.length === 0) {
     return
@@ -298,6 +323,10 @@ async function autoOpenContainers(
  * a container was stopped.
  */
 async function cleanupStaleFolders(): Promise<void> {
+  if (!isAutoAttachEnabled()) {
+    return
+  }
+
   const tracked = vscode.workspace.workspaceFolders?.filter(
     (f) => f.uri.scheme === SCHEME && f.uri.authority,
   )
@@ -410,6 +439,9 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
     return
   }
 
+  // Container set changed — stop trusting cached terminal lookups.
+  terminalContainerCache.clear()
+
   if (action === 'start') {
     // Small delay — container may not be fully ready for inspect immediately.
     await new Promise((r) => setTimeout(r, 500))
@@ -424,6 +456,10 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
  * and aren't already tracked, then add them to the workspace.
  */
 async function onContainerStarted(containerId: string): Promise<void> {
+  if (!isAutoAttachEnabled()) {
+    return
+  }
+
   const hostFolders = getHostFolders()
   if (hostFolders.length === 0) {
     return
@@ -455,6 +491,10 @@ async function onContainerStarted(containerId: string): Promise<void> {
 }
 
 async function onContainerStopped(containerId: string): Promise<void> {
+  if (!isAutoAttachEnabled()) {
+    return
+  }
+
   console.log('devc-vscode: onContainerStopped', containerId)
   const folders = vscode.workspace.workspaceFolders?.filter(
     (f) => f.uri.scheme === SCHEME && f.uri.authority === containerId,
@@ -493,6 +533,23 @@ function getDockerCommand(): string {
   )
 }
 
+/** Command sent to the terminal by "Open Folder in Container". */
+function getOpenFolderCommand(): string {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>('openFolderCommand')
+  return configured && configured.trim() !== '' ? configured : 'devc herdr'
+}
+
+/** Whether container file trees attach/detach automatically as containers start and stop. */
+function isAutoAttachEnabled(): boolean {
+  return (
+    vscode.workspace
+      .getConfiguration('devc-vscode')
+      .get<boolean>('autoAttach') ?? false
+  )
+}
+
 /** Return the fsPath of all file:// workspace folders. */
 function getHostFolders(): string[] {
   return (
@@ -500,6 +557,157 @@ function getHostFolders(): string[] {
       ?.filter((f) => f.uri.scheme === 'file')
       .map((f) => f.uri.fsPath) ?? []
   )
+}
+
+/** Cache of host folder -> container ID for terminal link lookups, cleared on docker events. */
+const terminalContainerCache = new Map<string, string | undefined>()
+
+/** The container backing a "devcontainer" terminal, resolved from its cwd. */
+async function resolveTerminalContainer(
+  terminal: vscode.Terminal,
+): Promise<string | undefined> {
+  const opts = terminal.creationOptions
+  const cwd = 'cwd' in opts ? opts.cwd : undefined
+  if (!cwd) {
+    return undefined
+  }
+  const hostFolder = typeof cwd === 'string' ? cwd : cwd.fsPath
+
+  if (terminalContainerCache.has(hostFolder)) {
+    return terminalContainerCache.get(hostFolder)
+  }
+
+  const resolved = await findContainerForHostFolder(hostFolder)
+  terminalContainerCache.set(hostFolder, resolved)
+  return resolved
+}
+
+/**
+ * Find a running container for a host folder: first by the devcontainer CLI's
+ * local_folder label, then by scanning bind mounts.
+ */
+async function findContainerForHostFolder(
+  hostFolder: string,
+): Promise<string | undefined> {
+  const docker = getDockerCommand()
+
+  const labelled = await execDocker(
+    [
+      'ps',
+      '-q',
+      '--filter',
+      `label=devcontainer.local_folder=${hostFolder}`,
+    ],
+    undefined,
+    docker,
+  )
+  if (labelled.exitCode === 0) {
+    const id = labelled.stdout.toString('utf8').split('\n')[0]?.trim()
+    if (id) {
+      return id
+    }
+  }
+
+  const idsRes = await execDocker(['ps', '-q'], undefined, docker)
+  if (idsRes.exitCode !== 0) {
+    return undefined
+  }
+  for (const line of idsRes.stdout.toString('utf8').split('\n')) {
+    const id = line.trim()
+    if (!id) {
+      continue
+    }
+    if (await findMatchingBindMount(id, hostFolder)) {
+      return id
+    }
+  }
+  return undefined
+}
+
+/**
+ * Ensure a workspace folder exists that contains `targetPath` inside the
+ * container, attaching the container's root file tree if none does. Returns
+ * false if the tree could not be attached. Explicit user action, so this runs
+ * regardless of the autoAttach setting.
+ */
+async function ensureFolderVisible(
+  containerId: string,
+  targetPath: string,
+): Promise<boolean> {
+  if (hasFolderContaining(containerId, targetPath)) {
+    return true
+  }
+
+  const name = await getContainerName(containerId)
+  const label = name || containerId.slice(0, 12)
+  const index = vscode.workspace.workspaceFolders?.length ?? 0
+  const added = vscode.workspace.updateWorkspaceFolders(index, 0, {
+    uri: vscode.Uri.from({ scheme: SCHEME, authority: containerId, path: '/' }),
+    name: containerFolderLabel(label, label),
+  })
+  if (!added) {
+    return false
+  }
+
+  // updateWorkspaceFolders applies asynchronously; the explorer cannot reveal
+  // the path until the folder is actually registered.
+  return waitForFolderContaining(containerId, targetPath)
+}
+
+/** Whether a workspace folder already covers `targetPath` in this container. */
+function hasFolderContaining(containerId: string, targetPath: string): boolean {
+  return (vscode.workspace.workspaceFolders ?? []).some(
+    (f) =>
+      f.uri.scheme === SCHEME &&
+      f.uri.authority === containerId &&
+      isPathWithin(f.uri.path, targetPath),
+  )
+}
+
+/** Resolve once a workspace folder covering `targetPath` appears, or on timeout. */
+function waitForFolderContaining(
+  containerId: string,
+  targetPath: string,
+  timeoutMs = 5000,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const finish = (result: boolean) => {
+      clearTimeout(timer)
+      sub.dispose()
+      resolve(result)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    const sub = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      if (hasFolderContaining(containerId, targetPath)) {
+        finish(true)
+      }
+    })
+    if (hasFolderContaining(containerId, targetPath)) {
+      finish(true)
+    }
+  })
+}
+
+/** Whether `target` is `base` or sits underneath it. */
+function isPathWithin(base: string, target: string): boolean {
+  const normalized = base.endsWith('/') ? base.slice(0, -1) : base
+  if (normalized === '') {
+    return true
+  }
+  return target === normalized || target.startsWith(`${normalized}/`)
+}
+
+/** Container name without docker's leading slash, if it can be read. */
+async function getContainerName(containerId: string): Promise<string> {
+  const res = await execDocker(
+    ['inspect', '--format', '{{.Name}}', containerId],
+    undefined,
+    getDockerCommand(),
+  )
+  if (res.exitCode !== 0) {
+    return ''
+  }
+  return res.stdout.toString('utf8').trim().replace(/^\//, '')
 }
 
 /** Return the set of container IDs that are already represented in the workspace. */

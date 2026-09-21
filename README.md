@@ -1,38 +1,41 @@
 # Dev Container File Tree
 
-Browse and edit files inside a **running dev container** from VS Code running on the host — without using VS Code's Dev Containers extension or attaching a window to the container.
+Browse and edit files inside a running dev container from VS Code on the host — no remote server, no container attach. Files are read and written over `docker exec`.
 
-The extension registers a `FileSystemProvider` for the `devc-vscode://` scheme. File trees and file contents are sourced from the container by shelling out to `docker exec` on the host, so it works with containers started by the [devcontainer CLI](https://github.com/devcontainers/cli) (`devcontainer up`), plain `docker run`, or anything else — as long as the container is running and reachable via the host's Docker CLI.
+## How it works
 
-## Usage
+Registers a `devc-vscode://<container-id>/<path>` filesystem provider backed by `docker exec` (`stat`, `ls`, `cat`, `mkdir`, `rm`, `mv`).
 
-1. Start your dev container on the host, e.g. `devcontainer up --workspace-folder .`
-2. In VS Code (on the host), run **Dev Container FS: Open Folder in Dev Container...**
-   - If the current workspace folder matches a running container's `devcontainer.local_folder` label, that container is used automatically; otherwise you pick from all running dev containers.
-   - Confirm or edit the path inside the container (defaults to `/workspaces/<folder name>`).
-3. The container folder is added to your workspace like any other folder: expand the tree, open files, edit and save — writes go back into the container.
-4. **Dev Container FS: Refresh Container Files** re-reads the tree after changes made inside the container.
+With `devc-vscode.autoAttach` on (the default), containers whose bind mounts match an open host folder are added to the workspace automatically as `[container] <name>`, and removed when the container stops (`docker events` is watched live). Turn it off to attach file trees only on demand.
 
-URI shape: `devc-vscode://<container-id>/<absolute path in container>`
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `Dev Container FS: Show Container File Tree` | Pick a running dev container and mount a path from it |
+| `Dev Container FS: Refresh Container Files` | Re-read tracked container folders |
+| `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` |
+
+File paths printed in that terminal become clickable links that open the file inside the container. Clicking a *folder* reveals it in the explorer, attaching that container's file tree first if it isn't shown yet — so this works even with `autoAttach` off.
+
+## Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `devc-vscode.dockerPath` | `docker` | Docker CLI command (name on PATH or absolute path) |
+| `devc-vscode.autoAttach` | `true` | Attach/detach container file trees automatically as containers start and stop |
+| `devc-vscode.openFolderCommand` | `devc herdr` | Command sent to the terminal by "Open Folder in Container" |
 
 ## Requirements
 
-- Docker CLI on the host (`docker` on `PATH`, or set `devc-vscode.dockerPath`).
-- A running container with GNU coreutils/findutils (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`, `rmdir`) and `sh` — true for typical dev container images (Debian/Ubuntu based). BusyBox-only images (Alpine) are not supported.
-- Files are read/written as the container's default user (the image's `USER`, e.g. `vscode` in devcontainer images).
+Docker CLI on the host PATH; a dev container started by the devcontainer CLI (or any container with bind mounts to your workspace).
 
-## Extension Settings
+## Develop
 
-- `devc-vscode.dockerPath`: Docker CLI command used to talk to containers (a name on `PATH` or an absolute path). Default: `docker`.
+```sh
+npm install
+npm run compile   # or: npm run watch
+npm test
+```
 
-## Known Issues
-
-- **No file watching**: changes made inside the container don't appear automatically. Run **Dev Container FS: Refresh Container Files** (or collapse/re-expand the tree) to pick them up.
-- **Latency**: every operation is a separate `docker exec` (~100–300 ms), so expanding large trees feels slower than a local filesystem.
-- Container restarts keep the same container id, but a _recreated_ container gets a new id — re-open the folder if that happens.
-
-## Development
-
-- `npm run compile` / `npm run watch` — build
-- `npm run lint` — lint
-- `npm test` — runs the integration suite in a real VS Code extension host on the host, against a live container (the one labeled `devcontainer.local_folder=<this repo>`, any other running dev container, or `$DEVCONTAINER_FILETREE_TEST_CONTAINER`). Skips gracefully when no container is available.
+Press <kbd>F5</kbd> to launch an Extension Development Host.

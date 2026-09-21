@@ -22,13 +22,23 @@
           "type": "string",
           "default": "docker",
           "description": "Docker CLI command used to talk to containers (a name on PATH or an absolute path)."
+        },
+        "devc-vscode.autoAttach": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically add a container's file tree to the workspace when a container bind-mounting an open folder starts, and remove it when that container stops."
+        },
+        "devc-vscode.openFolderCommand": {
+          "type": "string",
+          "default": "devc herdr",
+          "description": "Command sent to the terminal by \"Open Folder in Container\"."
         }
       }
     },
     "commands": [
       {
-        "command": "devc-vscode.openContainerFolder",
-        "title": "Open Folder in Dev Container...",
+        "command": "devc-vscode.showContainerFileTree",
+        "title": "Show Container File Tree",
         "category": "Dev Container FS"
       },
       {
@@ -37,16 +47,16 @@
         "category": "Dev Container FS"
       },
       {
-        "command": "devc-vscode.openInDevContainer",
-        "title": "Open in Dev Container",
+        "command": "devc-vscode.openFolderInContainer",
+        "title": "Open Folder in Container",
         "category": "Dev Container FS"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "devc-vscode.openInDevContainer",
-          "when": "explorerResourceIsFolder"
+          "command": "devc-vscode.openFolderInContainer",
+          "when": "explorerResourceIsFolder && resourceScheme == file"
         }
       ]
     }
