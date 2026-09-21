@@ -11,6 +11,11 @@ interface ContainerInfo {
 	name: string
 }
 
+interface BindMountMatch {
+	containerName: string
+	destPath: string
+}
+
 /** Regex for file paths in terminal output: /absolute/path.ext or relative/path.ext, optionally with :line:col */
 const FILE_PATH_RE =
 	/(?:(?:\/[\w.@-]+)+(?:\.\w+)?)|(?:(?:[\w.@-]+\/)+(?:[\w.@-]+\.\w+))(?::\d+)?(?::\d+)?/g;
@@ -80,8 +85,8 @@ export function activate(context: vscode.ExtensionContext) {
 				if (!('name' in opts) || opts.name !== 'devcontainer') {
 					return [];
 				}
-				const containerId = getActiveContainerId();
-				if (!containerId) {
+				const containerIds = getTrackedContainerIds();
+				if (containerIds.size === 0) {
 					return [];
 				}
 				const links: DevContainerTerminalLink[] = [];
@@ -91,25 +96,28 @@ export function activate(context: vscode.ExtensionContext) {
 					if (match[0].length < 3) {
 						continue;
 					}
-					// Only claim this link if the path actually exists in the container.
 					const candidatePath = stripLineCol(match[0]);
-					const uri = vscode.Uri.from({
-						scheme: SCHEME,
-						authority: containerId,
-						path: candidatePath,
-					});
-					try {
-						await provider.stat(uri);
-						links.push(
-							new DevContainerTerminalLink(
-								match.index,
-								match[0].length,
-								`Open in Dev Container`,
-								{ path: match[0], containerId },
-							),
-						);
-					} catch {
-						// Doesn't exist in container — skip.
+					// Try each tracked container to see if the path exists.
+					for (const containerId of containerIds) {
+						const uri = vscode.Uri.from({
+							scheme: SCHEME,
+							authority: containerId,
+							path: candidatePath,
+						});
+						try {
+							await provider.stat(uri);
+							links.push(
+								new DevContainerTerminalLink(
+									match.index,
+									match[0].length,
+									`Open in Dev Container`,
+									{ path: match[0], containerId },
+								),
+							);
+							break; // Found in one container, no need to check others.
+						} catch {
+							// Doesn't exist in this container — try next.
+						}
 					}
 				}
 				return links;
@@ -138,9 +146,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
-	// Auto-detect: if a running container has the current workspace folder
-	// bind-mounted, open its root folder automatically.
-	autoOpenContainer(provider).catch((err) => {
+	// Auto-detect: if running containers have workspace folders bind-mounted,
+	// open their container folders automatically.
+	autoOpenContainers(provider).catch((err) => {
 		console.error('devcontainer-filetree: auto-detect failed', err);
 	});
 
@@ -160,7 +168,7 @@ export function deactivate() {
 async function openContainerFolder(
 	provider: DevContainerFileSystemProvider,
 ): Promise<void> {
-	const hostFolder = getHostFolder();
+	const hostFolder = getHostFolders()[0];
 
 	let container: ContainerInfo | undefined;
 	try {
@@ -209,28 +217,24 @@ async function openContainerFolder(
 		return;
 	}
 
-	const shortName = container.name || container.id.slice(0, 12);
 	const index = vscode.workspace.workspaceFolders?.length ?? 0;
 	vscode.workspace.updateWorkspaceFolders(index, 0, {
 		uri,
-		name: `Dev Container (${shortName}): ${remotePath}`,
+		name: containerFolderLabel(container.name || container.id, path.basename(remotePath)),
 	});
 }
 
 // ── Auto-detect ─────────────────────────────────────────────────────────────
 
-async function autoOpenContainer(
-	provider: DevContainerFileSystemProvider,
+/**
+ * Auto-open containers for ALL workspace folders that are bind-mounted
+ * in running containers and not yet tracked in the workspace.
+ */
+async function autoOpenContainers(
+	_provider: DevContainerFileSystemProvider,
 ): Promise<void> {
-	const hostFolder = getHostFolder();
-
-	if (!hostFolder) {
-		return;
-	}
-
-	// Don't auto-open if we already have a devcontainer folder in the workspace.
-	const alreadyOpen = hasDevContainerFolder();
-	if (alreadyOpen) {
+	const hostFolders = getHostFolders();
+	if (hostFolders.length === 0) {
 		return;
 	}
 
@@ -250,18 +254,28 @@ async function autoOpenContainer(
 		return;
 	}
 
-	// Inspect each container to find bind mounts matching the host folder.
-	for (const id of ids) {
-		const containerName = await findMatchingBindMount(id, hostFolder);
-		if (containerName) {
-			const shortName = containerName.replace(/^\//, '') || id.slice(0, 12);
-			const uri = vscode.Uri.from({ scheme: SCHEME, authority: id, path: '/' });
-			const index = vscode.workspace.workspaceFolders?.length ?? 0;
-			vscode.workspace.updateWorkspaceFolders(index, 0, {
-				uri,
-				name: `Dev Container (${shortName}): /`,
-			});
-			return;
+	// For each host folder, find a matching container and add it.
+	for (const hostFolder of hostFolders) {
+		// Skip if this host folder is already tracked.
+		if (await hasContainerForHostFolder(hostFolder)) {
+			continue;
+		}
+
+		for (const id of ids) {
+			const match = await findMatchingBindMount(id, hostFolder);
+			if (match) {
+				const uri = vscode.Uri.from({
+					scheme: SCHEME,
+					authority: id,
+					path: '/',
+				});
+				const index = vscode.workspace.workspaceFolders?.length ?? 0;
+				vscode.workspace.updateWorkspaceFolders(index, 0, {
+					uri,
+					name: containerFolderLabel(match.containerName || id, path.basename(hostFolder)),
+				});
+				break; // Found a match for this host folder, move to next.
+			}
 		}
 	}
 }
@@ -345,34 +359,36 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
 	}
 }
 
+/**
+ * When a container starts, check all host folders to see if any match
+ * and aren't already tracked, then add them to the workspace.
+ */
 async function onContainerStarted(containerId: string): Promise<void> {
-	const hostFolder = getHostFolder();
-	if (!hostFolder) {
+	const hostFolders = getHostFolders();
+	if (hostFolders.length === 0) {
 		return;
 	}
 
-	// Don't auto-open if we already have a devcontainer folder in the workspace.
-	const alreadyOpen = hasDevContainerFolder();
-	if (alreadyOpen) {
-		return;
-	}
+	for (const hostFolder of hostFolders) {
+		// Skip if this host folder is already tracked.
+		if (await hasContainerForHostFolder(hostFolder)) {
+			continue;
+		}
 
-	const containerName = await findMatchingBindMount(containerId, hostFolder);
-	if (!containerName) {
-		return;
+		const match = await findMatchingBindMount(containerId, hostFolder);
+		if (match) {
+			const uri = vscode.Uri.from({
+				scheme: SCHEME,
+				authority: containerId,
+				path: '/',
+			});
+			const index = vscode.workspace.workspaceFolders?.length ?? 0;
+			vscode.workspace.updateWorkspaceFolders(index, 0, {
+				uri,
+				name: containerFolderLabel(match.containerName || containerId, path.basename(hostFolder)),
+			});
+		}
 	}
-
-	const shortName = containerName.replace(/^\//, '') || containerId.slice(0, 12);
-	const uri = vscode.Uri.from({
-		scheme: SCHEME,
-		authority: containerId,
-		path: '/',
-	});
-	const index = vscode.workspace.workspaceFolders?.length ?? 0;
-	vscode.workspace.updateWorkspaceFolders(index, 0, {
-		uri,
-		name: `Dev Container (${shortName}): /`,
-	});
 }
 
 async function onContainerStopped(containerId: string): Promise<void> {
@@ -399,6 +415,10 @@ async function onContainerStopped(containerId: string): Promise<void> {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+function containerFolderLabel(_containerName: string, projectName: string): string {
+	return `[container] ${projectName}`;
+}
+
 function getDockerCommand(): string {
 	return (
 		vscode.workspace
@@ -407,24 +427,77 @@ function getDockerCommand(): string {
 	);
 }
 
-/** Return the fsPath of the first file:// workspace folder, if any. */
-function getHostFolder(): string | undefined {
-	return vscode.workspace.workspaceFolders?.find(
-		(f) => f.uri.scheme === 'file',
-	)?.uri.fsPath;
+/** Return the fsPath of all file:// workspace folders. */
+function getHostFolders(): string[] {
+	return vscode.workspace.workspaceFolders
+		?.filter((f) => f.uri.scheme === 'file')
+		.map((f) => f.uri.fsPath) ?? [];
 }
 
-/** Return true if any devcontainer-filetree folder is already in the workspace. */
-function hasDevContainerFolder(): boolean {
-	return !!vscode.workspace.workspaceFolders?.some(
-		(f) => f.uri.scheme === SCHEME,
+/** Return the set of container IDs that are already represented in the workspace. */
+function getTrackedContainerIds(): Set<string> {
+	const tracked = new Set<string>();
+	for (const f of vscode.workspace.workspaceFolders ?? []) {
+		if (f.uri.scheme === SCHEME && f.uri.authority) {
+			tracked.add(f.uri.authority);
+		}
+	}
+	return tracked;
+}
+
+/**
+ * Check whether a specific host folder already has a devcontainer workspace
+ * entry. We inspect each existing devcontainer folder's bind mount to find
+ * which host folder it maps to.
+ */
+async function hasContainerForHostFolder(hostFolder: string): Promise<boolean> {
+	for (const f of vscode.workspace.workspaceFolders ?? []) {
+		if (f.uri.scheme !== SCHEME || !f.uri.authority) {
+			continue;
+		}
+		const mounts = await getBindMounts(f.uri.authority);
+		for (const mount of mounts) {
+			if (mount.source === hostFolder) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+interface BindMount {
+	source: string
+	dest: string
+}
+
+/** Return all bind mounts for a container. */
+async function getBindMounts(containerId: string): Promise<BindMount[]> {
+	const docker = getDockerCommand();
+	const inspectRes = await execDocker(
+		[
+			'inspect',
+			'--format',
+			'{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}\t{{.Destination}}\n{{end}}{{end}}',
+			containerId,
+		],
+		undefined,
+		docker,
 	);
-}
-
-/** Return the container ID from the first devcontainer-filetree workspace folder. */
-function getActiveContainerId(): string | undefined {
-	return vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === SCHEME)
-		?.uri.authority;
+	if (inspectRes.exitCode !== 0) {
+		return [];
+	}
+	const mounts: BindMount[] = [];
+	for (const line of inspectRes.stdout.toString('utf8').split('\n')) {
+		const trimmed = line.trim();
+		if (!trimmed) {
+			continue;
+		}
+		const [source, dest] = trimmed.split('\t');
+		if (source && dest) {
+			mounts.push({ source, dest });
+		}
+	}
+	return mounts;
 }
 
 /** Strip trailing :line or :line:col from a path string. */
@@ -437,13 +510,13 @@ function stripLineCol(filePath: string): string {
 }
 
 /**
- * Inspect a container and return its name if any bind mount source
- * matches `hostFolder`, undefined otherwise.
+ * Inspect a container and return its name plus the matching dest path
+ * if any bind mount source matches `hostFolder`, undefined otherwise.
  */
 async function findMatchingBindMount(
 	containerId: string,
 	hostFolder: string,
-): Promise<string | undefined> {
+): Promise<BindMountMatch | undefined> {
 	const docker = getDockerCommand();
 	const inspectRes = await execDocker(
 		[
@@ -468,7 +541,7 @@ async function findMatchingBindMount(
 		const containerName = parts[0];
 		for (let i = 1; i + 1 < parts.length; i += 2) {
 			if (parts[i] === hostFolder) {
-				return containerName;
+				return { containerName, destPath: parts[i + 1] || '/' };
 			}
 		}
 	}
