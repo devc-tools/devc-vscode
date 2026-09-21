@@ -16,7 +16,7 @@ Container file trees attach on demand: `Show Container File Tree`, or clicking a
 | `Dev Container FS: Refresh Container Files` | Re-read tracked container folders |
 | `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` |
 
-File paths printed in that terminal become clickable links that open the file inside the container. Clicking a *folder* reveals it in the explorer, attaching that container's file tree first if it isn't shown yet.
+File paths printed in that terminal become clickable links that open the file inside the container. Clicking a *folder* reveals it in the explorer, attaching that container's file tree first if it isn't shown yet. Attaching the first such tree can restart the extension host (VS Code does this when a single-folder window becomes multi-root), so the pending reveal is parked in `globalState` and replayed on the next activation.
 
 The terminal is created with `hideFromUser` and then immediately shown. That is deliberate: it is the only creation option the Python extension checks before injecting `source .../activate` into a new terminal, so this keeps a host venv out of a container shell. There is no supported API for this ([vscode-python#11963](https://github.com/microsoft/vscode-python/issues/11963) is open), so it may need revisiting if that check changes.
 

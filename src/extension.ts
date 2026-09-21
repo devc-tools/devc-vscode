@@ -33,10 +33,28 @@ class DevContainerTerminalLink extends vscode.TerminalLink {
 
 let provider: DevContainerFileSystemProvider
 let dockerEventsProcess: cp.ChildProcess | undefined
+let extensionContext: vscode.ExtensionContext
+
+/**
+ * Adding a workspace folder can restart the extension host (VS Code does this
+ * when a single-folder window becomes a multi-root workspace), killing the
+ * reveal mid-flight. The target is parked in globalState — not workspaceState,
+ * which is keyed by a workspace identity that the transition itself changes —
+ * and replayed on the next activation.
+ */
+const PENDING_REVEAL_KEY = 'devc-vscode.pendingReveal'
+const PENDING_REVEAL_TTL_MS = 2 * 60 * 1000
+
+interface PendingReveal {
+  containerId: string
+  path: string
+  at: number
+}
 
 // ── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
+  extensionContext = context
   provider = new DevContainerFileSystemProvider()
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider(SCHEME, provider, {
@@ -147,15 +165,7 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           const stat = await provider.stat(uri)
           if (stat.type === vscode.FileType.Directory) {
-            // The explorer can only reveal a path that lives under a workspace
-            // folder, so attach the container's file tree first if needed.
-            if (!(await ensureFolderVisible(containerId, cleanPath))) {
-              vscode.window.showErrorMessage(
-                `Could not show ${cleanPath} — the container file tree was not attached.`,
-              )
-              return
-            }
-            await vscode.commands.executeCommand('revealInExplorer', uri)
+            await revealContainerFolder(containerId, cleanPath)
           } else {
             vscode.window.showTextDocument(uri)
           }
@@ -175,6 +185,11 @@ export function activate(context: vscode.ExtensionContext) {
   // Remove any stale devcontainer folders whose containers are not running.
   cleanupStaleFolders().catch((err) => {
     console.error('devc-vscode: cleanup failed', err)
+  })
+
+  // Finish a reveal that an extension host restart interrupted.
+  resumePendingReveal().catch((err) => {
+    console.error('devc-vscode: pending reveal failed', err)
   })
 
   // Watch for container start/stop events.
@@ -622,6 +637,79 @@ async function findContainerForHostFolder(
     }
   }
   return undefined
+}
+
+/** Attach the container's file tree if needed, then select the folder in the explorer. */
+async function revealContainerFolder(
+  containerId: string,
+  targetPath: string,
+): Promise<void> {
+  const uri = vscode.Uri.from({
+    scheme: SCHEME,
+    authority: containerId,
+    path: targetPath,
+  })
+
+  if (!hasFolderContaining(containerId, targetPath)) {
+    await extensionContext.globalState.update(PENDING_REVEAL_KEY, {
+      containerId,
+      path: targetPath,
+      at: Date.now(),
+    } satisfies PendingReveal)
+
+    if (!(await ensureFolderVisible(containerId, targetPath))) {
+      await extensionContext.globalState.update(PENDING_REVEAL_KEY, undefined)
+      vscode.window.showErrorMessage(
+        `Could not show ${targetPath} — the container file tree was not attached.`,
+      )
+      return
+    }
+  }
+
+  await revealWithRetry(uri)
+  await extensionContext.globalState.update(PENDING_REVEAL_KEY, undefined)
+}
+
+/** Replay a reveal that was parked before an extension host restart. */
+async function resumePendingReveal(): Promise<void> {
+  const pending =
+    extensionContext.globalState.get<PendingReveal>(PENDING_REVEAL_KEY)
+  if (!pending) {
+    return
+  }
+  await extensionContext.globalState.update(PENDING_REVEAL_KEY, undefined)
+
+  if (Date.now() - pending.at > PENDING_REVEAL_TTL_MS) {
+    return
+  }
+  if (!hasFolderContaining(pending.containerId, pending.path)) {
+    return
+  }
+  await revealWithRetry(
+    vscode.Uri.from({
+      scheme: SCHEME,
+      authority: pending.containerId,
+      path: pending.path,
+    }),
+  )
+}
+
+/**
+ * revealInExplorer silently does nothing when the explorer has not materialized
+ * the newly added root yet, and reports no failure to wait on — so retry it a
+ * few times. Repeat calls just re-select the same node.
+ */
+async function revealWithRetry(
+  uri: vscode.Uri,
+  attempts = 3,
+  delayMs = 300,
+): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) {
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
+    await vscode.commands.executeCommand('revealInExplorer', uri)
+  }
 }
 
 /**
