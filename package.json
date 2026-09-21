@@ -56,7 +56,7 @@
       "explorer/context": [
         {
           "command": "devc-vscode.openFolderInContainer",
-          "when": "explorerResourceIsFolder && resourceScheme == file"
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode"
         }
       ]
     }

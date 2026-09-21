@@ -82,6 +82,16 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'devc-vscode.openFolderInContainer',
       async (uri: vscode.Uri) => {
+        // The menu's when clause tests `resourceScheme != devc-vscode` rather
+        // than `== file`, because resource context keys are unset on the first
+        // explorer right-click and a positive test hides the item on the root
+        // host folder. That fails open, so reject container folders here.
+        if (uri && uri.scheme !== 'file') {
+          vscode.window.showErrorMessage(
+            'Open Folder in Container works on host folders only.',
+          )
+          return
+        }
         const cwd = uri?.fsPath
         // hideFromUser is the only creationOptions flag the Python extension
         // checks before injecting `source .../activate` into a new terminal
