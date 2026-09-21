@@ -2,7 +2,7 @@
 
 Browse and edit files inside a **running dev container** from VS Code running on the host — without using VS Code's Dev Containers extension or attaching a window to the container.
 
-The extension registers a `FileSystemProvider` for the `devcontainer-filetree://` scheme. File trees and file contents are sourced from the container by shelling out to `docker exec` on the host, so it works with containers started by the [devcontainer CLI](https://github.com/devcontainers/cli) (`devcontainer up`), plain `docker run`, or anything else — as long as the container is running and reachable via the host's Docker CLI.
+The extension registers a `FileSystemProvider` for the `devc-vscode://` scheme. File trees and file contents are sourced from the container by shelling out to `docker exec` on the host, so it works with containers started by the [devcontainer CLI](https://github.com/devcontainers/cli) (`devcontainer up`), plain `docker run`, or anything else — as long as the container is running and reachable via the host's Docker CLI.
 
 ## Usage
 
@@ -13,23 +13,23 @@ The extension registers a `FileSystemProvider` for the `devcontainer-filetree://
 3. The container folder is added to your workspace like any other folder: expand the tree, open files, edit and save — writes go back into the container.
 4. **Dev Container FS: Refresh Container Files** re-reads the tree after changes made inside the container.
 
-URI shape: `devcontainer-filetree://<container-id>/<absolute path in container>`
+URI shape: `devc-vscode://<container-id>/<absolute path in container>`
 
 ## Requirements
 
-- Docker CLI on the host (`docker` on `PATH`, or set `devcontainer-filetree.dockerPath`).
+- Docker CLI on the host (`docker` on `PATH`, or set `devc-vscode.dockerPath`).
 - A running container with GNU coreutils/findutils (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`, `rmdir`) and `sh` — true for typical dev container images (Debian/Ubuntu based). BusyBox-only images (Alpine) are not supported.
 - Files are read/written as the container's default user (the image's `USER`, e.g. `vscode` in devcontainer images).
 
 ## Extension Settings
 
-* `devcontainer-filetree.dockerPath`: Docker CLI command used to talk to containers (a name on `PATH` or an absolute path). Default: `docker`.
+- `devc-vscode.dockerPath`: Docker CLI command used to talk to containers (a name on `PATH` or an absolute path). Default: `docker`.
 
 ## Known Issues
 
 - **No file watching**: changes made inside the container don't appear automatically. Run **Dev Container FS: Refresh Container Files** (or collapse/re-expand the tree) to pick them up.
 - **Latency**: every operation is a separate `docker exec` (~100–300 ms), so expanding large trees feels slower than a local filesystem.
-- Container restarts keep the same container id, but a *recreated* container gets a new id — re-open the folder if that happens.
+- Container restarts keep the same container id, but a _recreated_ container gets a new id — re-open the folder if that happens.
 
 ## Development
 

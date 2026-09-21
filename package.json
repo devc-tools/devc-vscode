@@ -1,5 +1,5 @@
 {
-  "name": "devcontainer-filetree",
+  "name": "devc-vscode",
   "displayName": "Dev Container File Tree",
   "description": "Browse and edit files inside a running dev container (devcontainer CLI / Docker) from VS Code running on the host.",
   "version": "0.0.1",
@@ -10,7 +10,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onFileSystem:devcontainer-filetree",
+    "onFileSystem:devc-vscode",
     "*"
   ],
   "main": "./out/extension.js",
@@ -18,7 +18,7 @@
     "configuration": {
       "title": "Dev Container File Tree",
       "properties": {
-        "devcontainer-filetree.dockerPath": {
+        "devc-vscode.dockerPath": {
           "type": "string",
           "default": "docker",
           "description": "Docker CLI command used to talk to containers (a name on PATH or an absolute path)."
@@ -27,17 +27,17 @@
     },
     "commands": [
       {
-        "command": "devcontainer-filetree.openContainerFolder",
+        "command": "devc-vscode.openContainerFolder",
         "title": "Open Folder in Dev Container...",
         "category": "Dev Container FS"
       },
       {
-        "command": "devcontainer-filetree.refresh",
+        "command": "devc-vscode.refresh",
         "title": "Refresh Container Files",
         "category": "Dev Container FS"
       },
       {
-        "command": "devcontainer-filetree.openInDevContainer",
+        "command": "devc-vscode.openInDevContainer",
         "title": "Open in Dev Container",
         "category": "Dev Container FS"
       }
@@ -45,7 +45,7 @@
     "menus": {
       "explorer/context": [
         {
-          "command": "devcontainer-filetree.openInDevContainer",
+          "command": "devc-vscode.openInDevContainer",
           "when": "explorerResourceIsFolder"
         }
       ]
