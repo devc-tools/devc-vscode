@@ -152,6 +152,11 @@ export function activate(context: vscode.ExtensionContext) {
 		console.error('devcontainer-filetree: auto-detect failed', err);
 	});
 
+	// Remove any stale devcontainer folders whose containers are not running.
+	cleanupStaleFolders().catch((err) => {
+		console.error('devcontainer-filetree: cleanup failed', err);
+	});
+
 	// Watch for container start/stop events.
 	startDockerEventsWatcher();
 }
@@ -280,6 +285,55 @@ async function autoOpenContainers(
 	}
 }
 
+// ── Startup cleanup ─────────────────────────────────────────────────────────
+
+/**
+ * On startup, remove any devcontainer workspace folders whose containers
+ * are not running. This handles the case where VS Code was restarted after
+ * a container was stopped.
+ */
+async function cleanupStaleFolders(): Promise<void> {
+	const tracked = vscode.workspace.workspaceFolders?.filter(
+		(f) => f.uri.scheme === SCHEME && f.uri.authority,
+	);
+	if (!tracked || tracked.length === 0) {
+		return;
+	}
+
+	// Collect unique container IDs.
+	const containerIds = [...new Set(tracked.map((f) => f.uri.authority!))];
+
+	// Get all running container IDs.
+	const docker = getDockerCommand();
+	const idsRes = await execDocker(['ps', '-q'], undefined, docker);
+	const runningIds = new Set<string>();
+	if (idsRes.exitCode === 0) {
+		for (const id of idsRes.stdout.toString('utf8').split('\n')) {
+			const trimmed = id.trim();
+			if (trimmed) {
+				runningIds.add(trimmed);
+			}
+		}
+	}
+
+	// Find folders whose containers are not running.
+	const stale = tracked.filter((f) => !runningIds.has(f.uri.authority!));
+	if (stale.length === 0) {
+		return;
+	}
+
+	// Remove from the end so indices don't shift.
+	const all = vscode.workspace.workspaceFolders!;
+	for (const folder of stale.sort(
+		(a, b) => all.indexOf(b) - all.indexOf(a),
+	)) {
+		const idx = all.indexOf(folder);
+		if (idx !== -1) {
+			vscode.workspace.updateWorkspaceFolders(idx, 1);
+		}
+	}
+}
+
 // ── Docker events watcher ───────────────────────────────────────────────────
 
 function startDockerEventsWatcher(): void {
@@ -296,6 +350,8 @@ function startDockerEventsWatcher(): void {
 			'event=stop',
 			'--filter',
 			'event=die',
+			'--filter',
+			'event=destroy',
 			'--format',
 			'{{json .}}',
 		],
@@ -319,8 +375,8 @@ function startDockerEventsWatcher(): void {
 		}
 	});
 
-	child.on('error', () => {
-		// Docker not available — silently ignore.
+	child.on('error', (err) => {
+		console.error('devcontainer-filetree: docker events error', err.message);
 	});
 
 	child.on('close', () => {
@@ -329,6 +385,7 @@ function startDockerEventsWatcher(): void {
 }
 
 async function handleDockerEvent(jsonLine: string): Promise<void> {
+	console.log('devcontainer-filetree: docker event', jsonLine);
 	let event: {
 		Type?: string
 		Actor?: { ID?: string; Attributes?: Record<string, string> }
@@ -354,7 +411,7 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
 		// Small delay — container may not be fully ready for inspect immediately.
 		await new Promise((r) => setTimeout(r, 500));
 		await onContainerStarted(containerId);
-	} else if (action === 'stop' || action === 'die') {
+	} else if (action === 'stop' || action === 'die' || action === 'destroy') {
 		await onContainerStopped(containerId);
 	}
 }
@@ -392,24 +449,24 @@ async function onContainerStarted(containerId: string): Promise<void> {
 }
 
 async function onContainerStopped(containerId: string): Promise<void> {
+	console.log('devcontainer-filetree: onContainerStopped', containerId);
 	const folders = vscode.workspace.workspaceFolders?.filter(
 		(f) => f.uri.scheme === SCHEME && f.uri.authority === containerId,
 	);
+	console.log('devcontainer-filetree: matching folders', folders?.length ?? 0);
 	if (!folders || folders.length === 0) {
 		return;
 	}
 
-	const shortName = folders[0].name;
-	const remove = 'Remove from Workspace';
-	const keep = 'Keep';
-	const choice = await vscode.window.showWarningMessage(
-		`Container ${shortName} has stopped.`,
-		remove,
-		keep,
-	);
-	if (choice === remove) {
-		const startIndex = vscode.workspace.workspaceFolders!.indexOf(folders[0]);
-		vscode.workspace.updateWorkspaceFolders(startIndex, folders.length);
+	// Remove from the end so indices don't shift.
+	const all = vscode.workspace.workspaceFolders!;
+	for (const folder of folders.sort(
+		(a, b) => all.indexOf(b) - all.indexOf(a),
+	)) {
+		const idx = all.indexOf(folder);
+		if (idx !== -1) {
+			vscode.workspace.updateWorkspaceFolders(idx, 1);
+		}
 	}
 }
 
