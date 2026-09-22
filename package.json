@@ -11,7 +11,7 @@
   ],
   "activationEvents": [
     "onFileSystem:devc-vscode",
-    "*"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -22,11 +22,6 @@
           "type": "string",
           "default": "docker",
           "description": "Docker CLI command used to talk to containers (a name on PATH or an absolute path)."
-        },
-        "devc-vscode.autoAttach": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically add a container's file tree to the workspace when a container bind-mounting an open folder starts, and remove it when that container stops."
         },
         "devc-vscode.openFolderCommand": {
           "type": "string",
@@ -44,22 +39,112 @@
       {
         "command": "devc-vscode.refresh",
         "title": "Refresh Container Files",
-        "category": "Dev Container FS"
+        "category": "Dev Container FS",
+        "icon": "$(refresh)"
       },
       {
         "command": "devc-vscode.openFolderInContainer",
         "title": "Open Folder in Container",
         "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.newFile",
+        "title": "New File",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.newFolder",
+        "title": "New Folder",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.rename",
+        "title": "Rename",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.delete",
+        "title": "Delete",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.copyPath",
+        "title": "Copy Container Path",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.addToWorkspace",
+        "title": "Add Container Folder to Workspace",
+        "category": "Dev Container FS"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "devc-vscode.refresh",
+          "when": "view == devc-vscode.containers",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devc-vscode.newFile",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
+          "group": "1_new"
+        },
+        {
+          "command": "devc-vscode.newFolder",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
+          "group": "1_new@2"
+        },
+        {
+          "command": "devc-vscode.rename",
+          "when": "view == devc-vscode.containers && viewItem != container",
+          "group": "2_edit"
+        },
+        {
+          "command": "devc-vscode.delete",
+          "when": "view == devc-vscode.containers && viewItem != container",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "devc-vscode.copyPath",
+          "when": "view == devc-vscode.containers",
+          "group": "3_copy"
+        },
+        {
+          "command": "devc-vscode.addToWorkspace",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
+          "group": "4_workspace"
+        }
+      ],
       "explorer/context": [
         {
           "command": "devc-vscode.openFolderInContainer",
           "when": "explorerResourceIsFolder && resourceScheme != devc-vscode"
         }
       ]
-    }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "devc-vscode.containers",
+          "name": "Dev Containers"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "devc-vscode.rename",
+        "key": "f2",
+        "when": "view == devc-vscode.containers && listFocus && !inputFocus"
+      },
+      {
+        "command": "devc-vscode.delete",
+        "key": "delete",
+        "when": "view == devc-vscode.containers && listFocus && !inputFocus"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

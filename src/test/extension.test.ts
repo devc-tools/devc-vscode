@@ -11,7 +11,14 @@ function uri(container: string, p: string): vscode.Uri {
 }
 
 async function dockerPsIds(args: string[]): Promise<string[]> {
-  const res = await execDocker(['ps', '-q', ...args])
+  let res
+  try {
+    res = await execDocker(['ps', '-q', ...args])
+  } catch {
+    // No docker CLI at all (e.g. developing inside a dev container with no
+    // socket). Treated as "no containers" so the suite skips rather than errors.
+    return []
+  }
   if (res.exitCode !== 0) {
     return []
   }
