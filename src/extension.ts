@@ -12,7 +12,14 @@ import {
   WorkspaceFileOps,
   containerUri,
   findContainerForHostFolder,
+  findMatchingBindMount,
+  getContainerHome,
 } from './containerTree';
+import {
+  PathContext,
+  findPathCandidates,
+  resolveCandidatePath,
+} from './terminalLinks';
 
 const VIEW_ID = 'devc-vscode.containers';
 
@@ -21,16 +28,23 @@ interface ContainerInfo {
   name: string;
 }
 
-/** Regex for file paths in terminal output: /absolute/path.ext or relative/path.ext, optionally with :line:col */
-const FILE_PATH_RE =
-  /(?:(?:\/[\w.@-]+)+(?:\.\w+)?)|(?:(?:[\w.@-]+\/)+(?:[\w.@-]+\.\w+))(?::\d+)?(?::\d+)?/g;
+/** Everything a terminal needs before a path printed in it can be resolved. */
+interface TerminalContext extends PathContext {
+  containerId: string;
+}
 
 class DevContainerTerminalLink extends vscode.TerminalLink {
   constructor(
     startIndex: number,
     length: number,
     tooltip: string,
-    public readonly data: { path: string; containerId: string }
+    /** `path` is already absolute inside the container. */
+    public readonly data: {
+      path: string;
+      containerId: string;
+      line?: number;
+      column?: number;
+    }
   ) {
     super(startIndex, length, tooltip);
   }
@@ -94,53 +108,60 @@ export function activate(context: vscode.ExtensionContext) {
         if (!('name' in opts) || opts.name !== 'devcontainer') {
           return [];
         }
-        const terminalContainer = await resolveTerminalContainer(
-          context.terminal
-        );
-        if (!terminalContainer) {
+        const terminalContext = await resolveTerminalContext(context.terminal);
+        if (!terminalContext) {
           return [];
         }
+        const { containerId } = terminalContext;
         const links: DevContainerTerminalLink[] = [];
-        let match: RegExpExecArray | null;
-        FILE_PATH_RE.lastIndex = 0;
-        while ((match = FILE_PATH_RE.exec(context.line)) !== null) {
-          if (match[0].length < 3) {
+        for (const candidate of findPathCandidates(context.line)) {
+          const resolved = resolveCandidatePath(candidate.raw, terminalContext);
+          if (resolved === undefined) {
+            // A ~ with no known home, or a relative path with no known base.
             continue;
           }
-          const candidatePath = stripLineCol(match[0]);
-          const uri = containerUri(terminalContainer, candidatePath);
           try {
-            await provider.stat(uri);
-            links.push(
-              new DevContainerTerminalLink(
-                match.index,
-                match[0].length,
-                'Open in Dev Container',
-                { path: match[0], containerId: terminalContainer }
-              )
-            );
+            await provider.stat(containerUri(containerId, resolved));
           } catch {
             // Not a path in this container — leave it as plain text.
+            continue;
           }
+          links.push(
+            new DevContainerTerminalLink(
+              candidate.startIndex,
+              candidate.length,
+              'Open in Dev Container',
+              {
+                path: resolved,
+                containerId,
+                line: candidate.line,
+                column: candidate.column,
+              }
+            )
+          );
         }
         return links;
       },
       async handleTerminalLink(link) {
-        const { path: filePath, containerId } = (
-          link as DevContainerTerminalLink
-        ).data;
-        const cleanPath = stripLineCol(filePath);
-        const uri = containerUri(containerId, cleanPath);
+        const {
+          path: filePath,
+          containerId,
+          line,
+          column,
+        } = (link as DevContainerTerminalLink).data;
+        const uri = containerUri(containerId, filePath);
         try {
           const stat = await provider.stat(uri);
           if (stat.type === vscode.FileType.Directory) {
-            await revealInTree(containerId, cleanPath);
+            await revealInTree(containerId, filePath);
             return;
           }
         } catch {
           // Fall through and let the editor report the failure.
         }
-        vscode.window.showTextDocument(uri);
+        vscode.window.showTextDocument(uri, {
+          selection: selectionFor(line, column),
+        });
       },
     })
   );
@@ -528,13 +549,16 @@ function getHostFolders(): string[] {
   );
 }
 
-/** Cache of host folder -> container ID for terminal link lookups, cleared on docker events. */
-const terminalContainerCache = new Map<string, string | undefined>();
+/** Cache of host folder -> terminal context, cleared on docker events. */
+const terminalContainerCache = new Map<string, TerminalContext | undefined>();
 
-/** The container backing a "devcontainer" terminal, resolved from its cwd. */
-async function resolveTerminalContainer(
+/**
+ * The container backing a "devcontainer" terminal plus the facts needed to
+ * resolve paths printed in it, resolved from the terminal's host cwd.
+ */
+async function resolveTerminalContext(
   terminal: vscode.Terminal
-): Promise<string | undefined> {
+): Promise<TerminalContext | undefined> {
   const opts = terminal.creationOptions;
   const cwd = 'cwd' in opts ? opts.cwd : undefined;
   if (!cwd) {
@@ -546,21 +570,42 @@ async function resolveTerminalContainer(
     return terminalContainerCache.get(hostFolder);
   }
 
-  const resolved = await findContainerForHostFolder(
-    hostFolder,
-    getDockerCommand()
-  );
-  terminalContainerCache.set(hostFolder, resolved);
+  const docker = getDockerCommand();
+  const containerId = await findContainerForHostFolder(hostFolder, docker);
+  const resolved = containerId
+    ? {
+        containerId,
+        // Relative paths resolve against wherever this host folder is mounted
+        // inside the container. The terminal's own shell may have cd'd
+        // elsewhere, which we cannot see — that is an accepted edge case.
+        cwd: (await findMatchingBindMount(containerId, hostFolder, docker))
+          ?.destPath,
+        home: await getContainerHome(containerId, docker),
+      }
+    : undefined;
+
+  // A miss is only cached while docker events can invalidate it. Without that
+  // watcher the cache would never clear and links would stay dead all session.
+  if (resolved || dockerEventsProcess) {
+    terminalContainerCache.set(hostFolder, resolved);
+  }
   return resolved;
 }
 
-/** Strip trailing :line or :line:col from a path string. */
-function stripLineCol(filePath: string): string {
-  const colonIdx = filePath.lastIndexOf(':');
-  if (colonIdx > 0 && /^\d+(:\d+)?$/.test(filePath.slice(colonIdx + 1))) {
-    return filePath.slice(0, colonIdx);
+/** Where to put the cursor for a link carrying a :line:col suffix. */
+function selectionFor(
+  line: number | undefined,
+  column: number | undefined
+): vscode.Range | undefined {
+  if (line === undefined) {
+    return undefined;
   }
-  return filePath;
+  // Terminal output counts from 1, vscode.Position counts from 0.
+  const position = new vscode.Position(
+    Math.max(0, line - 1),
+    Math.max(0, (column ?? 1) - 1)
+  );
+  return new vscode.Range(position, position);
 }
 
 /**

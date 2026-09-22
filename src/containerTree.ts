@@ -559,6 +559,32 @@ export async function getContainerName(
 }
 
 /**
+ * The container user's home directory, for expanding ~ in terminal links.
+ * Undefined when it cannot be read, which leaves ~ paths unresolved rather
+ * than guessed.
+ */
+export async function getContainerHome(
+  containerId: string,
+  dockerCommand: string
+): Promise<string | undefined> {
+  let res;
+  try {
+    res = await execDocker(
+      ['exec', containerId, 'sh', '-c', 'printf %s "$HOME"'],
+      undefined,
+      dockerCommand
+    );
+  } catch {
+    return undefined;
+  }
+  if (res.exitCode !== 0) {
+    return undefined;
+  }
+  const home = res.stdout.toString('utf8').trim();
+  return home.startsWith('/') ? home : undefined;
+}
+
+/**
  * Resolves the containers serving the current workspace over the Docker CLI.
  *
  * Roots are scoped to open host folders and labelled with the host folder's

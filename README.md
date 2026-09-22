@@ -14,7 +14,9 @@ Each root is the container's filesystem root, `/`. The workspace association dec
 
 Nothing is added to your workspace. The tree is a view, not a workspace folder, so no window reload, no multi-root conversion, and no dead container roots restored after a reload. If you do want a container folder in the native Explorer — for drag-and-drop against host files, or per-folder settings — use **Add Container Folder to Workspace**, which is the one place that still mutates the workspace.
 
-File paths printed in a container terminal become clickable links. Clicking a *file* opens it; clicking a *folder* focuses the tree and reveals it.
+File paths printed in a container terminal become clickable links. Clicking a *file* opens it, jumping to the line and column when the output carries a `:line:col` suffix; clicking a *folder* focuses the tree and reveals it.
+
+Absolute paths always resolve. `~` resolves against the container user's `$HOME`, and relative paths resolve against wherever the terminal's host folder is mounted inside the container — not against the shell's actual working directory, which the extension cannot see, so a link will not appear after you `cd` somewhere else unless the same relative path also exists under the mount. Anything that cannot be resolved with certainty is left as plain text rather than guessed at: `~user/...`, unexpanded `$HOME/...`, and every relative path when the mount destination is unknown. Bare filenames with no `/` are never linked.
 
 The terminal is created with `hideFromUser` and then immediately shown. That is deliberate: it is the only creation option the Python extension checks before injecting `source .../activate` into a new terminal, so this keeps a host venv out of a container shell. There is no supported API for this ([vscode-python#11963](https://github.com/microsoft/vscode-python/issues/11963) is open), so it may need revisiting if that check changes.
 
