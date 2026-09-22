@@ -1,9 +1,9 @@
-import * as cp from 'child_process'
-import * as posix from 'path/posix'
-import * as path from 'path'
-import * as vscode from 'vscode'
-import { DevContainerFileSystemProvider } from './devcontainerFs'
-import { execDocker } from './docker'
+import * as cp from 'child_process';
+import * as posix from 'path/posix';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { DevContainerFileSystemProvider } from './devcontainerFs';
+import { execDocker } from './docker';
 import {
   ContainerNode,
   ContainerTreeDataProvider,
@@ -12,147 +12,147 @@ import {
   WorkspaceFileOps,
   containerUri,
   findContainerForHostFolder,
-} from './containerTree'
+} from './containerTree';
 
-const VIEW_ID = 'devc-vscode.containers'
+const VIEW_ID = 'devc-vscode.containers';
 
 interface ContainerInfo {
-  id: string
-  name: string
+  id: string;
+  name: string;
 }
 
 /** Regex for file paths in terminal output: /absolute/path.ext or relative/path.ext, optionally with :line:col */
 const FILE_PATH_RE =
-  /(?:(?:\/[\w.@-]+)+(?:\.\w+)?)|(?:(?:[\w.@-]+\/)+(?:[\w.@-]+\.\w+))(?::\d+)?(?::\d+)?/g
+  /(?:(?:\/[\w.@-]+)+(?:\.\w+)?)|(?:(?:[\w.@-]+\/)+(?:[\w.@-]+\.\w+))(?::\d+)?(?::\d+)?/g;
 
 class DevContainerTerminalLink extends vscode.TerminalLink {
   constructor(
     startIndex: number,
     length: number,
     tooltip: string,
-    public readonly data: { path: string; containerId: string },
+    public readonly data: { path: string; containerId: string }
   ) {
-    super(startIndex, length, tooltip)
+    super(startIndex, length, tooltip);
   }
 }
 
-let provider: DevContainerFileSystemProvider
-let treeProvider: ContainerTreeDataProvider
-let treeView: vscode.TreeView<ContainerNode>
-let dockerEventsProcess: cp.ChildProcess | undefined
+let provider: DevContainerFileSystemProvider;
+let treeProvider: ContainerTreeDataProvider;
+let treeView: vscode.TreeView<ContainerNode>;
+let dockerEventsProcess: cp.ChildProcess | undefined;
 
 // ── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
-  provider = new DevContainerFileSystemProvider()
+  provider = new DevContainerFileSystemProvider();
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider(SCHEME, provider, {
       isCaseSensitive: true,
-    }),
-  )
+    })
+  );
 
   treeProvider = new ContainerTreeDataProvider(
     new DockerContainerSource(getDockerCommand, getHostFolders),
-    new WorkspaceFileOps(),
-  )
+    new WorkspaceFileOps()
+  );
   treeView = vscode.window.createTreeView(VIEW_ID, {
     treeDataProvider: treeProvider,
     dragAndDropController: treeProvider,
     canSelectMany: true,
     showCollapseAll: true,
-  })
-  context.subscriptions.push(treeView)
+  });
+  context.subscriptions.push(treeView);
 
   const register = (id: string, handler: (...args: never[]) => unknown) =>
     context.subscriptions.push(
-      vscode.commands.registerCommand(id, handler as never),
-    )
+      vscode.commands.registerCommand(id, handler as never)
+    );
 
-  register('devc-vscode.refresh', () => treeProvider.refresh())
-  register('devc-vscode.showContainerFileTree', () => showContainerFileTree())
+  register('devc-vscode.refresh', () => treeProvider.refresh());
+  register('devc-vscode.showContainerFileTree', () => showContainerFileTree());
   register('devc-vscode.newFile', (node?: ContainerNode) =>
-    createEntry(node, 'file'),
-  )
+    createEntry(node, 'file')
+  );
   register('devc-vscode.newFolder', (node?: ContainerNode) =>
-    createEntry(node, 'folder'),
-  )
-  register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node))
-  register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node))
-  register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node))
+    createEntry(node, 'folder')
+  );
+  register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node));
+  register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node));
+  register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node));
   register('devc-vscode.addToWorkspace', (node?: ContainerNode) =>
-    addToWorkspace(node),
-  )
+    addToWorkspace(node)
+  );
   register('devc-vscode.openFolderInContainer', (uri: vscode.Uri) =>
-    openFolderInContainer(uri),
-  )
+    openFolderInContainer(uri)
+  );
 
   context.subscriptions.push(
     vscode.window.registerTerminalLinkProvider({
       async provideTerminalLinks(context) {
         // Only activate for terminals created by our "Open in Dev Container" command.
-        const opts = context.terminal.creationOptions
+        const opts = context.terminal.creationOptions;
         if (!('name' in opts) || opts.name !== 'devcontainer') {
-          return []
+          return [];
         }
         const terminalContainer = await resolveTerminalContainer(
-          context.terminal,
-        )
+          context.terminal
+        );
         if (!terminalContainer) {
-          return []
+          return [];
         }
-        const links: DevContainerTerminalLink[] = []
-        let match: RegExpExecArray | null
-        FILE_PATH_RE.lastIndex = 0
+        const links: DevContainerTerminalLink[] = [];
+        let match: RegExpExecArray | null;
+        FILE_PATH_RE.lastIndex = 0;
         while ((match = FILE_PATH_RE.exec(context.line)) !== null) {
           if (match[0].length < 3) {
-            continue
+            continue;
           }
-          const candidatePath = stripLineCol(match[0])
-          const uri = containerUri(terminalContainer, candidatePath)
+          const candidatePath = stripLineCol(match[0]);
+          const uri = containerUri(terminalContainer, candidatePath);
           try {
-            await provider.stat(uri)
+            await provider.stat(uri);
             links.push(
               new DevContainerTerminalLink(
                 match.index,
                 match[0].length,
                 'Open in Dev Container',
-                { path: match[0], containerId: terminalContainer },
-              ),
-            )
+                { path: match[0], containerId: terminalContainer }
+              )
+            );
           } catch {
             // Not a path in this container — leave it as plain text.
           }
         }
-        return links
+        return links;
       },
       async handleTerminalLink(link) {
         const { path: filePath, containerId } = (
           link as DevContainerTerminalLink
-        ).data
-        const cleanPath = stripLineCol(filePath)
-        const uri = containerUri(containerId, cleanPath)
+        ).data;
+        const cleanPath = stripLineCol(filePath);
+        const uri = containerUri(containerId, cleanPath);
         try {
-          const stat = await provider.stat(uri)
+          const stat = await provider.stat(uri);
           if (stat.type === vscode.FileType.Directory) {
-            await revealInTree(containerId, cleanPath)
-            return
+            await revealInTree(containerId, cleanPath);
+            return;
           }
         } catch {
           // Fall through and let the editor report the failure.
         }
-        vscode.window.showTextDocument(uri)
+        vscode.window.showTextDocument(uri);
       },
-    }),
-  )
+    })
+  );
 
   // Watch for container start/stop events so roots appear and vanish live.
-  startDockerEventsWatcher()
+  startDockerEventsWatcher();
 }
 
 export function deactivate() {
   if (dockerEventsProcess) {
-    dockerEventsProcess.kill()
-    dockerEventsProcess = undefined
+    dockerEventsProcess.kill();
+    dockerEventsProcess = undefined;
   }
 }
 
@@ -163,135 +163,138 @@ export function deactivate() {
  * selection when invoked from the command palette.
  */
 function targetNode(node?: ContainerNode): ContainerNode | undefined {
-  const resolved = node ?? treeView.selection[0]
+  const resolved = node ?? treeView.selection[0];
   if (!resolved) {
-    vscode.window.showErrorMessage('No container file selected.')
-    return undefined
+    vscode.window.showErrorMessage('No container file selected.');
+    return undefined;
   }
-  return resolved
+  return resolved;
 }
 
 /** The directory a new entry created against `node` belongs in. */
 function directoryOf(node: ContainerNode): vscode.Uri {
   if (node.kind === 'file') {
-    return containerUri(node.containerId, posix.dirname(node.uri.path))
+    return containerUri(node.containerId, posix.dirname(node.uri.path));
   }
-  return node.uri
+  return node.uri;
 }
 
 async function createEntry(
   node: ContainerNode | undefined,
-  kind: 'file' | 'folder',
+  kind: 'file' | 'folder'
 ): Promise<void> {
-  const target = targetNode(node)
+  const target = targetNode(node);
   if (!target) {
-    return
+    return;
   }
-  const parent = directoryOf(target)
+  const parent = directoryOf(target);
   const name = await vscode.window.showInputBox({
     prompt: `New ${kind} in ${parent.path}`,
     validateInput: validateName,
-  })
+  });
   if (!name) {
-    return
+    return;
   }
-  const uri = parent.with({ path: posix.join(parent.path, name) })
+  const uri = parent.with({ path: posix.join(parent.path, name) });
   try {
     if (kind === 'folder') {
-      await vscode.workspace.fs.createDirectory(uri)
+      await vscode.workspace.fs.createDirectory(uri);
     } else {
-      await vscode.workspace.fs.writeFile(uri, new Uint8Array(0))
+      await vscode.workspace.fs.writeFile(uri, new Uint8Array(0));
     }
   } catch (err) {
     vscode.window.showErrorMessage(
-      `Could not create ${name}: ${(err as Error).message}`,
-    )
-    return
+      `Could not create ${name}: ${(err as Error).message}`
+    );
+    return;
   }
   // The new entry lands inside `target` unless `target` is itself a file, in
   // which case it lands beside it — refresh whichever directory now contains it.
   treeProvider.refresh(
-    target.kind === 'file' ? await parentNodeOf(target) : target,
-  )
+    target.kind === 'file' ? await parentNodeOf(target) : target
+  );
   if (kind === 'file') {
-    vscode.window.showTextDocument(uri)
+    vscode.window.showTextDocument(uri);
   }
 }
 
 async function renameEntry(node?: ContainerNode): Promise<void> {
-  const target = targetNode(node)
+  const target = targetNode(node);
   if (!target || target.kind === 'container') {
-    return
+    return;
   }
-  const current = posix.basename(target.uri.path)
+  const current = posix.basename(target.uri.path);
   const name = await vscode.window.showInputBox({
     prompt: 'New name',
     value: current,
-    valueSelection: [0, current.lastIndexOf('.') > 0 ? current.lastIndexOf('.') : current.length],
+    valueSelection: [
+      0,
+      current.lastIndexOf('.') > 0 ? current.lastIndexOf('.') : current.length,
+    ],
     validateInput: validateName,
-  })
+  });
   if (!name || name === current) {
-    return
+    return;
   }
   const destination = target.uri.with({
     path: posix.join(posix.dirname(target.uri.path), name),
-  })
+  });
   try {
     await vscode.workspace.fs.rename(target.uri, destination, {
       overwrite: false,
-    })
+    });
   } catch (err) {
     vscode.window.showErrorMessage(
-      `Could not rename ${current}: ${(err as Error).message}`,
-    )
-    return
+      `Could not rename ${current}: ${(err as Error).message}`
+    );
+    return;
   }
-  treeProvider.refresh(await parentNodeOf(target))
+  treeProvider.refresh(await parentNodeOf(target));
 }
 
 async function deleteEntries(node?: ContainerNode): Promise<void> {
-  const target = targetNode(node)
+  const target = targetNode(node);
   if (!target || target.kind === 'container') {
-    return
+    return;
   }
   // Multi-select only applies when the invoked node is part of the selection —
   // a context menu on an unselected node acts on that node alone.
-  const selection = treeView.selection.filter((n) => n.kind !== 'container')
-  const nodes = selection.some((n) => n.uri.toString() === target.uri.toString())
+  const selection = treeView.selection.filter(n => n.kind !== 'container');
+  const nodes = selection.some(n => n.uri.toString() === target.uri.toString())
     ? selection
-    : [target]
+    : [target];
 
   const label =
     nodes.length === 1
       ? `'${posix.basename(nodes[0].uri.path)}'`
-      : `${nodes.length} items`
+      : `${nodes.length} items`;
   const answer = await vscode.window.showWarningMessage(
     `Delete ${label}? This cannot be undone — the container has no trash.`,
     { modal: true },
-    'Delete',
-  )
+    'Delete'
+  );
   if (answer !== 'Delete') {
-    return
+    return;
   }
 
   for (const entry of nodes) {
     try {
-      await vscode.workspace.fs.delete(entry.uri, { recursive: true })
+      await vscode.workspace.fs.delete(entry.uri, { recursive: true });
     } catch (err) {
       vscode.window.showErrorMessage(
-        `Could not delete ${posix.basename(entry.uri.path)}: ${(err as Error).message}`,
-      )
+        `Could not delete ${posix.basename(entry.uri.path)}: ${(err as Error).message}`
+      );
     }
   }
-  treeProvider.refresh(await parentNodeOf(nodes[0]))
+  treeProvider.refresh(await parentNodeOf(nodes[0]));
 }
 
 async function copyPath(node?: ContainerNode): Promise<void> {
-  const target = targetNode(node)
+  const target = targetNode(node);
   if (!target) {
-    return
+    return;
   }
-  await vscode.env.clipboard.writeText(target.uri.path)
+  await vscode.env.clipboard.writeText(target.uri.path);
 }
 
 /**
@@ -300,43 +303,41 @@ async function copyPath(node?: ContainerNode): Promise<void> {
  * asked for it explicitly.
  */
 async function addToWorkspace(node?: ContainerNode): Promise<void> {
-  const target = targetNode(node)
+  const target = targetNode(node);
   if (!target || target.kind === 'file') {
-    return
+    return;
   }
   const name =
-    target.kind === 'container'
-      ? target.name
-      : posix.basename(target.uri.path)
-  const index = vscode.workspace.workspaceFolders?.length ?? 0
+    target.kind === 'container' ? target.name : posix.basename(target.uri.path);
+  const index = vscode.workspace.workspaceFolders?.length ?? 0;
   const added = vscode.workspace.updateWorkspaceFolders(index, 0, {
     uri: target.uri,
     name: `[container] ${name}`,
-  })
+  });
   if (!added) {
     vscode.window.showErrorMessage(
-      `Could not add ${name} to the workspace — it may already be there.`,
-    )
+      `Could not add ${name} to the workspace — it may already be there.`
+    );
   }
 }
 
 async function parentNodeOf(
-  node: ContainerNode,
+  node: ContainerNode
 ): Promise<ContainerNode | undefined> {
-  return treeProvider.getParent(node)
+  return treeProvider.getParent(node);
 }
 
 function validateName(value: string): string | undefined {
   if (!value.trim()) {
-    return 'Name cannot be empty'
+    return 'Name cannot be empty';
   }
   if (value.includes('/')) {
-    return 'Name cannot contain "/"'
+    return 'Name cannot contain "/"';
   }
   if (value === '.' || value === '..') {
-    return 'Invalid name'
+    return 'Invalid name';
   }
-  return undefined
+  return undefined;
 }
 
 // ── Reveal ──────────────────────────────────────────────────────────────────
@@ -344,61 +345,61 @@ function validateName(value: string): string | undefined {
 /** Focus the container tree and select `targetPath` in it. */
 async function revealInTree(
   containerId: string,
-  targetPath: string,
+  targetPath: string
 ): Promise<void> {
   // reveal needs the view resolved first; `<viewId>.focus` is generated by
   // VS Code from the view contribution and is not declared in package.json.
-  await vscode.commands.executeCommand(`${VIEW_ID}.focus`)
-  const node = await treeProvider.nodeFor(containerId, targetPath)
+  await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+  const node = await treeProvider.nodeFor(containerId, targetPath);
   try {
-    await treeView.reveal(node, { select: true, focus: true, expand: true })
+    await treeView.reveal(node, { select: true, focus: true, expand: true });
   } catch (err) {
     vscode.window.showErrorMessage(
-      `Could not show ${targetPath}: ${(err as Error).message}`,
-    )
+      `Could not show ${targetPath}: ${(err as Error).message}`
+    );
   }
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
 async function showContainerFileTree(): Promise<void> {
-  const hostFolder = getHostFolders()[0]
+  const hostFolder = getHostFolders()[0];
 
-  let container: ContainerInfo | undefined
+  let container: ContainerInfo | undefined;
   try {
-    container = await pickContainer(hostFolder)
+    container = await pickContainer(hostFolder);
   } catch (err) {
-    vscode.window.showErrorMessage((err as Error).message)
-    return
+    vscode.window.showErrorMessage((err as Error).message);
+    return;
   }
   if (!container) {
     vscode.window.showErrorMessage(
-      'No running dev container found. Start one first (e.g. `devcontainer up --workspace-folder <path>`).',
-    )
-    return
+      'No running dev container found. Start one first (e.g. `devcontainer up --workspace-folder <path>`).'
+    );
+    return;
   }
 
-  const guess = hostFolder ? `/workspaces/${path.basename(hostFolder)}` : '/'
+  const guess = hostFolder ? `/workspaces/${path.basename(hostFolder)}` : '/';
   const remotePath = await vscode.window.showInputBox({
     prompt: `Path inside container ${container.name || container.id.slice(0, 12)}`,
     value: guess,
-    validateInput: (v) =>
+    validateInput: v =>
       v.startsWith('/') ? undefined : 'Path must be absolute',
-  })
+  });
   if (remotePath === undefined) {
-    return
+    return;
   }
 
   try {
-    await provider.stat(containerUri(container.id, remotePath))
+    await provider.stat(containerUri(container.id, remotePath));
   } catch (err) {
     vscode.window.showErrorMessage(
-      `Cannot open ${remotePath}: ${(err as Error).message}`,
-    )
-    return
+      `Cannot open ${remotePath}: ${(err as Error).message}`
+    );
+    return;
   }
 
-  await revealInTree(container.id, remotePath)
+  await revealInTree(container.id, remotePath);
 }
 
 async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
@@ -408,11 +409,11 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
   // That fails open, so reject container folders here.
   if (uri && uri.scheme !== 'file') {
     vscode.window.showErrorMessage(
-      'Open Folder in Container works on host folders only.',
-    )
-    return
+      'Open Folder in Container works on host folders only.'
+    );
+    return;
   }
-  const cwd = uri?.fsPath
+  const cwd = uri?.fsPath;
   // hideFromUser is the only creationOptions flag the Python extension checks
   // before injecting `source .../activate` into a new terminal (see
   // microsoft/vscode-python src/client/terminals/activation.ts). It reads
@@ -424,15 +425,15 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
     location: vscode.TerminalLocation.Editor,
     isTransient: true,
     hideFromUser: true,
-  })
-  t.show()
-  t.sendText(getOpenFolderCommand())
+  });
+  t.show();
+  t.sendText(getOpenFolderCommand());
 }
 
 // ── Docker events watcher ───────────────────────────────────────────────────
 
 function startDockerEventsWatcher(): void {
-  const docker = getDockerCommand()
+  const docker = getDockerCommand();
   const child = cp.spawn(
     docker,
     [
@@ -450,54 +451,54 @@ function startDockerEventsWatcher(): void {
       '--format',
       '{{json .}}',
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  )
+    { stdio: ['ignore', 'pipe', 'pipe'] }
+  );
 
-  dockerEventsProcess = child
+  dockerEventsProcess = child;
 
-  let buf = ''
+  let buf = '';
   child.stdout?.on('data', (chunk: Buffer) => {
-    buf += chunk.toString('utf8')
-    let nl: number
+    buf += chunk.toString('utf8');
+    let nl: number;
     while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
       if (line) {
-        handleDockerEvent(line).catch((err) => {
-          console.error('devc-vscode: event handling error', err)
-        })
+        handleDockerEvent(line).catch(err => {
+          console.error('devc-vscode: event handling error', err);
+        });
       }
     }
-  })
+  });
 
-  child.on('error', (err) => {
-    console.error('devc-vscode: docker events error', err.message)
-  })
+  child.on('error', err => {
+    console.error('devc-vscode: docker events error', err.message);
+  });
 
   child.on('close', () => {
-    dockerEventsProcess = undefined
-  })
+    dockerEventsProcess = undefined;
+  });
 }
 
 async function handleDockerEvent(jsonLine: string): Promise<void> {
-  let event: { Type?: string; Action?: string }
+  let event: { Type?: string; Action?: string };
   try {
-    event = JSON.parse(jsonLine)
+    event = JSON.parse(jsonLine);
   } catch {
-    return
+    return;
   }
   if (event.Type !== 'container') {
-    return
+    return;
   }
 
   // The container set changed — cached terminal lookups are no longer trusted.
-  terminalContainerCache.clear()
+  terminalContainerCache.clear();
 
   if (event.Action === 'start') {
     // A container may not accept `exec` the instant it reports as started.
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise(r => setTimeout(r, 500));
   }
-  treeProvider.refresh()
+  treeProvider.refresh();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -507,56 +508,59 @@ function getDockerCommand(): string {
     vscode.workspace
       .getConfiguration('devc-vscode')
       .get<string>('dockerPath') || 'docker'
-  )
+  );
 }
 
 /** Command sent to the terminal by "Open Folder in Container". */
 function getOpenFolderCommand(): string {
   const configured = vscode.workspace
     .getConfiguration('devc-vscode')
-    .get<string>('openFolderCommand')
-  return configured && configured.trim() !== '' ? configured : 'devc herdr'
+    .get<string>('openFolderCommand');
+  return configured && configured.trim() !== '' ? configured : 'devc herdr';
 }
 
 /** Return the fsPath of all file:// workspace folders. */
 function getHostFolders(): string[] {
   return (
     vscode.workspace.workspaceFolders
-      ?.filter((f) => f.uri.scheme === 'file')
-      .map((f) => f.uri.fsPath) ?? []
-  )
+      ?.filter(f => f.uri.scheme === 'file')
+      .map(f => f.uri.fsPath) ?? []
+  );
 }
 
 /** Cache of host folder -> container ID for terminal link lookups, cleared on docker events. */
-const terminalContainerCache = new Map<string, string | undefined>()
+const terminalContainerCache = new Map<string, string | undefined>();
 
 /** The container backing a "devcontainer" terminal, resolved from its cwd. */
 async function resolveTerminalContainer(
-  terminal: vscode.Terminal,
+  terminal: vscode.Terminal
 ): Promise<string | undefined> {
-  const opts = terminal.creationOptions
-  const cwd = 'cwd' in opts ? opts.cwd : undefined
+  const opts = terminal.creationOptions;
+  const cwd = 'cwd' in opts ? opts.cwd : undefined;
   if (!cwd) {
-    return undefined
+    return undefined;
   }
-  const hostFolder = typeof cwd === 'string' ? cwd : cwd.fsPath
+  const hostFolder = typeof cwd === 'string' ? cwd : cwd.fsPath;
 
   if (terminalContainerCache.has(hostFolder)) {
-    return terminalContainerCache.get(hostFolder)
+    return terminalContainerCache.get(hostFolder);
   }
 
-  const resolved = await findContainerForHostFolder(hostFolder, getDockerCommand())
-  terminalContainerCache.set(hostFolder, resolved)
-  return resolved
+  const resolved = await findContainerForHostFolder(
+    hostFolder,
+    getDockerCommand()
+  );
+  terminalContainerCache.set(hostFolder, resolved);
+  return resolved;
 }
 
 /** Strip trailing :line or :line:col from a path string. */
 function stripLineCol(filePath: string): string {
-  const colonIdx = filePath.lastIndexOf(':')
+  const colonIdx = filePath.lastIndexOf(':');
   if (colonIdx > 0 && /^\d+(:\d+)?$/.test(filePath.slice(colonIdx + 1))) {
-    return filePath.slice(0, colonIdx)
+    return filePath.slice(0, colonIdx);
   }
-  return filePath
+  return filePath;
 }
 
 /**
@@ -566,9 +570,9 @@ function stripLineCol(filePath: string): string {
  * user pick.
  */
 async function pickContainer(
-  hostFolder: string | undefined,
+  hostFolder: string | undefined
 ): Promise<ContainerInfo | undefined> {
-  const format = '{{.ID}} {{.Names}}'
+  const format = '{{.ID}} {{.Names}}';
 
   if (hostFolder) {
     const matches = parseContainers(
@@ -577,57 +581,57 @@ async function pickContainer(
         `label=devcontainer.local_folder=${hostFolder}`,
         '--format',
         format,
-      ]),
-    )
+      ])
+    );
     if (matches.length === 1) {
-      return matches[0]
+      return matches[0];
     }
     if (matches.length > 1) {
-      return pickFrom(matches)
+      return pickFrom(matches);
     }
   }
 
   // Fallback: any running dev container on this host.
   const all = parseContainers(
-    await ps(['--filter', 'label=devcontainer.config_file', '--format', format]),
-  )
+    await ps(['--filter', 'label=devcontainer.config_file', '--format', format])
+  );
   if (all.length === 0) {
-    return undefined
+    return undefined;
   }
-  return pickFrom(all)
+  return pickFrom(all);
 }
 
 async function ps(args: string[]): Promise<Buffer> {
-  const docker = getDockerCommand()
-  const res = await execDocker(['ps', ...args], undefined, docker)
+  const docker = getDockerCommand();
+  const res = await execDocker(['ps', ...args], undefined, docker);
   if (res.exitCode !== 0) {
-    throw new Error(`docker ps failed: ${res.stderr.toString('utf8').trim()}`)
+    throw new Error(`docker ps failed: ${res.stderr.toString('utf8').trim()}`);
   }
-  return res.stdout
+  return res.stdout;
 }
 
 function parseContainers(stdout: Buffer): ContainerInfo[] {
   return stdout
     .toString('utf8')
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const [id, name = ''] = line.split(/\s/, 2)
-      return { id: id.trim(), name: name.trim() }
-    })
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map(line => {
+      const [id, name = ''] = line.split(/\s/, 2);
+      return { id: id.trim(), name: name.trim() };
+    });
 }
 
 async function pickFrom(
-  containers: ContainerInfo[],
+  containers: ContainerInfo[]
 ): Promise<ContainerInfo | undefined> {
   const picked = await vscode.window.showQuickPick(
-    containers.map((c) => ({
+    containers.map(c => ({
       label: c.name || c.id.slice(0, 12),
       description: c.id.slice(0, 12),
       container: c,
     })),
-    { placeHolder: 'Select the dev container to open' },
-  )
-  return picked?.container
+    { placeHolder: 'Select the dev container to open' }
+  );
+  return picked?.container;
 }
