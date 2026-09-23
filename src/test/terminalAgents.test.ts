@@ -23,6 +23,13 @@ const PROBE = [
   'pts/9 30 120',
   'pts/10 28 98',
   'pts/13 31 110',
+  '---',
+  '7504\t/workspaces/app',
+  '7746\t/workspaces/app',
+  '33000\t/workspaces/app/pkg',
+  '33050\t/workspaces/app/pkg',
+  '33100\t/workspaces/app/pkg/sub dir',
+  '26722\t',
 ].join('\n');
 
 suite('parseProbe', () => {
@@ -32,6 +39,7 @@ suite('parseProbe', () => {
       ageSeconds: 40,
       size: { rows: 31, cols: 110 },
       agent: { agent: 'claude', pid: 33050 },
+      cwd: '/workspaces/app/pkg/sub dir',
     });
     assert.deepStrictEqual(ttys.get('pts/3')?.agent, {
       agent: 'claude',
@@ -39,6 +47,19 @@ suite('parseProbe', () => {
     });
     assert.strictEqual(ttys.get('pts/9')?.agent, undefined);
     assert.strictEqual(ttys.has('?'), false);
+  });
+
+  test("cwd is the foreground process's, else the shell's", () => {
+    const { ttys } = parseProbe(PROBE);
+    // pts/3: claude is the foreground group leader.
+    assert.strictEqual(ttys.get('pts/3')?.cwd, '/workspaces/app');
+    // pts/10: the only process's cwd was unreadable.
+    assert.strictEqual(ttys.get('pts/10')?.cwd, undefined);
+    // Without a foreground match, the oldest process (the shell) is used.
+    const shellOnly = parseProbe(
+      '---\n 10 pts/1 10 99 50 bash\n---\n---\n10\t/home/vscode\n'
+    );
+    assert.strictEqual(shellOnly.ttys.get('pts/1')?.cwd, '/home/vscode');
   });
 
   test('no manifests means no agents', () => {

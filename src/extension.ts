@@ -55,6 +55,7 @@ let provider: DevContainerFileSystemProvider;
 let treeProvider: ContainerTreeDataProvider;
 let treeView: vscode.TreeView<ContainerNode>;
 let agentTree: AgentTreeDataProvider;
+let terminalAgents: TerminalAgentTracker;
 let dockerEventsProcess: cp.ChildProcess | undefined;
 
 // ── Activation ──────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
         : undefined;
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents()),
-    new TerminalAgentTracker({
+    (terminalAgents = new TerminalAgentTracker({
       isContainerTerminal,
       async resolveContainer(terminal) {
         const context = await resolveTerminalContext(terminal);
@@ -123,7 +124,7 @@ export function activate(context: vscode.ExtensionContext) {
       report: (terminal, id, agent) =>
         agentTree.setTerminalAgent(id, terminal, agent),
       log: message => agentLog.info(message),
-    })
+    }))
   );
   syncAgents();
 
@@ -158,10 +159,17 @@ export function activate(context: vscode.ExtensionContext) {
         if (!terminalContext) {
           return [];
         }
+        // Relative paths resolve against the shell's real working directory
+        // once the tracker has found the terminal's pty, and against the
+        // project mount until then.
+        const liveCwd = terminalAgents.cwdFor(context.terminal);
+        const pathContext = liveCwd
+          ? { ...terminalContext, cwd: liveCwd }
+          : terminalContext;
         const { containerId } = terminalContext;
         const links: DevContainerTerminalLink[] = [];
         for (const candidate of findPathCandidates(context.line)) {
-          const resolved = resolveCandidatePath(candidate.raw, terminalContext);
+          const resolved = resolveCandidatePath(candidate.raw, pathContext);
           if (resolved === undefined) {
             // A ~ with no known home, or a relative path with no known base.
             continue;

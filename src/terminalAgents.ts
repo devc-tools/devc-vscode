@@ -29,6 +29,12 @@ export interface TtyInfo {
   size?: { rows: number; cols: number };
   /** The agent running on it, preferring the foreground process group. */
   agent?: { agent: string; pid: number };
+  /**
+   * Working directory of the foreground process, else of the session's
+   * oldest process (the shell). Read from /proc, so it follows every `cd`
+   * without any shell integration in the container.
+   */
+  cwd?: string;
 }
 
 export interface ContainerProbe {
@@ -47,6 +53,10 @@ ps -eo pid=,tty=,pgid=,tpgid=,etimes=,args= 2>/dev/null
 echo ---
 for t in $(ps -eo tty= | sort -u); do
   case $t in pts/*) printf '%s %s\\n' "$t" "$(stty size < /dev/$t 2>/dev/null)" ;; esac
+done
+echo ---
+ps -eo pid=,tty= | while read -r p t; do
+  case $t in pts/*) printf '%s\\t%s\\n' "$p" "$(readlink /proc/$p/cwd 2>/dev/null)" ;; esac
 done
 `;
 /** Classifies stdin once per agent id given as an argument. */
@@ -83,7 +93,7 @@ function programName(args: string): string | undefined {
 
 /** Parse PROBE_SCRIPT output into the container's ptys. */
 export function parseProbe(output: string): ContainerProbe {
-  const [manifestPart = '', psPart = '', sizePart = ''] =
+  const [manifestPart = '', psPart = '', sizePart = '', cwdPart = ''] =
     output.split(/^---$/m);
   const known = new Set(
     manifestPart
@@ -94,6 +104,10 @@ export function parseProbe(output: string): ContainerProbe {
 
   const ttys = new Map<string, TtyInfo>();
   const agents = new Map<string, { agent: string; pid: number; fg: boolean }>();
+  /** Per tty: the foreground group leader, else a foreground process. */
+  const foreground = new Map<string, { pid: string; leader: boolean }>();
+  /** Per tty: the oldest process, normally the shell docker exec started. */
+  const oldest = new Map<string, { pid: string; age: number }>();
   for (const line of psPart.split('\n')) {
     const m = /^\s*(\d+)\s+(\S+)\s+(\d+)\s+(-?\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!m || !m[2].startsWith('pts/')) {
@@ -103,6 +117,16 @@ export function parseProbe(output: string): ContainerProbe {
     const info = ttys.get(tty) ?? { ageSeconds: 0 };
     info.ageSeconds = Math.max(info.ageSeconds, Number(etimes));
     ttys.set(tty, info);
+
+    if (pgid === tpgid) {
+      const leader = pid === tpgid;
+      if (!foreground.get(tty)?.leader) {
+        foreground.set(tty, { pid, leader });
+      }
+    }
+    if (Number(etimes) >= (oldest.get(tty)?.age ?? -1)) {
+      oldest.set(tty, { pid, age: Number(etimes) });
+    }
 
     const name = programName(args);
     if (name && known.has(name)) {
@@ -122,6 +146,19 @@ export function parseProbe(output: string): ContainerProbe {
     if (info) {
       info.size = { rows: Number(m[2]), cols: Number(m[3]) };
     }
+  }
+  const cwds = new Map<string, string>();
+  for (const line of cwdPart.split('\n')) {
+    const tab = line.indexOf('\t');
+    const cwd = tab >= 0 ? line.slice(tab + 1) : '';
+    if (cwd.startsWith('/')) {
+      cwds.set(line.slice(0, tab).trim(), cwd);
+    }
+  }
+  for (const [tty, info] of ttys) {
+    info.cwd =
+      cwds.get(foreground.get(tty)?.pid ?? '') ??
+      cwds.get(oldest.get(tty)?.pid ?? '');
   }
   return { ttys };
 }
@@ -260,6 +297,8 @@ class TrackedExecution {
   private disposed = false;
   private container: { id: string; user: string | undefined } | undefined;
   private tty: string | undefined;
+  /** The terminal's working directory inside the container, as last probed. */
+  cwd: string | undefined;
   private last: string | undefined;
 
   constructor(
@@ -344,6 +383,10 @@ class TrackedExecution {
       }
 
       const info = probe.ttys.get(this.tty)!;
+      if (info.cwd !== this.cwd) {
+        this.cwd = info.cwd;
+        this.deps.log(`${this.terminal.name} ${this.tty}: cwd ${this.cwd}`);
+      }
       if (info.size) {
         await this.screen.resize(info.size.cols, info.size.rows);
       }
@@ -394,6 +437,7 @@ class TrackedExecution {
       this.claims.get(this.container.id)?.delete(this.tty);
     }
     this.tty = undefined;
+    this.cwd = undefined;
   }
 
   dispose(): void {
@@ -444,6 +488,14 @@ export class TerminalAgentTracker implements vscode.Disposable {
         this.tracked.delete(t);
       }),
     ];
+  }
+
+  /**
+   * A container terminal's current working directory inside the container,
+   * a few seconds stale at most; undefined until its pty has been found.
+   */
+  cwdFor(terminal: vscode.Terminal): string | undefined {
+    return this.tracked.get(terminal)?.cwd;
   }
 
   dispose(): void {
