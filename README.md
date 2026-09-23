@@ -6,13 +6,13 @@ Browse and edit files inside a running dev container from VS Code on the host �
 
 Registers a `devc-vscode://<container-id>/<path>` filesystem provider backed by `docker exec` (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`), and contributes a **Dev Containers** tree view into the Explorer panel.
 
-The tree is scoped to the window's workspace: each open host folder contributes at most one root — the running container that serves it, found by the devcontainer CLI's `devcontainer.local_folder` label and falling back to a bind-mount scan. Roots are labelled with the **host folder's basename**, not docker's generated container name, which appears as the subtitle.
+The tree is scoped to the window's workspace by a single rule: a running dev container gets a root when its project folder — the devcontainer CLI's `devcontainer.local_folder` label — is an open host folder **or sits under one**. So a container started for a subfolder gets its own root alongside the workspace folder's, and no unrelated dev container on the machine can appear. Roots are labelled with the **host folder's basename**, or `basename/path/to/subfolder` for a container serving a subfolder; docker's generated container name is the subtitle.
 
 Each root is the container's filesystem root, `/`. The workspace association decides *which* containers show up and what they are called; it does not narrow what you can browse, so `/etc` and `/usr` are a couple of clicks away just like the project directory.
 
-`docker events` is watched live, so roots appear when a container starts and vanish when it stops. `Show Container File Tree` can still reach a container this workspace has no bind mount for — it is pinned as an extra root for the session, and drops away when that container stops. In a window with no folder open there is nothing to scope to, so every running dev container is listed.
+`docker events` is watched live, so roots appear when a container starts and vanish when it stops. There is no way to add anything else to the tree: the rule above is the whole of it, so a window with no folder open shows nothing.
 
-Nothing is added to your workspace. The tree is a view, not a workspace folder, so no window reload, no multi-root conversion, and no dead container roots restored after a reload. If you do want a container folder in the native Explorer — for drag-and-drop against host files, or per-folder settings — use **Add Container Folder to Workspace**, which is the one place that still mutates the workspace.
+Nothing is added to your workspace. The tree is a view, not a workspace folder, so no window reload, no multi-root conversion, and no dead container roots restored after a reload. The extension never calls `updateWorkspaceFolders`.
 
 File paths printed in a container terminal become clickable links. Clicking a *file* opens it, jumping to the line and column when the output carries a `:line:col` suffix; clicking a *folder* focuses the tree and reveals it.
 
@@ -38,9 +38,7 @@ Deletes are permanent: a container has no trash, so the confirmation prompt is t
 
 | Command | Description |
 | --- | --- |
-| `Dev Container FS: Show Container File Tree` | Pick a container and a path, then reveal it in the tree |
 | `Dev Container FS: Refresh Container Files` | Re-read the tree |
-| `Dev Container FS: Add Container Folder to Workspace` | Add the selected container folder to the workspace as `[container] <name>` |
 | `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` (rejected on container folders) |
 
 `New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection.

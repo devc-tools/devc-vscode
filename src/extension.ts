@@ -1,9 +1,7 @@
 import * as cp from 'child_process';
 import * as posix from 'path/posix';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
-import { execDocker } from './docker';
 import {
   ContainerNode,
   ContainerTreeDataProvider,
@@ -22,11 +20,6 @@ import {
 } from './terminalLinks';
 
 const VIEW_ID = 'devc-vscode.containers';
-
-interface ContainerInfo {
-  id: string;
-  name: string;
-}
 
 /** Everything a terminal needs before a path printed in it can be resolved. */
 interface TerminalContext extends PathContext {
@@ -83,7 +76,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
   register('devc-vscode.refresh', () => treeProvider.refresh());
-  register('devc-vscode.showContainerFileTree', () => showContainerFileTree());
   register('devc-vscode.newFile', (node?: ContainerNode) =>
     createEntry(node, 'file')
   );
@@ -93,9 +85,6 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node));
   register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node));
   register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node));
-  register('devc-vscode.addToWorkspace', (node?: ContainerNode) =>
-    addToWorkspace(node)
-  );
   register('devc-vscode.openFolderInContainer', (uri: vscode.Uri) =>
     openFolderInContainer(uri)
   );
@@ -318,30 +307,6 @@ async function copyPath(node?: ContainerNode): Promise<void> {
   await vscode.env.clipboard.writeText(target.uri.path);
 }
 
-/**
- * Opt-in escape hatch to the native Explorer. This mutates the workspace and
- * can restart the extension host, which is acceptable only because the user
- * asked for it explicitly.
- */
-async function addToWorkspace(node?: ContainerNode): Promise<void> {
-  const target = targetNode(node);
-  if (!target || target.kind === 'file') {
-    return;
-  }
-  const name =
-    target.kind === 'container' ? target.name : posix.basename(target.uri.path);
-  const index = vscode.workspace.workspaceFolders?.length ?? 0;
-  const added = vscode.workspace.updateWorkspaceFolders(index, 0, {
-    uri: target.uri,
-    name: `[container] ${name}`,
-  });
-  if (!added) {
-    vscode.window.showErrorMessage(
-      `Could not add ${name} to the workspace — it may already be there.`
-    );
-  }
-}
-
 async function parentNodeOf(
   node: ContainerNode
 ): Promise<ContainerNode | undefined> {
@@ -382,46 +347,6 @@ async function revealInTree(
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
-
-async function showContainerFileTree(): Promise<void> {
-  const hostFolder = getHostFolders()[0];
-
-  let container: ContainerInfo | undefined;
-  try {
-    container = await pickContainer(hostFolder);
-  } catch (err) {
-    vscode.window.showErrorMessage((err as Error).message);
-    return;
-  }
-  if (!container) {
-    vscode.window.showErrorMessage(
-      'No running dev container found. Start one first (e.g. `devcontainer up --workspace-folder <path>`).'
-    );
-    return;
-  }
-
-  const guess = hostFolder ? `/workspaces/${path.basename(hostFolder)}` : '/';
-  const remotePath = await vscode.window.showInputBox({
-    prompt: `Path inside container ${container.name || container.id.slice(0, 12)}`,
-    value: guess,
-    validateInput: v =>
-      v.startsWith('/') ? undefined : 'Path must be absolute',
-  });
-  if (remotePath === undefined) {
-    return;
-  }
-
-  try {
-    await provider.stat(containerUri(container.id, remotePath));
-  } catch (err) {
-    vscode.window.showErrorMessage(
-      `Cannot open ${remotePath}: ${(err as Error).message}`
-    );
-    return;
-  }
-
-  await revealInTree(container.id, remotePath);
-}
 
 async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
   // The menu's when clause tests `resourceScheme != devc-vscode` rather than
@@ -606,77 +531,4 @@ function selectionFor(
     Math.max(0, (column ?? 1) - 1)
   );
   return new vscode.Range(position, position);
-}
-
-/**
- * Locate the dev container for the host workspace folder using the labels the
- * devcontainer CLI stamps on containers (devcontainer.local_folder). Falls back
- * to listing every container with devcontainer.config_file and letting the
- * user pick.
- */
-async function pickContainer(
-  hostFolder: string | undefined
-): Promise<ContainerInfo | undefined> {
-  const format = '{{.ID}} {{.Names}}';
-
-  if (hostFolder) {
-    const matches = parseContainers(
-      await ps([
-        '--filter',
-        `label=devcontainer.local_folder=${hostFolder}`,
-        '--format',
-        format,
-      ])
-    );
-    if (matches.length === 1) {
-      return matches[0];
-    }
-    if (matches.length > 1) {
-      return pickFrom(matches);
-    }
-  }
-
-  // Fallback: any running dev container on this host.
-  const all = parseContainers(
-    await ps(['--filter', 'label=devcontainer.config_file', '--format', format])
-  );
-  if (all.length === 0) {
-    return undefined;
-  }
-  return pickFrom(all);
-}
-
-async function ps(args: string[]): Promise<Buffer> {
-  const docker = getDockerCommand();
-  const res = await execDocker(['ps', ...args], undefined, docker);
-  if (res.exitCode !== 0) {
-    throw new Error(`docker ps failed: ${res.stderr.toString('utf8').trim()}`);
-  }
-  return res.stdout;
-}
-
-function parseContainers(stdout: Buffer): ContainerInfo[] {
-  return stdout
-    .toString('utf8')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .map(line => {
-      const [id, name = ''] = line.split(/\s/, 2);
-      return { id: id.trim(), name: name.trim() };
-    });
-}
-
-async function pickFrom(
-  containers: ContainerInfo[]
-): Promise<ContainerInfo | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    containers.map(c => ({
-      label: c.name || c.id.slice(0, 12),
-      description: c.id.slice(0, 12),
-      container: c,
-    })),
-    { placeHolder: 'Select the dev container to open' }
-  );
-  return picked?.container;
 }

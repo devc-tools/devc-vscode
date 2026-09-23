@@ -19,12 +19,6 @@ export interface ContainerInfo {
 export interface ContainerSource {
   /** Running dev containers that serve the current workspace, in display order. */
   listRunning(): Promise<ContainerInfo[]>;
-  /**
-   * Describe any running container, for roots reached by reveal rather than by
-   * match. Returns undefined when the container is not running, so a pinned
-   * root disappears once its container stops.
-   */
-  describe(containerId: string): Promise<ContainerInfo | undefined>;
 }
 
 /**
@@ -123,12 +117,6 @@ export class ContainerTreeDataProvider
 
   /** Container roots, cached so getParent can terminate without a docker call. */
   private readonly roots = new Map<string, ContainerNode>();
-  /**
-   * Containers reached by an explicit reveal rather than by matching the
-   * workspace. They stay as roots so "Show Container File Tree" can still
-   * surface a container this workspace has no bind mount for.
-   */
-  private readonly pinned = new Set<string>();
 
   constructor(
     private readonly source: ContainerSource,
@@ -233,11 +221,10 @@ export class ContainerTreeDataProvider
   // --- reveal support
 
   /**
-   * Build a node for an arbitrary container path, pinning its container so the
-   * getParent chain has a root to terminate at.
+   * Build a node for an arbitrary container path. The getParent chain
+   * terminates at the container's root, which listRoots supplies on demand.
    */
   async nodeFor(containerId: string, path: string): Promise<ContainerNode> {
-    this.pinned.add(containerId);
     let type = vscode.FileType.Directory;
     try {
       type = (await this.files.stat(containerUri(containerId, path))).type;
@@ -252,28 +239,9 @@ export class ContainerTreeDataProvider
   }
 
   private async listRoots(): Promise<ContainerNode[]> {
-    const matched = await this.source.listRunning();
-    const byId = new Map(matched.map(c => [c.id, c]));
-    for (const id of this.pinned) {
-      if (!byId.has(id)) {
-        let described: ContainerInfo | undefined;
-        try {
-          described = await this.source.describe(id);
-        } catch {
-          described = undefined;
-        }
-        if (described) {
-          byId.set(id, described);
-        } else {
-          // Stopped or gone; drop the pin rather than show a dead root.
-          this.pinned.delete(id);
-        }
-      }
-    }
-
     this.roots.clear();
     const nodes: ContainerNode[] = [];
-    for (const c of byId.values()) {
+    for (const c of await this.source.listRunning()) {
       const node: ContainerNode = {
         kind: 'container',
         containerId: c.id,
@@ -542,22 +510,6 @@ export async function findContainerForHostFolder(
   return undefined;
 }
 
-/** Container name without docker's leading slash, empty if it cannot be read. */
-export async function getContainerName(
-  containerId: string,
-  dockerCommand: string
-): Promise<string> {
-  const res = await execDocker(
-    ['inspect', '--format', '{{.Name}}', containerId],
-    undefined,
-    dockerCommand
-  );
-  if (res.exitCode !== 0) {
-    return '';
-  }
-  return res.stdout.toString('utf8').trim().replace(/^\//, '');
-}
-
 /**
  * The container user's home directory, for expanding ~ in terminal links.
  * Undefined when it cannot be read, which leaves ~ paths unresolved rather
@@ -584,12 +536,68 @@ export async function getContainerHome(
   return home.startsWith('/') ? home : undefined;
 }
 
+/** A running dev container and the host folder its project lives in. */
+interface LabelledContainer {
+  id: string;
+  containerName: string;
+  /** The devcontainer.local_folder label: the project folder on the host. */
+  localFolder: string;
+}
+
+/**
+ * Every running dev container that records a project folder, in one call.
+ * Tab-delimited because host paths can contain spaces.
+ */
+async function listLabelledDevContainers(
+  docker: string
+): Promise<LabelledContainer[]> {
+  const res = await execDocker(
+    [
+      'ps',
+      '--filter',
+      'label=devcontainer.local_folder',
+      '--format',
+      '{{.ID}}\t{{.Names}}\t{{.Label "devcontainer.local_folder"}}',
+    ],
+    undefined,
+    docker
+  );
+  if (res.exitCode !== 0) {
+    return [];
+  }
+  return res.stdout
+    .toString('utf8')
+    .split('\n')
+    .map(line => line.split('\t').map(field => field.trim()))
+    .filter(fields => fields.length >= 3 && fields[0] && fields[2])
+    .map(([id, containerName, localFolder]) => ({
+      id,
+      containerName,
+      localFolder,
+    }));
+}
+
+/**
+ * The tree label for a container's root: the workspace folder's basename, plus
+ * the path down to the project when the container serves a subfolder rather
+ * than the workspace folder itself.
+ */
+export function rootLabel(hostFolder: string, localFolder: string): string {
+  const base = posix.basename(hostFolder) || hostFolder;
+  if (normalizePath(hostFolder) === normalizePath(localFolder)) {
+    return base;
+  }
+  return posix.join(base, posix.relative(hostFolder, localFolder));
+}
+
 /**
  * Resolves the containers serving the current workspace over the Docker CLI.
  *
- * Roots are scoped to open host folders and labelled with the host folder's
- * basename — a window showing one project should not list every dev container
- * running on the machine under its raw docker name.
+ * A container is in scope when its project folder — the devcontainer.local_folder
+ * label — is an open workspace folder or sits under one. That covers a container
+ * started for a subfolder, and excludes every unrelated dev container on the
+ * machine. Containers that carry no such label are not dev containers this
+ * workspace owns, so they are left out rather than guessed at from their mounts.
  */
 export class DockerContainerSource implements ContainerSource {
   constructor(
@@ -598,95 +606,30 @@ export class DockerContainerSource implements ContainerSource {
   ) {}
 
   async listRunning(): Promise<ContainerInfo[]> {
-    const docker = this.dockerCommand();
     const hostFolders = this.hostFolders();
     if (hostFolders.length === 0) {
-      // Empty window: nothing to scope to, so offer every dev container.
-      return this.listAllDevContainers(docker);
+      // Nothing to scope to, so nothing is in scope.
+      return [];
     }
 
     const found = new Map<string, ContainerInfo>();
-    for (const hostFolder of hostFolders) {
-      const id = await findContainerForHostFolder(hostFolder, docker);
-      if (!id || found.has(id)) {
+    for (const container of await listLabelledDevContainers(
+      this.dockerCommand()
+    )) {
+      // The most specific workspace folder wins, so a nested folder labels its
+      // containers relative to itself rather than to its parent.
+      const owner = hostFolders
+        .filter(folder => isPathWithin(folder, container.localFolder))
+        .sort((a, b) => b.length - a.length)[0];
+      if (owner === undefined || found.has(container.id)) {
         continue;
       }
-      found.set(id, {
-        id,
-        name: posix.basename(hostFolder) || hostFolder,
-        containerName: await getContainerName(id, docker),
+      found.set(container.id, {
+        id: container.id,
+        name: rootLabel(owner, container.localFolder),
+        containerName: container.containerName,
       });
     }
-    return [...found.values()];
-  }
-
-  async describe(containerId: string): Promise<ContainerInfo | undefined> {
-    const docker = this.dockerCommand();
-    if (!(await this.isRunning(containerId, docker))) {
-      return undefined;
-    }
-    for (const hostFolder of this.hostFolders()) {
-      const match = await findMatchingBindMount(
-        containerId,
-        hostFolder,
-        docker
-      );
-      if (match) {
-        return {
-          id: containerId,
-          name: posix.basename(hostFolder) || hostFolder,
-          containerName: match.containerName,
-        };
-      }
-    }
-    const containerName = await getContainerName(containerId, docker);
-    return {
-      id: containerId,
-      name: containerName || containerId.slice(0, 12),
-      containerName,
-    };
-  }
-
-  private async isRunning(
-    containerId: string,
-    docker: string
-  ): Promise<boolean> {
-    const res = await execDocker(
-      ['ps', '-q', '--filter', `id=${containerId}`],
-      undefined,
-      docker
-    );
-    return res.exitCode === 0 && res.stdout.toString('utf8').trim().length > 0;
-  }
-
-  private async listAllDevContainers(docker: string): Promise<ContainerInfo[]> {
-    const res = await execDocker(
-      [
-        'ps',
-        '--filter',
-        'label=devcontainer.config_file',
-        '--format',
-        '{{.ID}} {{.Names}}',
-      ],
-      undefined,
-      docker
-    );
-    if (res.exitCode !== 0) {
-      return [];
-    }
-    return res.stdout
-      .toString('utf8')
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-      .map(line => {
-        const [id, name = ''] = line.split(/\s+/, 2);
-        return {
-          id: id.trim(),
-          name: name.trim() || id.trim().slice(0, 12),
-          containerName: name.trim(),
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 }

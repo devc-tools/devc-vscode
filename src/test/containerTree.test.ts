@@ -9,6 +9,7 @@ import {
   containerUri,
   isPathWithin,
   parseUriList,
+  rootLabel,
   sortEntries,
 } from '../containerTree';
 
@@ -133,19 +134,9 @@ class FakeFileOps implements FileOps {
 }
 
 class FakeContainerSource implements ContainerSource {
-  /** Containers reachable by describe(), whether or not they match the workspace. */
-  running: ContainerInfo[];
-  constructor(
-    private readonly containers: ContainerInfo[],
-    running?: ContainerInfo[]
-  ) {
-    this.running = running ?? containers;
-  }
+  constructor(public containers: ContainerInfo[]) {}
   async listRunning(): Promise<ContainerInfo[]> {
     return this.containers;
-  }
-  async describe(containerId: string): Promise<ContainerInfo | undefined> {
-    return this.running.find(c => c.id === containerId);
   }
 }
 
@@ -172,13 +163,8 @@ function fixture(confirm = async () => true) {
     name: 'app',
     containerName: 'app-container',
   };
-  const c2: ContainerInfo = {
-    id: 'c2',
-    name: 'srv',
-    containerName: 'other-container',
-  };
-  // Only c1 matches the workspace; c2 is running but reachable only by reveal.
-  const source = new FakeContainerSource([c1], [c1, c2]);
+  // c2 is running but out of scope, so it is never a root.
+  const source = new FakeContainerSource([c1]);
   const provider = new ContainerTreeDataProvider(source, files, confirm);
   return { files, provider, source };
 }
@@ -207,22 +193,9 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
     );
   });
 
-  test('a revealed container is pinned as an extra root', async () => {
+  test('revealing a container that is not in scope adds no root', async () => {
     const { provider } = fixture();
-    assert.strictEqual((await provider.getChildren()).length, 1);
     await provider.nodeFor('c2', '/srv');
-    const roots = await provider.getChildren();
-    assert.deepStrictEqual(
-      roots.map(r => r.containerId),
-      ['c1', 'c2']
-    );
-  });
-
-  test('a pinned root disappears once its container stops', async () => {
-    const { provider, source } = fixture();
-    await provider.nodeFor('c2', '/srv');
-    assert.strictEqual((await provider.getChildren()).length, 2);
-    source.running = source.running.filter(c => c.id !== 'c2');
     assert.deepStrictEqual(
       (await provider.getChildren()).map(r => r.containerId),
       ['c1']
@@ -443,6 +416,33 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
 
     test('parseUriList tolerates bare LF', () => {
       assert.strictEqual(parseUriList('file:///a\nfile:///b').length, 2);
+    });
+
+    test('rootLabel names a workspace-folder container by its basename', () => {
+      assert.strictEqual(
+        rootLabel('/Users/me/code/app', '/Users/me/code/app'),
+        'app'
+      );
+      assert.strictEqual(
+        rootLabel('/Users/me/code/app/', '/Users/me/code/app'),
+        'app'
+      );
+    });
+
+    test('rootLabel names a subfolder container relative to the folder', () => {
+      assert.strictEqual(
+        rootLabel('/Users/me/code/app', '/Users/me/code/app/services/api'),
+        'app/services/api'
+      );
+    });
+
+    test('isPathWithin scopes containers to workspace folders and children', () => {
+      // The rule listRunning applies to devcontainer.local_folder.
+      const folder = '/Users/me/code/app';
+      assert.ok(isPathWithin(folder, folder));
+      assert.ok(isPathWithin(folder, '/Users/me/code/app/services/api'));
+      assert.ok(!isPathWithin(folder, '/Users/me/code/other'));
+      assert.ok(!isPathWithin(folder, '/Users/me/code/app-sibling'));
     });
 
     test('isPathWithin does not match sibling prefixes', () => {

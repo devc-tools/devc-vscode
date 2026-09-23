@@ -36,11 +36,6 @@
     },
     "commands": [
       {
-        "command": "devc-vscode.showContainerFileTree",
-        "title": "Show Container File Tree",
-        "category": "Dev Container FS"
-      },
-      {
         "command": "devc-vscode.refresh",
         "title": "Refresh Container Files",
         "category": "Dev Container FS",
@@ -74,11 +69,6 @@
       {
         "command": "devc-vscode.copyPath",
         "title": "Copy Container Path",
-        "category": "Dev Container FS"
-      },
-      {
-        "command": "devc-vscode.addToWorkspace",
-        "title": "Add Container Folder to Workspace",
         "category": "Dev Container FS"
       }
     ],
@@ -115,11 +105,6 @@
           "command": "devc-vscode.copyPath",
           "when": "view == devc-vscode.containers",
           "group": "3_copy"
-        },
-        {
-          "command": "devc-vscode.addToWorkspace",
-          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
-          "group": "4_workspace"
         }
       ],
       "explorer/context": [

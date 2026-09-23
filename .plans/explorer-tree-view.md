@@ -9,8 +9,10 @@ membership, so no capability is lost — see "What this removes" below.
 
 ## Decisions
 
-**Roots are running dev containers, discovered live.** The tree lists every running container
-matching `label=devcontainer.config_file`. There is no attach/detach concept, so the
+**Roots are running dev containers, discovered live and scoped to the workspace.** A
+container gets a root when its `devcontainer.local_folder` label is an open workspace folder
+or sits under one, so a container started for a subfolder gets its own root and no unrelated
+dev container can appear. Nothing else can be added to the tree. There is no attach/detach concept, so the
 `devc-vscode.autoAttach` setting is **removed**. Containers appear when they start and vanish
 when they stop, driven by the existing `docker events` watcher.
 
@@ -18,14 +20,13 @@ when they stop, driven by the existing `docker events` watcher.
 source matches an open host workspace folder, else `/`. `findMatchingBindMount` already
 computes this and returns `destPath`.
 
-**The workspace-folder path survives as an explicit command.** `devc-vscode.addToWorkspace`
-keeps `updateWorkspaceFolders` for users who want the native Explorer. Because the user
-invoked it, an extension-host restart is acceptable and the `globalState` reveal-replay hack
-is not needed.
+**The workspace-folder path is dropped entirely.** No command calls
+`updateWorkspaceFolders`, so the extension can never restart the extension host and the
+`globalState` reveal-replay hack is not needed.
 
 **Dependencies are constructor-injected, so the tree is testable without Docker.**
-`ContainerTreeDataProvider` takes a `ContainerSource` (`listRunning(): Promise<ContainerInfo[]>`,
-`basePath(id): Promise<string>`) and a `FileOps` (`readDirectory`, `stat`, `rename`, `delete`,
+`ContainerTreeDataProvider` takes a `ContainerSource` (`listRunning(): Promise<ContainerInfo[]>`)
+and a `FileOps` (`readDirectory`, `stat`, `rename`, `delete`,
 `createDirectory`, `readFile`, `writeFile` over `vscode.Uri`) rather than calling `execDocker`
 or `vscode.workspace.fs` directly. Production wires these to `execDocker` and
 `vscode.workspace.fs`; tests pass fakes. This is what lets sort order, `getParent`, and drop
@@ -69,14 +70,8 @@ Container root items set `description` to the short container id (first 12 chars
 | `devc-vscode.rename` | `Rename` | `Dev Container FS` |
 | `devc-vscode.delete` | `Delete` | `Dev Container FS` |
 | `devc-vscode.copyPath` | `Copy Container Path` | `Dev Container FS` |
-| `devc-vscode.addToWorkspace` | `Add Container Folder to Workspace` | `Dev Container FS` |
 | `devc-vscode.refresh` | `Refresh Container Files` | `Dev Container FS` |
 | `devc-vscode.openFolderInContainer` | `Open Folder in Container` | `Dev Container FS` |
-| `devc-vscode.showContainerFileTree` | `Show Container File Tree` | `Dev Container FS` |
-
-`devc-vscode.showContainerFileTree` keeps its id but changes behavior: it prompts for a
-container and path as it does today, then focuses the view and reveals that path. It no
-longer calls `updateWorkspaceFolders`.
 
 `devc-vscode.refresh` fires the tree's `onDidChangeTreeData` instead of walking
 `workspaceFolders`.
@@ -97,8 +92,7 @@ selection, item commands show `No container file selected.` via `showErrorMessag
     { "command": "devc-vscode.newFolder", "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/", "group": "1_new" },
     { "command": "devc-vscode.rename",    "when": "view == devc-vscode.containers && viewItem != container", "group": "2_edit" },
     { "command": "devc-vscode.delete",    "when": "view == devc-vscode.containers && viewItem != container", "group": "2_edit" },
-    { "command": "devc-vscode.copyPath",  "when": "view == devc-vscode.containers", "group": "3_copy" },
-    { "command": "devc-vscode.addToWorkspace", "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/", "group": "4_workspace" }
+    { "command": "devc-vscode.copyPath",  "when": "view == devc-vscode.containers", "group": "3_copy" }
   ],
   "explorer/context": [
     { "command": "devc-vscode.openFolderInContainer", "when": "explorerResourceIsFolder && resourceScheme != devc-vscode" }
@@ -197,15 +191,13 @@ the `docker events` watcher and terminal link provider.
 - [x] Implement `devc-vscode.rename` (`showInputBox` seeded with the current basename, then `workspace.fs.rename`)
 - [x] Implement `devc-vscode.delete` (modal confirm, then `workspace.fs.delete` with `recursive: true` for directories)
 - [x] Implement `devc-vscode.copyPath` (`env.clipboard.writeText(uri.path)`)
-- [x] Implement `devc-vscode.addToWorkspace` retaining `updateWorkspaceFolders` and the `[container] <name>` label
-- [x] Rewrite `devc-vscode.showContainerFileTree` to focus and reveal instead of adding a workspace folder
 - [x] Rewrite `devc-vscode.refresh` to refresh the tree
 - [x] Rewrite `revealContainerFolder` (terminal folder links) to focus the view and `treeView.reveal`, deleting the `globalState` replay path
 - [x] Reduce `onContainerStarted` / `onContainerStopped` to `treeProvider.refresh()`
 - [x] Delete every symbol listed under "What this removes"
 - [x] Add `src/test/containerTree.test.ts` covering child listing, sort order, `getParent` round-trip, `getTreeItem` contextValue mapping, and drop-target resolution against **fake** `ContainerSource` / `FileOps` — no Docker
 - [x] Update `README.md`: replace the attach/autoAttach narrative with the tree view, refresh the commands and settings tables, and drop the extension-host-restart paragraph
-- [x] Add a `CHANGELOG.md` entry noting the removed `autoAttach` setting and the changed `showContainerFileTree` behavior
+- [x] Add a `CHANGELOG.md` entry noting the removed `autoAttach` setting and the removed `showContainerFileTree` command
 
 ## Validation
 
@@ -224,7 +216,7 @@ container-attached window.
 - [x] `npm run lint` exits 0
 - [x] `grep -c autoAttach package.json src/*.ts README.md` reports 0 matches in all files
 - [x] `grep -c pendingReveal src/extension.ts` reports 0
-- [x] `grep -n updateWorkspaceFolders src/extension.ts` shows exactly one call site, inside the `devc-vscode.addToWorkspace` handler
+- [x] `grep -c updateWorkspaceFolders src/extension.ts` reports 0
 - [x] `grep -n execDocker src/containerTree.ts` shows matches only in `DockerContainerSource` and the module-level `findMatchingBindMount` it calls — never inside `ContainerTreeDataProvider`
 - [x] `npx vsce package` produces a `.vsix` without warnings about missing contribution points
 - [x] `sudo apt-get install -y xvfb` once, then `xvfb-run -a npm test` exits 0 (first run downloads VS Code)
@@ -242,14 +234,13 @@ container-attached window.
   - [ ] Dragging a file onto another directory in the same container moves it; dragging a host file from the native Explorer into the tree copies it in
   - [ ] Clicking a folder path in an `Open Folder in Container` terminal reveals it in the tree with no window reload
   - [ ] `docker stop <id>` removes the root from the tree within a few seconds; `docker start <id>` brings it back
-  - [ ] `Add Container Folder to Workspace` adds the `[container] <name>` root to the native Explorer
 
 ## Relevant Files
 
 | File | Change |
 | --- | --- |
 | `src/containerTree.ts` | **New.** `ContainerNode`, `ContainerTreeDataProvider`, drag-and-drop controller |
-| `src/extension.ts` | Create the tree view; add the six file-operation commands; rewrite `showContainerFileTree`, `refresh`, `revealContainerFolder`, `onContainerStarted`, `onContainerStopped`; delete the workspace-folder machinery |
+| `src/extension.ts` | Create the tree view; add the five file-operation commands; rewrite `refresh`, `revealContainerFolder`, `onContainerStarted`, `onContainerStopped`; delete the workspace-folder machinery and `showContainerFileTree` |
 | `src/devcontainerFs.ts` | Unchanged — listed because the tree depends on its exact `FileSystemError` codes for error messages |
 | `src/docker.ts` | Unchanged — `execDocker` is reused for container discovery |
 | `src/test/containerTree.test.ts` | **New.** Tree provider tests against fake `ContainerSource` / `FileOps` — runnable without Docker |
