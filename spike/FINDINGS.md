@@ -20,19 +20,32 @@ Measured in the real test host (`SPIKE=1 SPIKE_CONTAINER=<id> npx vscode-test --
    that container session, including an agent the user starts, flows through it.
 2. `@xterm/headless` (MIT, pure JS, zero deps — xterm.js core, as VS Code uses) rebuilds
    the screen.
-3. Which agent: one `docker exec` lists herdr's cached manifest ids
-   (`~/.local/state/herdr/agent-detection/remote/*.toml`, 20 agents) and `ps`; a process
-   whose program name matches a manifest id, and is not under `herdr server`, is a
-   candidate. Screen size comes from `stty size < /proc/<pid>/fd/0` (docker forwards
-   resizes), since VS Code won't give dimensions.
-4. What state: `herdr agent explain --file - --agent <id> --format json` in the
-   container classifies the screen with herdr's own rules. Only a *matched rule* counts
-   (herdr otherwise falls back to idle), so a plain shell next to an agent elsewhere
-   isn't mislabeled.
+3. Which pty: one `docker exec` lists herdr's cached manifest ids
+   (`~/.local/state/herdr/agent-detection/remote/*.toml`, 20 agents), every process with
+   its tty, process group, foreground group and age (`ps etimes`), and each pty's
+   `stty size`. The terminal adopts the pty whose oldest process is no older than its
+   command and that no other terminal has claimed. Ages are relative, so host and
+   container clocks never need to agree.
+4. Which agent: that pty's foreground process whose program name matches a manifest id.
+   herdr's own panes have their own ptys, so they never collide with a VS Code terminal.
+   Size is that pty's (docker forwards resizes), since VS Code won't give dimensions.
+5. What state: `herdr agent explain --file - --agent <id> --format json` in the
+   container classifies the screen with herdr's own rules. With the agent known from the
+   pty itself, herdr's fallback (no rule matched → idle) is used as-is, as herdr does.
 
-End-to-end result (fake `claude` using real Claude UI strings, in a container terminal):
-`working (3.8s) → blocked (6.5s) → idle (9.7s) → none after exit`, ~0.3–0.7s behind the
-frame.
+Each step logs to the **Dev Container Agents** output channel; when herdr falls back,
+the rebuilt screen is logged too, which is what to look at if a state looks wrong.
+
+End-to-end result (fake `claude` using real Claude UI strings, drawing full-width rules
+like Claude's prompt box, with a decoy `claude` already running on another pty at another
+size): adopted its own pty, `working → blocked → idle → none after exit`, each via a
+matched rule, ~0.3–0.7s behind the frame.
+
+First real-Claude try failed: the idle screen after a reply showed "no agents". The
+first version picked the agent (and so the screen size) per container; `devc-dev` had
+five `claude` processes, the first at 114 cols vs. the user's 110, so Claude's
+full-width prompt box wrapped in the rebuilt screen and no idle rule matched. Per-pty
+adoption fixes identity and size together.
 
 ## Trade-offs vs. Claude hooks
 
@@ -47,9 +60,8 @@ frame.
 
 - Needs shell integration in the host terminal; without it no execution events fire,
   so nothing is detected (fails quiet, not wrong).
-- Agent identity is per container, not per terminal. Two different agents in two
-  terminals of one container both become candidates; each screen is still classified
-  on its own, but pty size is taken from the first candidate.
+- pty adoption is by timing: two terminals opened into one container within the same
+  second could swap ptys. Container-side tools needed: `ps` (procps) and `stty`.
 - Depends on herdr in the container as the rule engine. Porting the manifest evaluator to
   TS would remove that, but means a TOML parser and translating Rust regex syntax
   (`\x{...}`, inline `(?i)`, `(?m)`) — and herdr's license would need checking before

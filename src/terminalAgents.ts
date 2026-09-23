@@ -13,30 +13,42 @@ import { TerminalScreen } from './terminalScreen';
  *     command the terminal was opened with (`devc ...`) writes, including
  *     whatever agent the user starts inside that container shell.
  *  2. Screen: a headless xterm rebuilds the rendered screen from it.
- *  3. Which agent: processes in the container whose program name matches one
- *     of herdr's detection manifests, excluding those herdr itself runs.
- *  4. What state: the container's herdr classifies the screen with
+ *  3. Which pty: the one in the container opened after the command started —
+ *     the terminal's own session, so identity and size are per terminal.
+ *  4. Which agent: that pty's foreground process, when its program name
+ *     matches one of herdr's detection manifests.
+ *  5. What state: the container's herdr classifies the screen with
  *     `herdr agent explain --file`, using the same rules herdr's sidebar uses.
  */
 
-/** A running agent the container's herdr has a manifest for. */
-export interface AgentProcess {
-  agent: string;
-  pid: number;
-  /** The size of the agent's pty, which tracks the VS Code terminal's. */
+/** One pty in the container, as the probe saw it. */
+export interface TtyInfo {
+  /** Age of the pty's oldest process: when the session was opened. */
+  ageSeconds: number;
+  /** The pty's size, which tracks the VS Code terminal's (docker forwards resizes). */
   size?: { rows: number; cols: number };
+  /** The agent running on it, preferring the foreground process group. */
+  agent?: { agent: string; pid: number };
+}
+
+export interface ContainerProbe {
+  ttys: Map<string, TtyInfo>;
 }
 
 /**
- * Lists herdr's manifest ids, then every process. One exec for both; herdr
- * caches a manifest per agent it knows how to detect.
+ * herdr's manifest ids, every process with its tty and foreground group, and
+ * each pty's size, in one exec. herdr caches a manifest per agent it knows how
+ * to detect, so those ids are the agents worth looking for.
  */
 const PROBE_SCRIPT = `
 ls "$HOME/.local/state/herdr/agent-detection/remote" 2>/dev/null | sed -n 's/\\.toml$//p'
 echo ---
-ps -eo pid=,ppid=,args= 2>/dev/null
+ps -eo pid=,tty=,pgid=,tpgid=,etimes=,args= 2>/dev/null
+echo ---
+for t in $(ps -eo tty= | sort -u); do
+  case $t in pts/*) printf '%s %s\\n' "$t" "$(stty size < /dev/$t 2>/dev/null)" ;; esac
+done
 `;
-
 /** Classifies stdin once per agent id given as an argument. */
 const EXPLAIN_SCRIPT = `
 PATH="$HOME/.local/bin:$PATH"
@@ -69,47 +81,69 @@ function programName(args: string): string | undefined {
   return name || undefined;
 }
 
-/**
- * Agents running in a container, from PROBE_SCRIPT output. Processes under a
- * herdr server are left out: herdr already reports those, and the terminal
- * attached to herdr shows herdr's UI rather than the agent's screen.
- */
-export function parseProbe(output: string): AgentProcess[] {
-  const [manifestPart, psPart = ''] = output.split(/^---$/m);
+/** Parse PROBE_SCRIPT output into the container's ptys. */
+export function parseProbe(output: string): ContainerProbe {
+  const [manifestPart = '', psPart = '', sizePart = ''] =
+    output.split(/^---$/m);
   const known = new Set(
     manifestPart
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean)
   );
-  const procs = new Map<number, { ppid: number; name?: string }>();
+
+  const ttys = new Map<string, TtyInfo>();
+  const agents = new Map<string, { agent: string; pid: number; fg: boolean }>();
   for (const line of psPart.split('\n')) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (m) {
-      procs.set(Number(m[1]), { ppid: Number(m[2]), name: programName(m[3]) });
+    const m = /^\s*(\d+)\s+(\S+)\s+(\d+)\s+(-?\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!m || !m[2].startsWith('pts/')) {
+      continue;
     }
-  }
-  const underHerdr = (pid: number): boolean => {
-    for (let p = procs.get(pid)?.ppid; p && procs.has(p);) {
-      const proc = procs.get(p)!;
-      if (proc.name === 'herdr') {
-        return true;
-      }
-      p = proc.ppid;
-    }
-    return false;
-  };
-  const found: AgentProcess[] = [];
-  const seen = new Set<string>();
-  for (const [pid, proc] of procs) {
-    if (proc.name && known.has(proc.name) && !underHerdr(pid)) {
-      if (!seen.has(proc.name)) {
-        seen.add(proc.name);
-        found.push({ agent: proc.name, pid });
+    const [, pid, tty, pgid, tpgid, etimes, args] = m;
+    const info = ttys.get(tty) ?? { ageSeconds: 0 };
+    info.ageSeconds = Math.max(info.ageSeconds, Number(etimes));
+    ttys.set(tty, info);
+
+    const name = programName(args);
+    if (name && known.has(name)) {
+      const fg = pgid === tpgid;
+      const current = agents.get(tty);
+      if (!current || (fg && !current.fg)) {
+        agents.set(tty, { agent: name, pid: Number(pid), fg });
       }
     }
   }
-  return found;
+  for (const [tty, { agent, pid }] of agents) {
+    ttys.get(tty)!.agent = { agent, pid };
+  }
+  for (const line of sizePart.split('\n')) {
+    const m = /^(pts\/\d+) (\d+) (\d+)$/.exec(line.trim());
+    const info = m && ttys.get(m[1]);
+    if (info) {
+      info.size = { rows: Number(m[2]), cols: Number(m[3]) };
+    }
+  }
+  return { ttys };
+}
+
+/**
+ * The pty a terminal's command opened: one whose oldest process is no older
+ * than the command, and not already claimed by another terminal. Ages are
+ * relative, so host and container clocks never need to agree.
+ */
+export function adoptTty(
+  probe: ContainerProbe,
+  commandAgeSeconds: number,
+  claimed: ReadonlySet<string>
+): string | undefined {
+  const candidates = [...probe.ttys]
+    .filter(
+      ([tty, info]) =>
+        !claimed.has(tty) && info.ageSeconds <= commandAgeSeconds + 1
+    )
+    // The oldest qualifying session opened closest to the command.
+    .sort(([, a], [, b]) => b.ageSeconds - a.ageSeconds);
+  return candidates[0]?.[0];
 }
 
 export interface Classification {
@@ -138,96 +172,48 @@ export function parseExplain(line: string): Classification | undefined {
   }
 }
 
-/**
- * The agent a screen belongs to. Only a matched rule counts: herdr falls back
- * to "idle" for any screen it cannot place, and a plain shell prompt next to
- * an agent in another terminal must not show up as that agent.
- */
-export function pickClassification(
-  results: Classification[]
-): Classification | undefined {
-  return results.find(r => r.rule !== undefined);
+function userArgs(user: string | undefined): string[] {
+  return user ? ['-u', user] : [];
 }
 
-export async function probeAgents(
+export async function probeContainer(
   containerId: string,
   user: string | undefined,
   dockerCommand: string
-): Promise<AgentProcess[]> {
+): Promise<ContainerProbe | undefined> {
   const res = await execDocker(
-    [
-      'exec',
-      ...(user ? ['-u', user] : []),
-      containerId,
-      'sh',
-      '-c',
-      PROBE_SCRIPT,
-    ],
+    ['exec', ...userArgs(user), containerId, 'sh', '-c', PROBE_SCRIPT],
     undefined,
     dockerCommand
   );
-  if (res.exitCode !== 0) {
-    return [];
-  }
-  const agents = parseProbe(res.stdout.toString('utf8'));
-  if (agents.length === 0) {
-    return agents;
-  }
-  // Stable VS Code API exposes no terminal dimensions, but `docker exec -t`
-  // forwards every resize to the pty inside, so ask the agent's own pty.
-  const sizes = await execDocker(
-    [
-      'exec',
-      ...(user ? ['-u', user] : []),
-      containerId,
-      'sh',
-      '-c',
-      'for pid in "$@"; do stty size < /proc/$pid/fd/0 2>/dev/null || echo; done',
-      'sh',
-      ...agents.map(a => String(a.pid)),
-    ],
-    undefined,
-    dockerCommand
-  );
-  sizes.stdout
-    .toString('utf8')
-    .split('\n')
-    .forEach((line, i) => {
-      const m = /^(\d+) (\d+)$/.exec(line.trim());
-      if (m && agents[i]) {
-        agents[i].size = { rows: Number(m[1]), cols: Number(m[2]) };
-      }
-    });
-  return agents;
+  return res.exitCode === 0
+    ? parseProbe(res.stdout.toString('utf8'))
+    : undefined;
 }
 
 export async function classifyScreen(
   containerId: string,
   user: string | undefined,
-  agents: string[],
+  agent: string,
   screen: string,
   dockerCommand: string
-): Promise<Classification[]> {
+): Promise<Classification | undefined> {
   const res = await execDocker(
     [
       'exec',
       '-i',
-      ...(user ? ['-u', user] : []),
+      ...userArgs(user),
       containerId,
       'sh',
       '-c',
       EXPLAIN_SCRIPT,
       'sh',
-      ...agents,
+      agent,
     ],
     Buffer.from(screen, 'utf8'),
     dockerCommand
   );
-  return res.stdout
-    .toString('utf8')
-    .split('\n')
-    .map(parseExplain)
-    .filter((c): c is Classification => c !== undefined);
+  return parseExplain(res.stdout.toString('utf8').split('\n')[0] ?? '');
 }
 
 export interface TerminalAgentDeps {
@@ -236,51 +222,53 @@ export interface TerminalAgentDeps {
   resolveContainer(
     terminal: vscode.Terminal
   ): Promise<{ id: string; user: string | undefined } | undefined>;
-  probe(containerId: string, user: string | undefined): Promise<AgentProcess[]>;
+  probe(
+    containerId: string,
+    user: string | undefined
+  ): Promise<ContainerProbe | undefined>;
   classify(
     containerId: string,
     user: string | undefined,
-    agents: string[],
+    agent: string,
     screen: string
-  ): Promise<Classification[]>;
+  ): Promise<Classification | undefined>;
   /** Called with the terminal's current agent, or undefined when it has none. */
   report(
     terminal: vscode.Terminal,
     containerId: string,
     agent?: AgentInfo
   ): void;
+  log(message: string): void;
 }
 
-/** How long a container's process list is trusted. */
-const PROBE_TTL_MS = 5000;
 /** Output settles for this long before the screen is classified. */
 const SETTLE_MS = 300;
-/** Re-check a quiet screen this often, so a finished agent is noticed. */
-const IDLE_RECHECK_MS = 5000;
+/** Re-check a quiet terminal this often: a pty to adopt, an agent exiting. */
+const RECHECK_MS = 3000;
 
 /** Reads one command's output and keeps its agent status current. */
 class TrackedExecution {
-  private readonly screen: TerminalScreen;
+  private readonly screen = new TerminalScreen();
+  private readonly startedAt = Date.now();
   private timer: NodeJS.Timeout | undefined;
   private evaluating = false;
   private dirty = false;
   private disposed = false;
-  private status: AgentStatus | undefined;
   private container: { id: string; user: string | undefined } | undefined;
+  private tty: string | undefined;
+  private last: string | undefined;
 
   constructor(
     private readonly terminal: vscode.Terminal,
     execution: vscode.TerminalShellExecution,
     private readonly deps: TerminalAgentDeps,
-    private readonly probes: Map<
-      string,
-      { at: number; agents: Promise<AgentProcess[]> }
-    >
+    /** ptys already owned by some terminal, by container. */
+    private readonly claims: Map<string, Set<string>>
   ) {
-    this.screen = new TerminalScreen();
     // read() only yields data written after it is first called.
     const stream = execution.read();
     this.pump(stream).finally(() => this.dispose());
+    this.schedule(0);
   }
 
   private async pump(stream: AsyncIterable<string>): Promise<void> {
@@ -301,6 +289,15 @@ class TrackedExecution {
     this.timer = setTimeout(() => this.evaluate(), ms);
   }
 
+  private claimed(id: string): Set<string> {
+    let set = this.claims.get(id);
+    if (!set) {
+      set = new Set();
+      this.claims.set(id, set);
+    }
+    return set;
+  }
+
   private async evaluate(): Promise<void> {
     if (this.disposed || this.evaluating) {
       return;
@@ -313,59 +310,82 @@ class TrackedExecution {
         return;
       }
       const { id, user } = this.container;
-      const agents = await this.agentsIn(id, user);
-      // With several agents the terminal's own is unknown; any size beats
-      // the default until they differ.
-      const size = agents.find(a => a.size)?.size;
-      if (size) {
-        this.screen.resize(size.cols, size.rows);
+      const probe = await this.deps.probe(id, user);
+      if (!probe || this.disposed) {
+        return;
       }
-      const pick = agents.length
-        ? pickClassification(
-            await this.deps.classify(
-              id,
-              user,
-              agents.map(a => a.agent),
-              this.screen.text()
-            )
+
+      if (this.tty && !probe.ttys.has(this.tty)) {
+        this.deps.log(`${this.terminal.name}: ${this.tty} closed`);
+        this.release();
+      }
+      if (!this.tty) {
+        const age = (Date.now() - this.startedAt) / 1000;
+        this.tty = adoptTty(probe, age, this.claimed(id));
+        if (!this.tty) {
+          return;
+        }
+        this.claimed(id).add(this.tty);
+        this.deps.log(
+          `${this.terminal.name}: adopted ${id.slice(0, 12)} ${this.tty}`
+        );
+      }
+
+      const info = probe.ttys.get(this.tty)!;
+      if (info.size) {
+        this.screen.resize(info.size.cols, info.size.rows);
+      }
+      const result = info.agent
+        ? await this.deps.classify(
+            id,
+            user,
+            info.agent.agent,
+            this.screen.text()
           )
         : undefined;
-      if (this.disposed) {
+      if (this.disposed || (result?.keepPrevious && this.last)) {
         return;
       }
-      if (pick?.keepPrevious && this.status) {
-        return;
+
+      const summary = result
+        ? `${result.agent} ${result.status} (${result.rule ?? 'no rule matched'}) ${info.size?.cols}x${info.size?.rows}`
+        : 'no agent';
+      if (summary !== this.last) {
+        this.last = summary;
+        this.deps.log(`${this.terminal.name} ${this.tty}: ${summary}`);
+        if (result && !result.rule) {
+          this.deps.log(`screen:\n${this.screen.text()}`);
+        }
       }
-      this.status = pick?.status;
+      // The agent is known from the pty's own processes, so herdr's fallback
+      // state (no rule matched) is still that agent's state — as in herdr.
       this.deps.report(
         this.terminal,
         id,
-        pick && {
-          paneId: `terminal:${pick.agent}`,
-          agent: pick.agent,
-          status: pick.status,
+        result && {
+          paneId: `terminal:${this.tty}`,
+          agent: result.agent,
+          status: result.status,
           title: this.screen.title || undefined,
-          workspace: undefined,
         }
       );
+    } catch (err) {
+      this.deps.log(`${this.terminal.name}: ${(err as Error).message}`);
     } finally {
       this.evaluating = false;
       if (!this.disposed) {
         // Output arrived mid-evaluation: go again. Otherwise re-check later so
-        // an agent that exits without redrawing still disappears.
-        this.schedule(this.dirty ? SETTLE_MS : IDLE_RECHECK_MS);
+        // a pty is adopted and an agent that exits quietly is noticed.
+        this.schedule(this.dirty ? SETTLE_MS : RECHECK_MS);
       }
     }
   }
 
-  private agentsIn(id: string, user: string | undefined) {
-    const cached = this.probes.get(id);
-    if (cached && Date.now() - cached.at < PROBE_TTL_MS) {
-      return cached.agents;
+  private release(): void {
+    if (this.container && this.tty) {
+      this.claims.get(this.container.id)?.delete(this.tty);
     }
-    const agents = this.deps.probe(id, user).catch(() => []);
-    this.probes.set(id, { at: Date.now(), agents });
-    return agents;
+    this.tty = undefined;
   }
 
   dispose(): void {
@@ -376,6 +396,7 @@ class TrackedExecution {
     if (this.timer) {
       clearTimeout(this.timer);
     }
+    this.release();
     this.screen.dispose();
     if (this.container) {
       this.deps.report(this.terminal, this.container.id, undefined);
@@ -386,10 +407,7 @@ class TrackedExecution {
 /** Watches every container terminal's commands for agents. */
 export class TerminalAgentTracker implements vscode.Disposable {
   private readonly tracked = new Map<vscode.Terminal, TrackedExecution>();
-  private readonly probes = new Map<
-    string,
-    { at: number; agents: Promise<AgentProcess[]> }
-  >();
+  private readonly claims = new Map<string, Set<string>>();
   private readonly subscriptions: vscode.Disposable[];
 
   constructor(private readonly deps: TerminalAgentDeps) {
@@ -401,7 +419,7 @@ export class TerminalAgentTracker implements vscode.Disposable {
         this.tracked.get(e.terminal)?.dispose();
         this.tracked.set(
           e.terminal,
-          new TrackedExecution(e.terminal, e.execution, deps, this.probes)
+          new TrackedExecution(e.terminal, e.execution, deps, this.claims)
         );
       }),
       vscode.window.onDidEndTerminalShellExecution(e => {

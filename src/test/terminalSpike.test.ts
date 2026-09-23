@@ -121,17 +121,39 @@ async function observe(label: string, name: string | undefined, cmd: string) {
     this.timeout(60000);
 
     test('fake claude in a container terminal is classified live', async () => {
-      const { TerminalAgentTracker, probeAgents, classifyScreen } =
+      const { TerminalAgentTracker, probeContainer, classifyScreen } =
         await import('../terminalAgents.js');
       const container = CONTAINER!;
+      // A decoy: another claude already running on its own pty at another
+      // size, as in a container with several agent terminals open.
+      const cp = await import('child_process');
+      const decoy = cp.spawn(
+        'script',
+        [
+          '-q',
+          '/dev/null',
+          'docker',
+          'exec',
+          '-it',
+          '-u',
+          'vscode',
+          container,
+          'sh',
+          '-c',
+          'stty cols 60 rows 12; PATH=/tmp/spikebin:$PATH; LOOP=1 claude',
+        ],
+        { stdio: ['pipe', 'ignore', 'ignore'] }
+      );
+      await new Promise(r => setTimeout(r, 2000));
       const t0 = Date.now();
       const seen: string[] = [];
       const tracker = new TerminalAgentTracker({
         isContainerTerminal: t => t.name === 'spike-agent',
         resolveContainer: async () => ({ id: container, user: 'vscode' }),
-        probe: (id, user) => probeAgents(id, user, 'docker'),
-        classify: (id, user, agents, screen) =>
-          classifyScreen(id, user, agents, screen, 'docker'),
+        probe: (id, user) => probeContainer(id, user, 'docker'),
+        classify: (id, user, agent, screen) =>
+          classifyScreen(id, user, agent, screen, 'docker'),
+        log: message => console.log(`[e2e log] ${message}`),
         report: (_t, _id, agent) => {
           const entry = `${Date.now() - t0}ms ${agent ? `${agent.agent}:${agent.status}` : 'none'}`;
           if (seen[seen.length - 1]?.split(' ')[1] !== entry.split(' ')[1]) {
@@ -158,6 +180,7 @@ async function observe(label: string, name: string | undefined, cmd: string) {
       console.log(`[e2e] reports: ${seen.join(' | ')}`);
       tracker.dispose();
       terminal.dispose();
+      decoy.kill();
       const states = seen.map(s => s.split(' ')[1]);
       assert.ok(states.includes('claude:working'), 'saw working');
       assert.ok(states.includes('claude:blocked'), 'saw blocked');

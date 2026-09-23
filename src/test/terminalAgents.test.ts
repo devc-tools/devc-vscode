@@ -1,49 +1,72 @@
 import * as assert from 'assert';
-import {
-  Classification,
-  parseExplain,
-  parseProbe,
-  pickClassification,
-} from '../terminalAgents';
+import { adoptTty, parseExplain, parseProbe } from '../terminalAgents';
 import { TerminalScreen } from '../terminalScreen';
 
+// Shaped like devc-dev: a stale claude on pts/3, the herdr client on pts/9
+// with its agent on its own pane pty, and a fresh claude on pts/13 whose
+// foreground job is a tool it launched.
+const PROBE = [
+  'claude',
+  'codex',
+  '---',
+  // pid tty pgid tpgid etimes args
+  ' 7504 pts/3   7504  7746 90000 bash',
+  ' 7746 pts/3   7746  7746 89990 claude',
+  '  140 pts/9    140   140  4000 herdr',
+  '26722 pts/10 26722 26722  3900 claude',
+  '33000 pts/13 33000 33100    40 bash',
+  '33050 pts/13 33050 33100    35 claude',
+  '33100 pts/13 33100 33100     2 npm test',
+  '  177 ?        177    -1  4000 /home/vscode/.local/bin/herdr server',
+  '---',
+  'pts/3 25 114',
+  'pts/9 30 120',
+  'pts/10 28 98',
+  'pts/13 31 110',
+].join('\n');
+
 suite('parseProbe', () => {
-  // Shaped like devc-dev: claude straight in exec'd shells, plus one in herdr.
-  const PROBE = [
-    'claude',
-    'codex',
-    '---',
-    '  140     0 herdr',
-    '  177   140 /home/vscode/.local/bin/herdr server',
-    '  197   177 bash',
-    '26722   197 claude',
-    ' 7504     0 bash',
-    ' 7746  7504 claude',
-    ' 8000     0 node /usr/local/lib/node_modules/@openai/codex/bin/codex.js',
-    ' 8100     0 /bin/sh /tmp/spikebin/claude',
-    ' 9000     0 vim notes.md',
-  ].join('\n');
-
-  test('finds agents that have a manifest, once per agent', () => {
-    assert.deepStrictEqual(parseProbe(PROBE), [
-      { agent: 'claude', pid: 7746 },
-      { agent: 'codex', pid: 8000 },
-    ]);
-  });
-
-  test('leaves out agents herdr is running', () => {
-    const onlyHerdr = PROBE.split('\n')
-      .filter(l => !/ (7746|8000|8100) /.test(l))
-      .join('\n');
-    assert.deepStrictEqual(parseProbe(onlyHerdr), []);
+  test('maps each pty to its age, size and agent', () => {
+    const { ttys } = parseProbe(PROBE);
+    assert.deepStrictEqual(ttys.get('pts/13'), {
+      ageSeconds: 40,
+      size: { rows: 31, cols: 110 },
+      agent: { agent: 'claude', pid: 33050 },
+    });
+    assert.deepStrictEqual(ttys.get('pts/3')?.agent, {
+      agent: 'claude',
+      pid: 7746,
+    });
+    assert.strictEqual(ttys.get('pts/9')?.agent, undefined);
+    assert.strictEqual(ttys.has('?'), false);
   });
 
   test('no manifests means no agents', () => {
-    assert.deepStrictEqual(parseProbe('---\n 1 0 claude'), []);
+    const { ttys } = parseProbe('---\n 1 pts/0 1 1 5 claude\n---\n');
+    assert.strictEqual(ttys.get('pts/0')?.agent, undefined);
   });
 });
 
-suite('parseExplain / pickClassification', () => {
+suite('adoptTty', () => {
+  test('takes the pty opened after the command started', () => {
+    assert.strictEqual(adoptTty(parseProbe(PROBE), 45, new Set()), 'pts/13');
+  });
+
+  test('never takes a pty older than the command', () => {
+    assert.strictEqual(adoptTty(parseProbe(PROBE), 20, new Set()), undefined);
+  });
+
+  test('skips ptys another terminal owns', () => {
+    const probe = parseProbe(PROBE);
+    assert.strictEqual(adoptTty(probe, 45, new Set(['pts/13'])), undefined);
+    assert.strictEqual(
+      adoptTty(probe, 5000, new Set(['pts/13', 'pts/9'])),
+      'pts/10'
+    );
+  });
+});
+
+suite('parseExplain', () => {
   test('reads state and the matched rule', () => {
     const line = JSON.stringify({
       agent: 'claude',
@@ -59,13 +82,13 @@ suite('parseExplain / pickClassification', () => {
     });
   });
 
-  test("herdr's idle fallback does not count as the agent's screen", () => {
-    const results: Classification[] = [
-      { agent: 'claude', status: 'idle', keepPrevious: false },
-      { agent: 'codex', status: 'working', rule: 'r', keepPrevious: false },
-    ];
-    assert.strictEqual(pickClassification(results)?.agent, 'codex');
-    assert.strictEqual(pickClassification(results.slice(0, 1)), undefined);
+  test('a fallback has no rule', () => {
+    const line = JSON.stringify({
+      agent: 'claude',
+      state: 'idle',
+      matched_rule: null,
+    });
+    assert.strictEqual(parseExplain(line)?.rule, undefined);
   });
 });
 

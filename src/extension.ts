@@ -18,7 +18,7 @@ import { focusHerdrAgent, getRemoteUser, watchHerdr } from './herdr';
 import {
   TerminalAgentTracker,
   classifyScreen,
-  probeAgents,
+  probeContainer,
 } from './terminalAgents';
 import {
   PathContext,
@@ -79,6 +79,10 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
+  const agentLog = vscode.window.createOutputChannel('Dev Container Agents', {
+    log: true,
+  });
+  context.subscriptions.push(agentLog);
   agentTree = new AgentTreeDataProvider(
     new DockerContainerSource(getDockerCommand, getHostFolders),
     watchContainerAgents
@@ -113,11 +117,12 @@ export function activate(context: vscode.ExtensionContext) {
             }
           : undefined;
       },
-      probe: (id, user) => probeAgents(id, user, getDockerCommand()),
-      classify: (id, user, agents, screen) =>
-        classifyScreen(id, user, agents, screen, getDockerCommand()),
+      probe: (id, user) => probeContainer(id, user, getDockerCommand()),
+      classify: (id, user, agent, screen) =>
+        classifyScreen(id, user, agent, screen, getDockerCommand()),
       report: (terminal, id, agent) =>
         agentTree.setTerminalAgent(id, terminal, agent),
+      log: message => agentLog.info(message),
     })
   );
   syncAgents();
