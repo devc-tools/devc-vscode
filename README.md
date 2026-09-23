@@ -28,6 +28,14 @@ The extension does no detection of its own. herdr already classifies every pane 
 
 Each container gets one long-lived `docker exec -i -u <remoteUser> <id> sh -c …`. Inside it, a loop runs `herdr api snapshot` once a second and prints only when the snapshot changes. It needs only `sh` and herdr (found on `PATH` or in `~/.local/bin`), with no `socat`, native Node modules or VS Code server in the container. `docker exec` does not stop its process when the client exits, so the loop runs in the background and ends when the exec's stdin closes: on dispose, on a stopped container, or when VS Code exits. It runs as the container's `remoteUser` from the `devcontainer.metadata` label, because herdr's socket lives in that user's home. A container with no herdr server running simply shows no agents until herdr starts.
 
+### Across windows
+
+Each VS Code window publishes what its Agents view shows to a file in the extension's global storage, which every window shares, and watches that directory for the other windows' files. Once another window has agents, the view groups by window, with **This Window** pinned first, so it's always clear which window a click lands in. The badge counts agents needing attention in every window.
+
+Clicking an agent owned by another window drops a focus request for that window, which reveals its own terminal and herdr pane, then brings that window to the front with `vscode.openFolder` on its workspace. VS Code focuses a window that already has that folder or workspace open rather than opening a second one. An untitled multi-root workspace has nothing to reopen, so its agents are listed but not switchable.
+
+Files are written to a temp name and renamed, so a reader never sees a partial file. A window removes its file when it closes; a file left by a crashed window is dropped once its extension host process is gone. A re-read every 10 s covers any missed file-watch event.
+
 ## Using the tree
 
 | Action | How |

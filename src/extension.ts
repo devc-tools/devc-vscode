@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as path from 'path';
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
 import { AgentNode, AgentTreeDataProvider } from './agentTree';
@@ -15,6 +16,7 @@ import {
   getContainerHome,
 } from './containerTree';
 import { focusHerdrAgent, getRemoteUser, watchHerdr } from './herdr';
+import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
   TerminalAgentTracker,
   classifyScreen,
@@ -56,6 +58,7 @@ let treeProvider: ContainerTreeDataProvider;
 let treeView: vscode.TreeView<ContainerNode>;
 let agentTree: AgentTreeDataProvider;
 let terminalAgents: TerminalAgentTracker;
+let windows: WindowRegistry;
 let dockerEventsProcess: cp.ChildProcess | undefined;
 
 // ── Activation ──────────────────────────────────────────────────────────────
@@ -102,6 +105,7 @@ export function activate(context: vscode.ExtensionContext) {
             tooltip: `${count} agent${count === 1 ? '' : 's'} need attention`,
           }
         : undefined;
+      publishWindow();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents()),
     (terminalAgents = new TerminalAgentTracker({
@@ -127,6 +131,28 @@ export function activate(context: vscode.ExtensionContext) {
     }))
   );
   syncAgents();
+
+  // Other VS Code windows' agents, shared through global storage.
+  windows = new WindowRegistry(
+    path.join(context.globalStorageUri.fsPath, 'windows'),
+    process.pid,
+    {
+      onOthers: others => agentTree.setOtherWindows(others),
+      onFocusRequest: key => {
+        const node = agentTree.findLocal(key);
+        if (node) {
+          focusAgent(node);
+        }
+      },
+    }
+  );
+  context.subscriptions.push(windows);
+  try {
+    windows.start();
+    publishWindow();
+  } catch (err) {
+    console.error('devc-vscode: window registry unavailable', err);
+  }
 
   const register = (id: string, handler: (...args: never[]) => unknown) =>
     context.subscriptions.push(
@@ -478,24 +504,76 @@ function watchContainerAgents(
  * Bring an agent into view: reveal the container's terminal, then have herdr
  * switch to the agent's pane inside it.
  */
+/** Share this window's agents with the other windows. */
+function publishWindow(): void {
+  windows?.publish({
+    version: SNAPSHOT_VERSION,
+    pid: process.pid,
+    name: vscode.workspace.name ?? '',
+    workspaceUri: workspaceIdentity()?.toString(),
+    containers: agentTree.snapshotContainers(),
+  });
+}
+
+/**
+ * What `vscode.openFolder` needs to bring this window to the front from
+ * another: its saved workspace file, or its folder. An untitled multi-root
+ * workspace has neither.
+ */
+function workspaceIdentity(): vscode.Uri | undefined {
+  const file = vscode.workspace.workspaceFile;
+  if (file) {
+    return file.scheme === 'file' ? file : undefined;
+  }
+  return vscode.workspace.workspaceFolders?.[0]?.uri;
+}
+
 async function focusAgent(node?: AgentNode): Promise<void> {
   if (node?.kind !== 'agent') {
+    return;
+  }
+  if (node.remote) {
+    // The owning window focuses its own terminal and herdr pane; opening its
+    // workspace again brings that window to the front instead of opening a
+    // second one.
+    const { window, published } = node.remote;
+    if (!window.workspaceUri) {
+      vscode.window.showInformationMessage(
+        `"${window.name}" has no saved workspace to switch to.`
+      );
+      return;
+    }
+    windows.requestFocus(window.pid, published.key);
+    await vscode.commands.executeCommand(
+      'vscode.openFolder',
+      vscode.Uri.parse(window.workspaceUri),
+      { forceNewWindow: true }
+    );
     return;
   }
   if (node.terminal) {
     node.terminal.show();
     return;
   }
+  // Reveal the terminal attached to herdr in that container: the one whose
+  // pty has herdr in the foreground. Before the tracker has found ptys (or
+  // for terminals opened before the extension loaded), any terminal into the
+  // container is the best guess.
   const containerId = node.container.id;
+  const candidates: vscode.Terminal[] = [];
   for (const terminal of vscode.window.terminals) {
-    if (!isContainerTerminal(terminal)) {
-      continue;
-    }
-    if ((await resolveTerminalContext(terminal))?.containerId === containerId) {
-      terminal.show();
-      break;
+    if (
+      isContainerTerminal(terminal) &&
+      (await resolveTerminalContext(terminal))?.containerId === containerId
+    ) {
+      candidates.push(terminal);
     }
   }
+  const herdrTerminal =
+    candidates.find(t => terminalAgents.foregroundFor(t) === 'herdr') ??
+    candidates.find(t => terminalAgents.foregroundFor(t) === undefined) ??
+    candidates[0];
+  herdrTerminal?.show();
   const docker = getDockerCommand();
   const user = await getRemoteUser(containerId, docker);
   if (!(await focusHerdrAgent(containerId, user, node.agent.paneId, docker))) {
