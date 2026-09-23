@@ -236,7 +236,7 @@ export class AgentTreeDataProvider
       ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
       : `agent:${node.container.id}:${agent.paneId}`;
     item.iconPath = STATUS_ICONS[agent.status];
-    item.description = agent.status;
+    item.description = node.terminal ? agent.status : `${agent.status} · herdr`;
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
       node.terminal
