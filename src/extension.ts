@@ -600,7 +600,7 @@ async function focusAgent(node?: AgentNode): Promise<void> {
   }
   const docker = getDockerCommand();
   const user = await getRemoteUser(containerId, docker);
-  if (!(await focusHerdrAgent(containerId, user, node.agent.paneId, docker))) {
+  if (!(await focusHerdrAgent(containerId, user, node.agent, docker))) {
     vscode.window.showErrorMessage(
       `Could not focus ${node.agent.agent} in herdr.`
     );

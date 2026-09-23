@@ -11,6 +11,8 @@ export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
 export interface AgentInfo {
   /** herdr's pane id, e.g. "w1:p2" — the target for `herdr agent focus`. */
   paneId: string;
+  /** herdr's id for the pane's tab, e.g. "w1:t2" — for `herdr tab focus`. */
+  tabId?: string;
   /** The detected agent, e.g. "claude". */
   agent: string;
   status: AgentStatus;
@@ -104,6 +106,7 @@ export function parseSnapshot(line: string): AgentInfo[] | undefined {
         : 'unknown';
     agents.push({
       paneId: pane.pane_id,
+      tabId: stringOr(pane.tab_id),
       agent: pane.agent,
       status,
       workspace:
@@ -223,11 +226,16 @@ export function watchHerdr(
   };
 }
 
-/** Switch herdr's focus to an agent's pane. */
+/**
+ * Switch herdr's focus to an agent's pane. As of herdr 0.9, `agent focus`
+ * moves the server's focus to the pane's tab but attached clients keep
+ * showing whatever they were showing; `tab focus` is what switches their
+ * view. So the tab is focused first, then the agent's pane within it.
+ */
 export async function focusHerdrAgent(
   containerId: string,
   user: string | undefined,
-  paneId: string,
+  agent: Pick<AgentInfo, 'paneId' | 'tabId'>,
   dockerCommand: string
 ): Promise<boolean> {
   const res = await execDocker(
@@ -237,9 +245,12 @@ export async function focusHerdrAgent(
       containerId,
       'sh',
       '-c',
-      'PATH="$HOME/.local/bin:$PATH" exec herdr agent focus "$1"',
+      `PATH="$HOME/.local/bin:$PATH"
+      if [ -n "$2" ]; then herdr tab focus "$2" >/dev/null || exit; fi
+      exec herdr agent focus "$1"`,
       'sh',
-      paneId,
+      agent.paneId,
+      agent.tabId ?? '',
     ],
     undefined,
     dockerCommand

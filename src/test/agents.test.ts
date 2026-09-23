@@ -16,6 +16,7 @@ const SNAPSHOT = JSON.stringify({
           cwd: '/workspaces/app',
           foreground_cwd: '/workspaces/app/sub',
           pane_id: 'w1:p1',
+          tab_id: 'w1:t1',
           terminal_title_stripped: 'Fixing tests',
           workspace_id: 'w1',
         },
@@ -46,6 +47,7 @@ suite('parseSnapshot', () => {
     assert.deepStrictEqual(parseSnapshot(SNAPSHOT), [
       {
         paneId: 'w1:p1',
+        tabId: 'w1:t1',
         agent: 'claude',
         status: 'working',
         workspace: 'app',
@@ -54,6 +56,7 @@ suite('parseSnapshot', () => {
       },
       {
         paneId: 'w2:p1',
+        tabId: undefined,
         agent: 'codex',
         status: 'unknown',
         workspace: 'docs',
