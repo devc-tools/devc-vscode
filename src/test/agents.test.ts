@@ -121,7 +121,12 @@ suite('AgentTreeDataProvider', () => {
   }
 
   function container(id: string): ContainerInfo {
-    return { id, name: id, containerName: `devc-${id}` };
+    return {
+      id,
+      name: id,
+      containerName: `devc-${id}`,
+      localFolder: `/work/${id}`,
+    };
   }
 
   function agent(paneId: string, status: AgentInfo['status']): AgentInfo {

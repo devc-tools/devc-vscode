@@ -31,6 +31,11 @@
           "type": "string",
           "default": "devc herdr",
           "description": "Command sent to the terminal by \"Open Folder in Container\"."
+        },
+        "devc-vscode.herdrAttachCommand": {
+          "type": "string",
+          "default": "devc herdr",
+          "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr."
         }
       }
     },

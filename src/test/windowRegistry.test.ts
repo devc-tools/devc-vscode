@@ -18,7 +18,12 @@ function snapshot(pid: number, name: string, agents = 1): WindowSnapshot {
     workspaceUri: `file:///work/${name}`,
     containers: [
       {
-        container: { id: `c${pid}`, name, containerName: `devc-${name}` },
+        container: {
+          id: `c${pid}`,
+          name,
+          containerName: `devc-${name}`,
+          localFolder: `/work/${name}`,
+        },
         agents: Array.from({ length: agents }, (_, i) => ({
           key: `herdr:c${pid}:w1:p${i}`,
           agent: { paneId: `w1:p${i}`, agent: 'claude', status: 'blocked' },
@@ -179,6 +184,7 @@ suite('AgentTreeDataProvider across windows', () => {
       id: 'c0',
       name: 'here',
       containerName: 'devc-here',
+      localFolder: '/work/here',
     });
     await tree.sync();
     push([{ paneId: 'w1:p1', agent: 'claude', status: 'idle' }]);
@@ -195,6 +201,7 @@ suite('AgentTreeDataProvider across windows', () => {
       id: 'c0',
       name: 'here',
       containerName: 'devc-here',
+      localFolder: '/work/here',
     });
     await tree.sync();
     push([{ paneId: 'w1:p1', agent: 'claude', status: 'working' }]);
@@ -220,6 +227,7 @@ suite('AgentTreeDataProvider across windows', () => {
       id: 'c0',
       name: 'here',
       containerName: 'devc-here',
+      localFolder: '/work/here',
     });
     await tree.sync();
     push([{ paneId: 'w1:p1', agent: 'claude', status: 'idle' }]);

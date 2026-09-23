@@ -162,6 +162,7 @@ function fixture(confirm = async () => true) {
     id: 'c1',
     name: 'app',
     containerName: 'app-container',
+    localFolder: '/work/app',
   };
   // c2 is running but out of scope, so it is never a root.
   const source = new FakeContainerSource([c1]);

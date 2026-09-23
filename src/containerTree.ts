@@ -10,6 +10,8 @@ export interface ContainerInfo {
   name: string;
   /** Docker's own name for the container. */
   containerName: string;
+  /** The devcontainer.local_folder label: the project folder on the host. */
+  localFolder: string;
 }
 
 /**
@@ -628,6 +630,7 @@ export class DockerContainerSource implements ContainerSource {
         id: container.id,
         name: rootLabel(owner, container.localFolder),
         containerName: container.containerName,
+        localFolder: container.localFolder,
       });
     }
     return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));

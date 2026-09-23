@@ -450,7 +450,18 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
     );
     return;
   }
-  const cwd = uri?.fsPath;
+  openContainerTerminal(uri?.fsPath, getOpenFolderCommand());
+}
+
+/**
+ * Open a container terminal in an editor tab, running `command` from the host
+ * folder `cwd`. The terminal is recognised by its name and resolved to its
+ * container by its cwd.
+ */
+function openContainerTerminal(
+  cwd: string | undefined,
+  command: string
+): vscode.Terminal {
   // hideFromUser is the only creationOptions flag the Python extension checks
   // before injecting `source .../activate` into a new terminal (see
   // microsoft/vscode-python src/client/terminals/activation.ts). It reads
@@ -464,7 +475,8 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
     hideFromUser: true,
   });
   t.show();
-  t.sendText(getOpenFolderCommand());
+  t.sendText(command);
+  return t;
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────
@@ -500,10 +512,6 @@ function watchContainerAgents(
   };
 }
 
-/**
- * Bring an agent into view: reveal the container's terminal, then have herdr
- * switch to the agent's pane inside it.
- */
 /** Share this window's agents with the other windows. */
 function publishWindow(): void {
   windows?.publish({
@@ -528,6 +536,11 @@ function workspaceIdentity(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
 }
 
+/**
+ * Bring an agent into view: reveal the container's terminal, then have herdr
+ * switch to the agent's pane inside it. With no terminal that could be showing
+ * herdr, open one that attaches to it.
+ */
 async function focusAgent(node?: AgentNode): Promise<void> {
   if (node?.kind !== 'agent') {
     return;
@@ -556,9 +569,10 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     return;
   }
   // Reveal the terminal attached to herdr in that container: the one whose
-  // pty has herdr in the foreground. Before the tracker has found ptys (or
-  // for terminals opened before the extension loaded), any terminal into the
-  // container is the best guess.
+  // pty has herdr in the foreground. Before the tracker has found a
+  // terminal's pty (or for terminals opened before the extension loaded), its
+  // foreground is unknown and it is the best guess. Terminals known to be
+  // running something else cannot show herdr.
   const containerId = node.container.id;
   const candidates: vscode.Terminal[] = [];
   for (const terminal of vscode.window.terminals) {
@@ -571,9 +585,19 @@ async function focusAgent(node?: AgentNode): Promise<void> {
   }
   const herdrTerminal =
     candidates.find(t => terminalAgents.foregroundFor(t) === 'herdr') ??
-    candidates.find(t => terminalAgents.foregroundFor(t) === undefined) ??
-    candidates[0];
-  herdrTerminal?.show();
+    candidates.find(t => terminalAgents.foregroundFor(t) === undefined);
+  if (herdrTerminal) {
+    herdrTerminal.show();
+  } else {
+    // Focus once herdr is up, so the pane switch lands in a client that is
+    // showing. Without shell integration the tracker never sees the terminal,
+    // so after the wait focus is tried regardless.
+    const terminal = openContainerTerminal(
+      node.container.localFolder,
+      getHerdrAttachCommand()
+    );
+    await waitForForeground(terminal, 'herdr', HERDR_ATTACH_TIMEOUT_MS);
+  }
   const docker = getDockerCommand();
   const user = await getRemoteUser(containerId, docker);
   if (!(await focusHerdrAgent(containerId, user, node.agent.paneId, docker))) {
@@ -581,6 +605,33 @@ async function focusAgent(node?: AgentNode): Promise<void> {
       `Could not focus ${node.agent.agent} in herdr.`
     );
   }
+}
+
+/** How long a newly opened terminal gets to bring herdr up. */
+const HERDR_ATTACH_TIMEOUT_MS = 20000;
+
+/**
+ * Resolves true once `program` is in the foreground of a terminal's pty,
+ * false if the terminal closes or `timeoutMs` passes first.
+ */
+function waitForForeground(
+  terminal: vscode.Terminal,
+  program: string,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise(resolve => {
+    const check = () => {
+      if (terminalAgents.foregroundFor(terminal) === program) {
+        resolve(true);
+      } else if (terminal.exitStatus || Date.now() >= deadline) {
+        resolve(false);
+      } else {
+        setTimeout(check, 250);
+      }
+    };
+    check();
+  });
 }
 
 // ── Docker events watcher ───────────────────────────────────────────────────
@@ -676,6 +727,17 @@ function getOpenFolderCommand(): string {
   const configured = vscode.workspace
     .getConfiguration('devc-vscode')
     .get<string>('openFolderCommand');
+  return configured && configured.trim() !== '' ? configured : 'devc herdr';
+}
+
+/**
+ * Command that opens a terminal attached to herdr in the container, used when
+ * a herdr agent is focused and no terminal is showing herdr.
+ */
+function getHerdrAttachCommand(): string {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>('herdrAttachCommand');
   return configured && configured.trim() !== '' ? configured : 'devc herdr';
 }
 
