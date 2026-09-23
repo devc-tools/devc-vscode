@@ -4,7 +4,13 @@ import { AgentInfo, AgentStatus } from './herdr';
 
 export type AgentNode =
   | { kind: 'container'; container: ContainerInfo }
-  | { kind: 'agent'; container: ContainerInfo; agent: AgentInfo };
+  | {
+      kind: 'agent';
+      container: ContainerInfo;
+      agent: AgentInfo;
+      /** Set when detected from a terminal's output rather than by herdr. */
+      terminal?: vscode.Terminal;
+    };
 
 /**
  * Starts streaming one container's agents. Injected so the tree can be
@@ -67,6 +73,13 @@ export class AgentTreeDataProvider
   implements vscode.TreeDataProvider<AgentNode>, vscode.Disposable
 {
   private readonly watched = new Map<string, Watched>();
+  /** Agents detected from terminal output, by container then terminal. */
+  private readonly terminalAgents = new Map<
+    string,
+    Map<vscode.Terminal, AgentInfo>
+  >();
+  private readonly terminalIds = new WeakMap<vscode.Terminal, number>();
+  private nextTerminalId = 1;
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     AgentNode | undefined
   >();
@@ -124,9 +137,59 @@ export class AgentTreeDataProvider
     }
   }
 
+  /** Record (or clear, with undefined) the agent a terminal is showing. */
+  setTerminalAgent(
+    containerId: string,
+    terminal: vscode.Terminal,
+    agent: AgentInfo | undefined
+  ): void {
+    let byTerminal = this.terminalAgents.get(containerId);
+    const previous = byTerminal?.get(terminal);
+    if (JSON.stringify(previous) === JSON.stringify(agent)) {
+      return;
+    }
+    if (agent) {
+      if (!byTerminal) {
+        byTerminal = new Map();
+        this.terminalAgents.set(containerId, byTerminal);
+      }
+      byTerminal.set(terminal, agent);
+    } else {
+      byTerminal?.delete(terminal);
+    }
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  private nodesFor(container: ContainerInfo): AgentNode[] {
+    const fromHerdr: AgentNode[] = (
+      this.watched.get(container.id)?.agents ?? []
+    ).map(agent => ({ kind: 'agent', container, agent }));
+    const fromTerminals: AgentNode[] = [
+      ...(this.terminalAgents.get(container.id) ?? []),
+    ].map(([terminal, agent]) => ({
+      kind: 'agent',
+      container,
+      agent,
+      terminal,
+    }));
+    return [...fromHerdr, ...fromTerminals];
+  }
+
+  private terminalId(terminal: vscode.Terminal): number {
+    let id = this.terminalIds.get(terminal);
+    if (id === undefined) {
+      id = this.nextTerminalId++;
+      this.terminalIds.set(terminal, id);
+    }
+    return id;
+  }
+
   /** Every tracked agent, for the badge and for tests. */
   allAgents(): AgentInfo[] {
-    return [...this.watched.values()].flatMap(w => w.agents);
+    return [
+      ...[...this.watched.values()].flatMap(w => w.agents),
+      ...[...this.terminalAgents.values()].flatMap(m => [...m.values()]),
+    ];
   }
 
   attentionCount(): number {
@@ -136,16 +199,12 @@ export class AgentTreeDataProvider
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
       return [...this.watched.values()]
-        .filter(w => w.agents.length > 0)
+        .filter(w => this.nodesFor(w.container).length > 0)
         .sort((a, b) => a.container.name.localeCompare(b.container.name))
         .map(w => ({ kind: 'container', container: w.container }));
     }
     if (node.kind === 'container') {
-      return (this.watched.get(node.container.id)?.agents ?? []).map(agent => ({
-        kind: 'agent',
-        container: node.container,
-        agent,
-      }));
+      return this.nodesFor(node.container);
     }
     return [];
   }
@@ -159,7 +218,9 @@ export class AgentTreeDataProvider
       item.id = `container:${node.container.id}`;
       item.iconPath = new vscode.ThemeIcon('vm');
       item.description = summarize(
-        this.watched.get(node.container.id)?.agents ?? []
+        this.nodesFor(node.container).map(n =>
+          n.kind === 'agent' ? n.agent : undefined!
+        )
       );
       item.tooltip = node.container.containerName;
       item.contextValue = 'agentContainer';
@@ -168,19 +229,24 @@ export class AgentTreeDataProvider
 
     const { agent } = node;
     const item = new vscode.TreeItem(
-      agent.workspace ?? agent.agent,
+      agent.workspace ?? (node.terminal ? node.terminal.name : agent.agent),
       vscode.TreeItemCollapsibleState.None
     );
-    item.id = `agent:${node.container.id}:${agent.paneId}`;
+    item.id = node.terminal
+      ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
+      : `agent:${node.container.id}:${agent.paneId}`;
     item.iconPath = STATUS_ICONS[agent.status];
-    item.description = agent.workspace
-      ? `${agent.agent} · ${agent.status}`
-      : agent.status;
+    item.description =
+      agent.workspace || node.terminal
+        ? `${agent.agent} · ${agent.status}`
+        : agent.status;
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
       agent.title,
       agent.cwd,
-      `herdr pane ${agent.paneId}`,
+      node.terminal
+        ? 'detected from terminal output'
+        : `herdr pane ${agent.paneId}`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -198,6 +264,7 @@ export class AgentTreeDataProvider
       entry.watcher.dispose();
     }
     this.watched.clear();
+    this.terminalAgents.clear();
     this._onDidChangeTreeData.dispose();
   }
 }

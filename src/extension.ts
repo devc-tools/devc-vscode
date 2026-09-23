@@ -16,6 +16,11 @@ import {
 } from './containerTree';
 import { focusHerdrAgent, getRemoteUser, watchHerdr } from './herdr';
 import {
+  TerminalAgentTracker,
+  classifyScreen,
+  probeAgents,
+} from './terminalAgents';
+import {
   PathContext,
   findPathCandidates,
   resolveCandidatePath,
@@ -93,7 +98,27 @@ export function activate(context: vscode.ExtensionContext) {
           }
         : undefined;
     }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents())
+    vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents()),
+    new TerminalAgentTracker({
+      isContainerTerminal,
+      async resolveContainer(terminal) {
+        const context = await resolveTerminalContext(terminal);
+        return context
+          ? {
+              id: context.containerId,
+              user: await getRemoteUser(
+                context.containerId,
+                getDockerCommand()
+              ),
+            }
+          : undefined;
+      },
+      probe: (id, user) => probeAgents(id, user, getDockerCommand()),
+      classify: (id, user, agents, screen) =>
+        classifyScreen(id, user, agents, screen, getDockerCommand()),
+      report: (terminal, id, agent) =>
+        agentTree.setTerminalAgent(id, terminal, agent),
+    })
   );
   syncAgents();
 
@@ -121,8 +146,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTerminalLinkProvider({
       async provideTerminalLinks(context) {
         // Only activate for terminals created by our "Open in Dev Container" command.
-        const opts = context.terminal.creationOptions;
-        if (!('name' in opts) || opts.name !== 'devcontainer') {
+        if (!isContainerTerminal(context.terminal)) {
           return [];
         }
         const terminalContext = await resolveTerminalContext(context.terminal);
@@ -445,10 +469,13 @@ async function focusAgent(node?: AgentNode): Promise<void> {
   if (node?.kind !== 'agent') {
     return;
   }
+  if (node.terminal) {
+    node.terminal.show();
+    return;
+  }
   const containerId = node.container.id;
   for (const terminal of vscode.window.terminals) {
-    const opts = terminal.creationOptions;
-    if (!('name' in opts) || opts.name !== 'devcontainer') {
+    if (!isContainerTerminal(terminal)) {
       continue;
     }
     if ((await resolveTerminalContext(terminal))?.containerId === containerId) {
@@ -538,6 +565,12 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Whether a terminal was opened by "Open Folder in Container". */
+function isContainerTerminal(terminal: vscode.Terminal): boolean {
+  const opts = terminal.creationOptions;
+  return 'name' in opts && opts.name === 'devcontainer';
+}
 
 function getDockerCommand(): string {
   return (

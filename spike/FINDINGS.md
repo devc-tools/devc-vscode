@@ -1,0 +1,61 @@
+# Agent status without herdr — spike findings
+
+Goal: detect agent state for agents run directly in a `devcontainer` terminal (no
+herdr), with nothing configured in the container and nothing agent-specific in the
+extension.
+
+## What stable VS Code API can see
+
+Measured in the real test host (`SPIKE=1 SPIKE_CONTAINER=<id> npx vscode-test --grep spike`):
+
+| Signal | Works? | Notes |
+| --- | --- | --- |
+| `TerminalShellExecution.read()` | **Yes** | Raw bytes incl. OSC titles and alt-screen, live (chunks arrive as written), through `docker exec -it`. Works for commands sent with `sendText`/typed by the user, via `onDidStartTerminalShellExecution`. Requires shell integration active in the *host* shell. |
+| `Terminal.name` | No | Never reflects OSC titles, named or unnamed terminal. |
+| `Terminal.dimensions`, `onDidChangeTerminalDimensions`, `onDidWriteTerminalData` | Proposed only | Not usable in a published extension. |
+
+## Prototype pipeline (`src/terminalAgents.ts`, `src/terminalScreen.ts`)
+
+1. `read()` the command the `devcontainer` terminal runs (`devc ...`); everything inside
+   that container session, including an agent the user starts, flows through it.
+2. `@xterm/headless` (MIT, pure JS, zero deps — xterm.js core, as VS Code uses) rebuilds
+   the screen.
+3. Which agent: one `docker exec` lists herdr's cached manifest ids
+   (`~/.local/state/herdr/agent-detection/remote/*.toml`, 20 agents) and `ps`; a process
+   whose program name matches a manifest id, and is not under `herdr server`, is a
+   candidate. Screen size comes from `stty size < /proc/<pid>/fd/0` (docker forwards
+   resizes), since VS Code won't give dimensions.
+4. What state: `herdr agent explain --file - --agent <id> --format json` in the
+   container classifies the screen with herdr's own rules. Only a *matched rule* counts
+   (herdr otherwise falls back to idle), so a plain shell next to an agent elsewhere
+   isn't mislabeled.
+
+End-to-end result (fake `claude` using real Claude UI strings, in a container terminal):
+`working (3.8s) → blocked (6.5s) → idle (9.7s) → none after exit`, ~0.3–0.7s behind the
+frame.
+
+## Trade-offs vs. Claude hooks
+
+| | Terminal + herdr explain | Claude hooks |
+| --- | --- | --- |
+| Container config | None beyond herdr being installed (manifests are cached once herdr has run) | Hook settings per container/image |
+| Other agents | Any of herdr's 20 manifests, updated by herdr | Per-agent hook systems, where they exist |
+| Accuracy | Screen heuristics — herdr's, maintained upstream | Exact lifecycle events |
+| Cost | Per settled output: 1 `docker exec` (+ probe every 5s while active) | Near zero |
+
+## Known gaps
+
+- Needs shell integration in the host terminal; without it no execution events fire,
+  so nothing is detected (fails quiet, not wrong).
+- Agent identity is per container, not per terminal. Two different agents in two
+  terminals of one container both become candidates; each screen is still classified
+  on its own, but pty size is taken from the first candidate.
+- Depends on herdr in the container as the rule engine. Porting the manifest evaluator to
+  TS would remove that, but means a TOML parser and translating Rust regex syntax
+  (`\x{...}`, inline `(?i)`, `(?m)`) — and herdr's license would need checking before
+  shipping its manifests.
+- The OSC title rules (e.g. Claude's spinner title) can't be fed to `explain --file`;
+  the title is captured (`TerminalScreen.title`) but unused.
+- Only tested with a fake agent script. Real Claude renders inline (not alt-screen) and
+  redraws relative to the cursor, which the headless emulator should handle but hasn't
+  been verified.
