@@ -229,14 +229,14 @@ export class AgentTreeDataProvider
 
     const { agent } = node;
     const item = new vscode.TreeItem(
-      agent.agent,
+      node.terminal ? agent.agent : `${agent.agent} (herdr)`,
       vscode.TreeItemCollapsibleState.None
     );
     item.id = node.terminal
       ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
       : `agent:${node.container.id}:${agent.paneId}`;
     item.iconPath = STATUS_ICONS[agent.status];
-    item.description = node.terminal ? agent.status : `${agent.status} · herdr`;
+    item.description = agent.status;
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
       node.terminal

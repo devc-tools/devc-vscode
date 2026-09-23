@@ -486,16 +486,25 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     node.terminal.show();
     return;
   }
+  // Reveal the terminal attached to herdr in that container: the one whose
+  // pty has herdr in the foreground. Before the tracker has found ptys (or
+  // for terminals opened before the extension loaded), any terminal into the
+  // container is the best guess.
   const containerId = node.container.id;
+  const candidates: vscode.Terminal[] = [];
   for (const terminal of vscode.window.terminals) {
-    if (!isContainerTerminal(terminal)) {
-      continue;
-    }
-    if ((await resolveTerminalContext(terminal))?.containerId === containerId) {
-      terminal.show();
-      break;
+    if (
+      isContainerTerminal(terminal) &&
+      (await resolveTerminalContext(terminal))?.containerId === containerId
+    ) {
+      candidates.push(terminal);
     }
   }
+  const herdrTerminal =
+    candidates.find(t => terminalAgents.foregroundFor(t) === 'herdr') ??
+    candidates.find(t => terminalAgents.foregroundFor(t) === undefined) ??
+    candidates[0];
+  herdrTerminal?.show();
   const docker = getDockerCommand();
   const user = await getRemoteUser(containerId, docker);
   if (!(await focusHerdrAgent(containerId, user, node.agent.paneId, docker))) {

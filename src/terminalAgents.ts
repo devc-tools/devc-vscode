@@ -35,6 +35,8 @@ export interface TtyInfo {
    * without any shell integration in the container.
    */
   cwd?: string;
+  /** Program name of the foreground process, e.g. "herdr" or "bash". */
+  foreground?: string;
 }
 
 export interface ContainerProbe {
@@ -105,7 +107,10 @@ export function parseProbe(output: string): ContainerProbe {
   const ttys = new Map<string, TtyInfo>();
   const agents = new Map<string, { agent: string; pid: number; fg: boolean }>();
   /** Per tty: the foreground group leader, else a foreground process. */
-  const foreground = new Map<string, { pid: string; leader: boolean }>();
+  const foreground = new Map<
+    string,
+    { pid: string; leader: boolean; name?: string }
+  >();
   /** Per tty: the oldest process, normally the shell docker exec started. */
   const oldest = new Map<string, { pid: string; age: number }>();
   for (const line of psPart.split('\n')) {
@@ -121,7 +126,7 @@ export function parseProbe(output: string): ContainerProbe {
     if (pgid === tpgid) {
       const leader = pid === tpgid;
       if (!foreground.get(tty)?.leader) {
-        foreground.set(tty, { pid, leader });
+        foreground.set(tty, { pid, leader, name: programName(args) });
       }
     }
     if (Number(etimes) >= (oldest.get(tty)?.age ?? -1)) {
@@ -156,6 +161,7 @@ export function parseProbe(output: string): ContainerProbe {
     }
   }
   for (const [tty, info] of ttys) {
+    info.foreground = foreground.get(tty)?.name;
     info.cwd =
       cwds.get(foreground.get(tty)?.pid ?? '') ??
       cwds.get(oldest.get(tty)?.pid ?? '');
@@ -299,6 +305,8 @@ class TrackedExecution {
   private tty: string | undefined;
   /** The terminal's working directory inside the container, as last probed. */
   cwd: string | undefined;
+  /** Program name in the foreground of the terminal's pty, as last probed. */
+  foreground: string | undefined;
   private last: string | undefined;
 
   constructor(
@@ -383,6 +391,7 @@ class TrackedExecution {
       }
 
       const info = probe.ttys.get(this.tty)!;
+      this.foreground = info.foreground;
       if (info.cwd !== this.cwd) {
         this.cwd = info.cwd;
         this.deps.log(`${this.terminal.name} ${this.tty}: cwd ${this.cwd}`);
@@ -438,6 +447,7 @@ class TrackedExecution {
     }
     this.tty = undefined;
     this.cwd = undefined;
+    this.foreground = undefined;
   }
 
   dispose(): void {
@@ -496,6 +506,11 @@ export class TerminalAgentTracker implements vscode.Disposable {
    */
   cwdFor(terminal: vscode.Terminal): string | undefined {
     return this.tracked.get(terminal)?.cwd;
+  }
+
+  /** The program in the foreground of a container terminal, when known. */
+  foregroundFor(terminal: vscode.Terminal): string | undefined {
+    return this.tracked.get(terminal)?.foreground;
   }
 
   dispose(): void {

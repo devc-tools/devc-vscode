@@ -40,7 +40,9 @@ suite('parseProbe', () => {
       size: { rows: 31, cols: 110 },
       agent: { agent: 'claude', pid: 33050 },
       cwd: '/workspaces/app/pkg/sub dir',
+      foreground: 'npm',
     });
+    assert.strictEqual(ttys.get('pts/9')?.foreground, 'herdr');
     assert.deepStrictEqual(ttys.get('pts/3')?.agent, {
       agent: 'claude',
       pid: 7746,
