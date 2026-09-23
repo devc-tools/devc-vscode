@@ -20,6 +20,14 @@ Absolute paths always resolve. `~` resolves against the container user's `$HOME`
 
 The terminal is created with `hideFromUser` and then immediately shown. That is deliberate: it is the only creation option the Python extension checks before injecting `source .../activate` into a new terminal, so this keeps a host venv out of a container shell. There is no supported API for this ([vscode-python#11963](https://github.com/microsoft/vscode-python/issues/11963) is open), so it may need revisiting if that check changes.
 
+## Agent status
+
+A second Explorer view, **Dev Container Agents**, lists the coding agents [herdr](https://herdr.dev) is running inside each in-scope container, with each agent's state: working, blocked, done, idle or unknown. Each container row also shows a count per state. The view's badge counts agents that are blocked or done, since those are waiting on you. Clicking an agent reveals that container's terminal and tells herdr to focus the agent's pane.
+
+The extension does no detection of its own. herdr already classifies every pane from its output (spinners, OSC titles, prompt boxes, permission dialogs), and its socket API reports the result, so the view shows exactly what herdr's sidebar shows. Reading herdr's state avoids reading the VS Code terminal at all. With herdr running, that terminal only ever carries herdr's composited screen, never the agent's raw output.
+
+Each container gets one long-lived `docker exec -i -u <remoteUser> <id> sh -c …`. Inside it, a loop runs `herdr api snapshot` once a second and prints only when the snapshot changes. It needs only `sh` and herdr (found on `PATH` or in `~/.local/bin`), with no `socat`, native Node modules or VS Code server in the container. `docker exec` does not stop its process when the client exits, so the loop runs in the background and ends when the exec's stdin closes: on dispose, on a stopped container, or when VS Code exits. It runs as the container's `remoteUser` from the `devcontainer.metadata` label, because herdr's socket lives in that user's home. A container with no herdr server running simply shows no agents until herdr starts.
+
 ## Using the tree
 
 | Action | How |
@@ -41,7 +49,7 @@ Deletes are permanent: a container has no trash, so the confirmation prompt is t
 | `Dev Container FS: Refresh Container Files` | Re-read the tree |
 | `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` (rejected on container folders) |
 
-`New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection.
+`New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection. `Focus Agent` is run by clicking an agent in the Agents view and is hidden from the palette.
 
 ## Settings
 
@@ -61,7 +69,7 @@ This extension runs on the host and talks to the host Docker daemon. It is not m
 ```sh
 npm install
 npm run compile      # or: npm run watch
-npm test
+npm test             # .npmrc sets ignore-scripts, so compile first — pretest does not run
 npx vsce package     # -> devc-vscode-<version>.vsix
 ```
 

@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
+import { AgentNode, AgentTreeDataProvider } from './agentTree';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
 import {
   ContainerNode,
@@ -13,6 +14,7 @@ import {
   findMatchingBindMount,
   getContainerHome,
 } from './containerTree';
+import { focusHerdrAgent, getRemoteUser, watchHerdr } from './herdr';
 import {
   PathContext,
   findPathCandidates,
@@ -20,6 +22,7 @@ import {
 } from './terminalLinks';
 
 const VIEW_ID = 'devc-vscode.containers';
+const AGENTS_VIEW_ID = 'devc-vscode.agents';
 
 /** Everything a terminal needs before a path printed in it can be resolved. */
 interface TerminalContext extends PathContext {
@@ -46,6 +49,7 @@ class DevContainerTerminalLink extends vscode.TerminalLink {
 let provider: DevContainerFileSystemProvider;
 let treeProvider: ContainerTreeDataProvider;
 let treeView: vscode.TreeView<ContainerNode>;
+let agentTree: AgentTreeDataProvider;
 let dockerEventsProcess: cp.ChildProcess | undefined;
 
 // ── Activation ──────────────────────────────────────────────────────────────
@@ -70,12 +74,36 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
+  agentTree = new AgentTreeDataProvider(
+    new DockerContainerSource(getDockerCommand, getHostFolders),
+    watchContainerAgents
+  );
+  const agentView = vscode.window.createTreeView(AGENTS_VIEW_ID, {
+    treeDataProvider: agentTree,
+  });
+  context.subscriptions.push(
+    agentTree,
+    agentView,
+    agentTree.onDidChangeTreeData(() => {
+      const count = agentTree.attentionCount();
+      agentView.badge = count
+        ? {
+            value: count,
+            tooltip: `${count} agent${count === 1 ? '' : 's'} need attention`,
+          }
+        : undefined;
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents())
+  );
+  syncAgents();
+
   const register = (id: string, handler: (...args: never[]) => unknown) =>
     context.subscriptions.push(
       vscode.commands.registerCommand(id, handler as never)
     );
 
   register('devc-vscode.refresh', () => treeProvider.refresh());
+  register('devc-vscode.focusAgent', (node?: AgentNode) => focusAgent(node));
   register('devc-vscode.newFile', (node?: ContainerNode) =>
     createEntry(node, 'file')
   );
@@ -376,6 +404,67 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
   t.sendText(getOpenFolderCommand());
 }
 
+// ── Agents ──────────────────────────────────────────────────────────────────
+
+function syncAgents(): void {
+  agentTree.sync().catch(err => {
+    console.error('devc-vscode: agent sync error', err);
+  });
+}
+
+/**
+ * Stream a container's agents from the herdr server inside it, as the user
+ * the devcontainer CLI execs as — the herdr socket lives in their home.
+ */
+function watchContainerAgents(
+  containerId: string,
+  onAgents: Parameters<typeof watchHerdr>[3],
+  onExit: () => void
+): { dispose(): void } {
+  const docker = getDockerCommand();
+  let watcher: { dispose(): void } | undefined;
+  let disposed = false;
+  getRemoteUser(containerId, docker).then(user => {
+    if (!disposed) {
+      watcher = watchHerdr(containerId, user, docker, onAgents, onExit);
+    }
+  }, onExit);
+  return {
+    dispose() {
+      disposed = true;
+      watcher?.dispose();
+    },
+  };
+}
+
+/**
+ * Bring an agent into view: reveal the container's terminal, then have herdr
+ * switch to the agent's pane inside it.
+ */
+async function focusAgent(node?: AgentNode): Promise<void> {
+  if (node?.kind !== 'agent') {
+    return;
+  }
+  const containerId = node.container.id;
+  for (const terminal of vscode.window.terminals) {
+    const opts = terminal.creationOptions;
+    if (!('name' in opts) || opts.name !== 'devcontainer') {
+      continue;
+    }
+    if ((await resolveTerminalContext(terminal))?.containerId === containerId) {
+      terminal.show();
+      break;
+    }
+  }
+  const docker = getDockerCommand();
+  const user = await getRemoteUser(containerId, docker);
+  if (!(await focusHerdrAgent(containerId, user, node.agent.paneId, docker))) {
+    vscode.window.showErrorMessage(
+      `Could not focus ${node.agent.agent} in herdr.`
+    );
+  }
+}
+
 // ── Docker events watcher ───────────────────────────────────────────────────
 
 function startDockerEventsWatcher(): void {
@@ -445,6 +534,7 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
     await new Promise(r => setTimeout(r, 500));
   }
   treeProvider.refresh();
+  syncAgents();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
