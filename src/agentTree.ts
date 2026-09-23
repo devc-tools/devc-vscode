@@ -1,15 +1,24 @@
 import * as vscode from 'vscode';
 import { ContainerInfo, ContainerSource } from './containerTree';
 import { AgentInfo, AgentStatus } from './herdr';
+import {
+  PublishedAgent,
+  PublishedContainer,
+  WindowSnapshot,
+} from './windowRegistry';
 
 export type AgentNode =
-  | { kind: 'container'; container: ContainerInfo }
+  /** A VS Code window's group; `remote` unset for this window. */
+  | { kind: 'window'; remote?: WindowSnapshot }
+  | { kind: 'container'; container: ContainerInfo; remote?: WindowSnapshot }
   | {
       kind: 'agent';
       container: ContainerInfo;
       agent: AgentInfo;
       /** Set when detected from a terminal's output rather than by herdr. */
       terminal?: vscode.Terminal;
+      /** Set for an agent another window owns. */
+      remote?: { window: WindowSnapshot; published: PublishedAgent };
     };
 
 /**
@@ -80,6 +89,8 @@ export class AgentTreeDataProvider
   >();
   private readonly terminalIds = new WeakMap<vscode.Terminal, number>();
   private nextTerminalId = 1;
+  /** Other VS Code windows' published views. */
+  private others: WindowSnapshot[] = [];
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     AgentNode | undefined
   >();
@@ -160,6 +171,57 @@ export class AgentTreeDataProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /** Replace what other windows show; fires only when it changed. */
+  setOtherWindows(windows: WindowSnapshot[]): void {
+    if (JSON.stringify(windows) === JSON.stringify(this.others)) {
+      return;
+    }
+    this.others = windows;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** This window's view, for other windows to show. */
+  snapshotContainers(): PublishedContainer[] {
+    return this.localContainers().map(container => ({
+      container,
+      agents: this.nodesFor(container).flatMap(node =>
+        node.kind === 'agent'
+          ? [
+              {
+                key: this.keyOf(node),
+                agent: node.agent,
+                herdr: !node.terminal,
+              },
+            ]
+          : []
+      ),
+    }));
+  }
+
+  /** This window's agent with a key from snapshotContainers. */
+  findLocal(key: string): AgentNode | undefined {
+    return this.localContainers()
+      .flatMap(container => this.nodesFor(container))
+      .find(node => node.kind === 'agent' && this.keyOf(node) === key);
+  }
+
+  private keyOf(node: AgentNode & { kind: 'agent' }): string {
+    return node.terminal
+      ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
+      : `herdr:${node.container.id}:${node.agent.paneId}`;
+  }
+
+  private localContainers(): ContainerInfo[] {
+    return [...this.watched.values()]
+      .filter(w => this.nodesFor(w.container).length > 0)
+      .map(w => w.container)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private othersWithAgents(): WindowSnapshot[] {
+    return this.others.filter(w => w.containers.some(c => c.agents.length));
+  }
+
   private nodesFor(container: ContainerInfo): AgentNode[] {
     const fromHerdr: AgentNode[] = (
       this.watched.get(container.id)?.agents ?? []
@@ -184,7 +246,7 @@ export class AgentTreeDataProvider
     return id;
   }
 
-  /** Every tracked agent, for the badge and for tests. */
+  /** This window's agents, for tests. */
   allAgents(): AgentInfo[] {
     return [
       ...[...this.watched.values()].flatMap(w => w.agents),
@@ -192,58 +254,118 @@ export class AgentTreeDataProvider
     ];
   }
 
+  /** Agents needing attention in every window, for the view badge. */
   attentionCount(): number {
-    return this.allAgents().filter(a => ATTENTION.has(a.status)).length;
+    const remote = this.others.flatMap(w =>
+      w.containers.flatMap(c => c.agents.map(a => a.agent))
+    );
+    return [...this.allAgents(), ...remote].filter(a => ATTENTION.has(a.status))
+      .length;
   }
 
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
-      return [...this.watched.values()]
-        .filter(w => this.nodesFor(w.container).length > 0)
-        .sort((a, b) => a.container.name.localeCompare(b.container.name))
-        .map(w => ({ kind: 'container', container: w.container }));
+      const others = this.othersWithAgents();
+      const local: AgentNode[] = this.localContainers().map(container => ({
+        kind: 'container',
+        container,
+      }));
+      // Grouped by window only once another window has agents; this window
+      // always comes first.
+      return others.length === 0
+        ? local
+        : [
+            { kind: 'window' },
+            ...others.map(remote => ({ kind: 'window' as const, remote })),
+          ];
+    }
+    if (node.kind === 'window') {
+      if (!node.remote) {
+        return this.localContainers().map(container => ({
+          kind: 'container',
+          container,
+        }));
+      }
+      const remote = node.remote;
+      return remote.containers
+        .filter(c => c.agents.length)
+        .map(c => ({ kind: 'container', container: c.container, remote }));
     }
     if (node.kind === 'container') {
-      return this.nodesFor(node.container);
+      if (!node.remote) {
+        return this.nodesFor(node.container);
+      }
+      const window = node.remote;
+      const published =
+        window.containers.find(c => c.container.id === node.container.id)
+          ?.agents ?? [];
+      return published.map(p => ({
+        kind: 'agent',
+        container: node.container,
+        agent: p.agent,
+        remote: { window, published: p },
+      }));
     }
     return [];
   }
 
+  private agentsUnder(node: AgentNode): AgentInfo[] {
+    return this.getChildren(node).flatMap(child =>
+      child.kind === 'agent' ? [child.agent] : this.agentsUnder(child)
+    );
+  }
+
   getTreeItem(node: AgentNode): vscode.TreeItem {
+    if (node.kind === 'window') {
+      const item = new vscode.TreeItem(
+        node.remote ? node.remote.name || 'Untitled window' : 'This Window',
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = node.remote ? `window:${node.remote.pid}` : 'window:current';
+      item.iconPath = new vscode.ThemeIcon(node.remote ? 'window' : 'pinned');
+      item.description = summarize(this.agentsUnder(node));
+      item.contextValue = 'agentWindow';
+      return item;
+    }
+
+    const remotePid =
+      node.kind === 'agent' ? node.remote?.window.pid : node.remote?.pid;
+    const scope = remotePid === undefined ? '' : `w${remotePid}:`;
     if (node.kind === 'container') {
       const item = new vscode.TreeItem(
         node.container.name,
         vscode.TreeItemCollapsibleState.Expanded
       );
-      item.id = `container:${node.container.id}`;
+      item.id = `${scope}container:${node.container.id}`;
       item.iconPath = new vscode.ThemeIcon('vm');
-      item.description = summarize(
-        this.nodesFor(node.container).map(n =>
-          n.kind === 'agent' ? n.agent : undefined!
-        )
-      );
+      item.description = summarize(this.agentsUnder(node));
       item.tooltip = node.container.containerName;
       item.contextValue = 'agentContainer';
       return item;
     }
 
     const { agent } = node;
+    const herdr = node.remote ? node.remote.published.herdr : !node.terminal;
     const item = new vscode.TreeItem(
-      node.terminal ? agent.agent : `${agent.agent} (herdr)`,
+      herdr ? `${agent.agent} (herdr)` : agent.agent,
       vscode.TreeItemCollapsibleState.None
     );
-    item.id = node.terminal
-      ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
-      : `agent:${node.container.id}:${agent.paneId}`;
+    item.id = node.remote
+      ? `${scope}${node.remote.published.key}`
+      : this.keyOf(node);
     item.iconPath = STATUS_ICONS[agent.status];
     item.description = agent.status;
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
-      node.terminal
-        ? `terminal "${node.terminal.name}" (detected from its output)`
-        : `herdr workspace ${agent.workspace ?? '?'}, pane ${agent.paneId}`,
+      herdr
+        ? `herdr workspace ${agent.workspace ?? '?'}, pane ${agent.paneId}`
+        : `terminal${node.terminal ? ` "${node.terminal.name}"` : ''} (detected from its output)`,
       agent.title,
       agent.cwd,
+      node.remote &&
+        (node.remote.window.workspaceUri
+          ? `In window "${node.remote.window.name}" — click to switch to it`
+          : `In window "${node.remote.window.name}", which has no saved workspace to switch to`),
     ]
       .filter(Boolean)
       .join('\n');

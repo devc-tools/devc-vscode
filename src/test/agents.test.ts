@@ -162,7 +162,7 @@ suite('AgentTreeDataProvider', () => {
 
     const roots = tree.getChildren();
     assert.deepStrictEqual(
-      roots.map(n => n.container.id),
+      roots.map(n => n.kind === 'container' && n.container.id),
       ['b']
     );
     assert.deepStrictEqual(
