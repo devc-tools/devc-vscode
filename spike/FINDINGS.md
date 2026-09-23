@@ -47,6 +47,15 @@ five `claude` processes, the first at 114 cols vs. the user's 110, so Claude's
 full-width prompt box wrapped in the rebuilt screen and no idle rule matched. Per-pty
 adoption fixes identity and size together.
 
+Second real-Claude issue: with two terminals, one stopped updating. The pty size is only
+learned on the next probe (up to 3s), so Claude's redraw after a resize was rendered at
+the old width and the screen stayed garbled. `TerminalScreen` now keeps output since the
+last full clear and replays it on resize. Verified against real Claude Code 2.1.280
+output captured from a pty (`devc-dev`): it runs on the alt screen and emits `ESC[2J` on
+every resize. Replaying that capture with sizes learned late: the stale screen right after
+a 90→100 resize matched no rule (the symptom), and the replayed one matched
+`live_prompt_box`.
+
 ## Trade-offs vs. Claude hooks
 
 | | Terminal + herdr explain | Claude hooks |
@@ -68,6 +77,3 @@ adoption fixes identity and size together.
   shipping its manifests.
 - The OSC title rules (e.g. Claude's spinner title) can't be fed to `explain --file`;
   the title is captured (`TerminalScreen.title`) but unused.
-- Only tested with a fake agent script. Real Claude renders inline (not alt-screen) and
-  redraws relative to the cursor, which the headless emulator should handle but hasn't
-  been verified.
