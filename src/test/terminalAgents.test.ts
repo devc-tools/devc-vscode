@@ -97,7 +97,7 @@ suite('TerminalScreen', () => {
     const screen = new TerminalScreen(40, 5);
     await screen.write('\x1b]0;⠋ busy\x07\x1b[?1049h\x1b[H\x1b[2Jworking…\r\n');
     await screen.write('\x1b[H\x1b[2J❯ \r\n  ? for shortcuts');
-    assert.strictEqual(screen.text(), '❯ \n  ? for shortcuts\n');
+    assert.strictEqual(await screen.text(), '❯ \n  ? for shortcuts\n');
     assert.strictEqual(screen.title, '⠋ busy');
     screen.dispose();
   });
@@ -106,7 +106,32 @@ suite('TerminalScreen', () => {
     const screen = new TerminalScreen(40, 5);
     await screen.write('line one\r\n* Thinking… (1s)\r\n');
     await screen.write('\x1b[1A\x1b[2K* Thinking… (2s)\r\n');
-    assert.strictEqual(screen.text(), 'line one\n* Thinking… (2s)\n');
+    assert.strictEqual(await screen.text(), 'line one\n* Thinking… (2s)\n');
+    screen.dispose();
+  });
+
+  test('a late resize rebuilds output drawn for the new width', async () => {
+    // The real terminal was resized to 12 columns and the agent redrew for
+    // it, but the emulator only learns the size afterwards.
+    const rule = '─'.repeat(12);
+    const screen = new TerminalScreen(16, 6);
+    await screen.write('old frame at the old width\r\n');
+    await screen.write(`\x1b[2J\x1b[H${rule}❯ \r\n${rule}`);
+    assert.notStrictEqual((await screen.text()).split('\n')[1], '❯');
+
+    await screen.resize(12, 6);
+    assert.strictEqual(await screen.text(), `${rule}\n❯ \n${rule}\n`);
+    assert.deepStrictEqual(screen.size, { cols: 12, rows: 6 });
+    screen.dispose();
+  });
+
+  test('writes queued behind a resize land after the replay', async () => {
+    const screen = new TerminalScreen(20, 4);
+    await screen.write('\x1b[2J\x1b[Hfirst\r\n');
+    const resized = screen.resize(10, 4);
+    const written = screen.write('second\r\n');
+    await Promise.all([resized, written]);
+    assert.strictEqual(await screen.text(), 'first\nsecond\n');
     screen.dispose();
   });
 });

@@ -184,7 +184,8 @@ export async function probeContainer(
   const res = await execDocker(
     ['exec', ...userArgs(user), containerId, 'sh', '-c', PROBE_SCRIPT],
     undefined,
-    dockerCommand
+    dockerCommand,
+    EXEC_TIMEOUT_MS
   );
   return res.exitCode === 0
     ? parseProbe(res.stdout.toString('utf8'))
@@ -211,7 +212,8 @@ export async function classifyScreen(
       agent,
     ],
     Buffer.from(screen, 'utf8'),
-    dockerCommand
+    dockerCommand,
+    EXEC_TIMEOUT_MS
   );
   return parseExplain(res.stdout.toString('utf8').split('\n')[0] ?? '');
 }
@@ -241,6 +243,8 @@ export interface TerminalAgentDeps {
   log(message: string): void;
 }
 
+/** A probe or classification taking longer than this is abandoned. */
+const EXEC_TIMEOUT_MS = 10000;
 /** Output settles for this long before the screen is classified. */
 const SETTLE_MS = 300;
 /** Re-check a quiet terminal this often: a pty to adopt, an agent exiting. */
@@ -267,7 +271,15 @@ class TrackedExecution {
   ) {
     // read() only yields data written after it is first called.
     const stream = execution.read();
-    this.pump(stream).finally(() => this.dispose());
+    deps.log(
+      `${terminal.name}: command started: ${execution.commandLine.value}`
+    );
+    this.pump(stream)
+      .catch(err => deps.log(`${terminal.name}: read failed: ${err}`))
+      .finally(() => {
+        deps.log(`${terminal.name}: output stream ended`);
+        this.dispose();
+      });
     this.schedule(0);
   }
 
@@ -333,15 +345,11 @@ class TrackedExecution {
 
       const info = probe.ttys.get(this.tty)!;
       if (info.size) {
-        this.screen.resize(info.size.cols, info.size.rows);
+        await this.screen.resize(info.size.cols, info.size.rows);
       }
+      const screen = await this.screen.text();
       const result = info.agent
-        ? await this.deps.classify(
-            id,
-            user,
-            info.agent.agent,
-            this.screen.text()
-          )
+        ? await this.deps.classify(id, user, info.agent.agent, screen)
         : undefined;
       if (this.disposed || (result?.keepPrevious && this.last)) {
         return;
@@ -354,7 +362,7 @@ class TrackedExecution {
         this.last = summary;
         this.deps.log(`${this.terminal.name} ${this.tty}: ${summary}`);
         if (result && !result.rule) {
-          this.deps.log(`screen:\n${this.screen.text()}`);
+          this.deps.log(`screen:\n${screen}`);
         }
       }
       // The agent is known from the pty's own processes, so herdr's fallback
@@ -423,6 +431,11 @@ export class TerminalAgentTracker implements vscode.Disposable {
         );
       }),
       vscode.window.onDidEndTerminalShellExecution(e => {
+        if (deps.isContainerTerminal(e.terminal)) {
+          deps.log(
+            `${e.terminal.name}: command ended (exit ${e.exitCode ?? '?'})`
+          );
+        }
         this.tracked.get(e.terminal)?.dispose();
         this.tracked.delete(e.terminal);
       }),

@@ -229,24 +229,21 @@ export class AgentTreeDataProvider
 
     const { agent } = node;
     const item = new vscode.TreeItem(
-      agent.workspace ?? (node.terminal ? node.terminal.name : agent.agent),
+      agent.agent,
       vscode.TreeItemCollapsibleState.None
     );
     item.id = node.terminal
       ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
       : `agent:${node.container.id}:${agent.paneId}`;
     item.iconPath = STATUS_ICONS[agent.status];
-    item.description =
-      agent.workspace || node.terminal
-        ? `${agent.agent} · ${agent.status}`
-        : agent.status;
+    item.description = agent.status;
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
+      node.terminal
+        ? `terminal "${node.terminal.name}" (detected from its output)`
+        : `herdr workspace ${agent.workspace ?? '?'}, pane ${agent.paneId}`,
       agent.title,
       agent.cwd,
-      node.terminal
-        ? 'detected from terminal output'
-        : `herdr pane ${agent.paneId}`,
     ]
       .filter(Boolean)
       .join('\n');
