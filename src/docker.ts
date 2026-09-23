@@ -9,17 +9,28 @@ export interface DockerExecResult {
 /**
  * Run `docker <args>` on the host, optionally piping `input` to stdin.
  * Never throws on non-zero exit codes; rejects only when docker itself
- * cannot be spawned (e.g. not installed / not on PATH).
+ * cannot be spawned (e.g. not installed / not on PATH), or when `timeoutMs`
+ * passes first — the process is killed then.
  */
 export function execDocker(
   args: string[],
   input?: Uint8Array,
-  dockerCommand = 'docker'
+  dockerCommand = 'docker',
+  timeoutMs?: number
 ): Promise<DockerExecResult> {
   return new Promise((resolve, reject) => {
     const child = cp.spawn(dockerCommand, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            child.kill();
+            reject(
+              new Error(`docker ${args[0]} timed out after ${timeoutMs}ms`)
+            );
+          }, timeoutMs);
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
@@ -31,9 +42,11 @@ export function execDocker(
     });
 
     child.on('error', err => {
+      clearTimeout(timer);
       reject(new Error(`Failed to start ${dockerCommand}: ${err.message}`));
     });
     child.on('close', code => {
+      clearTimeout(timer);
       resolve({
         stdout: Buffer.concat(stdoutChunks),
         stderr: Buffer.concat(stderrChunks),
