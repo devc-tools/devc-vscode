@@ -8,7 +8,7 @@ import {
 } from './windowRegistry';
 
 export type AgentNode =
-  /** A VS Code window's group; `remote` unset for this window. */
+  /** A VS Code window's group, this window first; `remote` unset for it. */
   | { kind: 'window'; remote?: WindowSnapshot }
   | { kind: 'container'; container: ContainerInfo; remote?: WindowSnapshot }
   | {
@@ -318,11 +318,12 @@ export class AgentTreeDataProvider
   getTreeItem(node: AgentNode): vscode.TreeItem {
     if (node.kind === 'window') {
       const item = new vscode.TreeItem(
-        node.remote ? node.remote.name || 'Untitled window' : 'This Window',
+        (node.remote ? node.remote.name : vscode.workspace.name) ||
+          'Untitled window',
         vscode.TreeItemCollapsibleState.Expanded
       );
       item.id = node.remote ? `window:${node.remote.pid}` : 'window:current';
-      item.iconPath = new vscode.ThemeIcon(node.remote ? 'window' : 'pinned');
+      item.iconPath = new vscode.ThemeIcon('window');
       item.description = summarize(this.agentsUnder(node));
       item.contextValue = 'agentWindow';
       return item;
