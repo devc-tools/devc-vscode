@@ -2,7 +2,7 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AgentInfo, parseSnapshot } from './herdr';
+import { AgentInfo, isErrorResponse, parseSnapshot } from './herdr';
 import { Classification, parseExplain } from './terminalAgents';
 
 /**
@@ -323,15 +323,6 @@ function shellQuote(value: string): string {
   return /^[\w.@%+=:,/-]+$/.test(value)
     ? value
     : `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function isErrorResponse(line: string): boolean {
-  try {
-    const response = JSON.parse(line);
-    return isObject(response) && isObject(response.error);
-  } catch {
-    return false;
-  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

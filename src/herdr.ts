@@ -182,7 +182,7 @@ export function watchHerdr(
   containerId: string,
   user: string | undefined,
   dockerCommand: string,
-  onAgents: (agents: AgentInfo[]) => void,
+  onAgents: (agents: AgentInfo[], running: boolean) => void,
   onExit: () => void
 ): { dispose(): void } {
   const child = cp.spawn(
@@ -201,7 +201,7 @@ export function watchHerdr(
       buf = buf.slice(nl + 1);
       const agents = line ? parseSnapshot(line) : undefined;
       if (agents && !disposed) {
-        onAgents(agents);
+        onAgents(agents, !isErrorResponse(line));
       }
     }
   });
@@ -280,6 +280,19 @@ export async function closeHerdrPane(
     dockerCommand
   );
   return res.exitCode === 0;
+}
+
+/**
+ * Whether a line is a herdr `{"error":{...}}` response — for a snapshot,
+ * usually `server_not_running`.
+ */
+export function isErrorResponse(line: string): boolean {
+  try {
+    const response = JSON.parse(line);
+    return isObject(response) && isObject(response.error);
+  } catch {
+    return false;
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

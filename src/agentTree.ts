@@ -65,13 +65,16 @@ type GroupNode = Extract<
  */
 export type WatchAgents = (
   containerId: string,
-  onAgents: (agents: AgentInfo[]) => void,
+  /** `running` is false while herdr's server is not up; true if omitted. */
+  onAgents: (agents: AgentInfo[], running?: boolean) => void,
   onExit: () => void
 ) => { dispose(): void };
 
 interface Watched {
   container: ContainerInfo;
   agents: AgentInfo[];
+  /** herdr's server is up in the container. */
+  running: boolean;
   watcher: { dispose(): void };
 }
 
@@ -87,6 +90,11 @@ export interface HostSessionSource {
   foregrounds(): Promise<string[]>;
   /** This window's file:// workspace folders, as host paths. */
   folders(): string[];
+  /**
+   * Names of the sessions that belong to this window whether or not they have
+   * agents: those `herdrs` names after its folders.
+   */
+  workspaceSessions(): string[];
   /** One reading of a session's agents; undefined when it cannot be read. */
   read(session: HostSession): Promise<AgentInfo[] | undefined>;
   /** Stream a session's agents, as WatchAgents does for a container. */
@@ -102,6 +110,8 @@ interface WatchedSession {
   agents: AgentInfo[];
   /** A terminal in this window is a client of the session. */
   attached: boolean;
+  /** Named after one of this window's folders. */
+  workspace: boolean;
   watcher: { dispose(): void };
 }
 
@@ -190,7 +200,9 @@ export function summarize(agents: AgentInfo[]): string {
 /**
  * Agents herdr is tracking in each of the workspace's dev containers, one
  * watcher per container, and in the host herdr sessions this window owns, one
- * watcher per session. Groups without any detected agent are left out.
+ * watcher per session. A container shows while its herdr is running or it has
+ * agents; a session while it is attached here, named after a workspace folder,
+ * or has agents in this window's folders.
  */
 export class AgentTreeDataProvider
   implements vscode.TreeDataProvider<AgentNode>, vscode.Disposable
@@ -200,6 +212,9 @@ export class AgentTreeDataProvider
   private readonly sessions = new Map<string, WatchedSession>();
   private folders: string[] = [];
   private defaultSession: string | undefined;
+  private workspaceSessions: string[] = [];
+  /** Containers with a terminal open on them in this window. */
+  private attachedContainers = new Set<string>();
   private sessionSync: Promise<void> | undefined;
   private sessionSyncAgain = false;
   private disposed = false;
@@ -247,14 +262,19 @@ export class AgentTreeDataProvider
       const entry: Watched = {
         container,
         agents: [],
+        running: false,
         watcher: { dispose() {} },
       };
       this.watched.set(container.id, entry);
       entry.watcher = this.watch(
         container.id,
-        agents => {
-          if (JSON.stringify(agents) !== JSON.stringify(entry.agents)) {
+        (agents, running = true) => {
+          if (
+            running !== entry.running ||
+            JSON.stringify(agents) !== JSON.stringify(entry.agents)
+          ) {
             entry.agents = agents;
+            entry.running = running;
             this._onDidChangeTreeData.fire(undefined);
           }
         },
@@ -307,23 +327,30 @@ export class AgentTreeDataProvider
       )
     );
     const folders = hosts.folders();
+    const workspaceSessions = hosts.workspaceSessions();
     if (this.disposed) {
       return;
     }
     let changed =
       JSON.stringify(folders) !== JSON.stringify(this.folders) ||
+      JSON.stringify(workspaceSessions) !==
+        JSON.stringify(this.workspaceSessions) ||
       defaultSession !== this.defaultSession;
     this.folders = folders;
+    this.workspaceSessions = workspaceSessions;
     this.defaultSession = defaultSession;
 
     const live = new Map(sessions.map(s => [s.name, s]));
     for (const [name, entry] of this.sessions) {
       const session = live.get(name);
       const isAttached = attached.has(name);
+      const isWorkspace = !!session && this.isWorkspaceSession(session);
       if (
         !session ||
         session.socketPath !== entry.session.socketPath ||
-        (!isAttached && ownedAgents(entry.agents, false, folders).length === 0)
+        (!isAttached &&
+          !isWorkspace &&
+          ownedAgents(entry.agents, false, folders).length === 0)
       ) {
         entry.watcher.dispose();
         this.sessions.delete(name);
@@ -332,20 +359,23 @@ export class AgentTreeDataProvider
       }
       if (
         entry.attached !== isAttached ||
+        entry.workspace !== isWorkspace ||
         entry.session.default !== session.default
       ) {
         changed = true;
       }
       entry.session = session;
       entry.attached = isAttached;
+      entry.workspace = isWorkspace;
     }
     for (const session of sessions) {
       if (this.sessions.has(session.name)) {
         continue;
       }
       const isAttached = attached.has(session.name);
+      const isWorkspace = this.isWorkspaceSession(session);
       let agents: AgentInfo[] = [];
-      if (!isAttached) {
+      if (!isAttached && !isWorkspace) {
         const read = await hosts.read(session);
         if (!read || ownedAgents(read, false, folders).length === 0) {
           continue;
@@ -355,7 +385,7 @@ export class AgentTreeDataProvider
       if (this.disposed || this.sessions.has(session.name)) {
         return;
       }
-      this.watchSession(session, isAttached, agents);
+      this.watchSession(session, isAttached, isWorkspace, agents);
       changed = true;
     }
     if (changed) {
@@ -363,15 +393,22 @@ export class AgentTreeDataProvider
     }
   }
 
+  /** Named after a workspace folder; the default session never is. */
+  private isWorkspaceSession(session: HostSession): boolean {
+    return !session.default && this.workspaceSessions.includes(session.name);
+  }
+
   private watchSession(
     session: HostSession,
     attached: boolean,
+    workspace: boolean,
     agents: AgentInfo[]
   ): void {
     const entry: WatchedSession = {
       session,
       agents,
       attached,
+      workspace,
       watcher: { dispose() {} },
     };
     this.sessions.set(session.name, entry);
@@ -401,6 +438,18 @@ export class AgentTreeDataProvider
   /** The name a bare `herdr` attaches to, as of the last session sync. */
   defaultSessionName(): string | undefined {
     return this.defaultSession;
+  }
+
+  /** Record which containers have a terminal open on them in this window. */
+  setAttachedContainers(ids: Set<string>): void {
+    if (
+      ids.size === this.attachedContainers.size &&
+      [...ids].every(id => this.attachedContainers.has(id))
+    ) {
+      return;
+    }
+    this.attachedContainers = new Set(ids);
+    this._onDidChangeTreeData.fire(undefined);
   }
 
   /** Record (or clear, with undefined) the agent a terminal is showing. */
@@ -498,14 +547,14 @@ export class AgentTreeDataProvider
   }
 
   /**
-   * This window's groups with agents: containers and sessions by label, then
-   * the host terminals.
+   * This window's groups: containers and sessions by label, then the host
+   * terminals.
    */
   private localGroups(): GroupNode[] {
     const containers: { label: string; node: GroupNode }[] = [
       ...this.watched.values(),
     ]
-      .filter(w => this.nodesFor(w.container).length > 0)
+      .filter(w => w.running || this.nodesFor(w.container).length > 0)
       .map(w => ({
         label: w.container.name,
         node: { kind: 'container', container: w.container },
@@ -513,7 +562,9 @@ export class AgentTreeDataProvider
     const sessions: { label: string; node: GroupNode }[] = [
       ...this.sessions.values(),
     ]
-      .filter(s => this.nodesForSession(s).length > 0)
+      .filter(
+        s => s.attached || s.workspace || this.nodesForSession(s).length > 0
+      )
       .map(s => ({
         label: sessionLabel(s.session),
         node: { kind: 'session', session: s.session.name, host: s.session },
@@ -703,7 +754,9 @@ export class AgentTreeDataProvider
       // Only this window's containers can be stopped: their terminals are here.
       item.contextValue = node.remote
         ? 'agentContainerRemote'
-        : 'agentContainer';
+        : this.attachedContainers.has(node.container.id)
+          ? 'agentContainer.attached'
+          : 'agentContainer';
       return item;
     }
     if (node.kind === 'session') {
@@ -724,9 +777,13 @@ export class AgentTreeDataProvider
       // herdr will not delete the default session.
       item.contextValue = !node.host
         ? 'agentSessionRemote'
-        : node.host.default
-          ? 'agentSession.default'
-          : 'agentSession';
+        : [
+            'agentSession',
+            node.host.default && '.default',
+            this.sessions.get(node.session)?.attached && '.attached',
+          ]
+            .filter(Boolean)
+            .join('');
       return item;
     }
     if (node.kind === 'local') {

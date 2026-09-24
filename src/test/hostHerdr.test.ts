@@ -212,6 +212,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       sessions: [] as HostSession[],
       foregrounds: [] as string[],
       folders: [] as string[],
+      workspaceSessions: [] as string[],
       agents: new Map<string, AgentInfo[]>(),
       watchers: new Map<
         string,
@@ -222,6 +223,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       list: async () => host.sessions,
       foregrounds: async () => host.foregrounds,
       folders: () => host.folders,
+      workspaceSessions: () => host.workspaceSessions,
       read: async s => host.agents.get(s.name),
       watch(s, onAgents, onExit) {
         const w = { push: onAgents, exit: onExit, disposed: false };
@@ -287,7 +289,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     // Stoppable but not deletable: herdr refuses to delete it.
     assert.strictEqual(
       tree.getTreeItem(tree.getChildren()[0]).contextValue,
-      'agentSession.default'
+      'agentSession.default.attached'
     );
     tree.dispose();
   });
@@ -370,7 +372,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       ]
     );
     const sessionItem = tree.getTreeItem(roots[1]);
-    assert.strictEqual(sessionItem.contextValue, 'agentSession');
+    assert.strictEqual(sessionItem.contextValue, 'agentSession.attached');
     assert.strictEqual(
       (sessionItem.iconPath as vscode.ThemeIcon).id,
       'terminal-tmux'
@@ -398,6 +400,53 @@ suite('AgentTreeDataProvider with host sessions', () => {
     );
     const node = tree.findLocal('host-herdr:delta:w1:p1');
     assert.strictEqual(node?.kind === 'agent' && node.session, 'delta');
+    tree.dispose();
+  });
+
+  test('a session named after a folder shows without agents', async () => {
+    const { host, source } = fakeHost();
+    host.sessions = [session('default', true), session('app'), session('x')];
+    host.folders = ['/work/app'];
+    host.workspaceSessions = ['app', 'default'];
+    host.agents.set('app', []);
+    host.agents.set('default', []);
+    const tree = treeWith(source);
+    await tree.syncSessions();
+
+    const roots = tree.getChildren();
+    // The default session is never matched by name.
+    assert.deepStrictEqual(labels(tree, roots), ['app']);
+    assert.deepStrictEqual(tree.getChildren(roots[0]), []);
+    // No terminal here is a client, so it offers to attach.
+    assert.strictEqual(tree.getTreeItem(roots[0]).contextValue, 'agentSession');
+
+    host.foregrounds = ['herdr --session app'];
+    await tree.syncSessions();
+    assert.strictEqual(
+      tree.getTreeItem(tree.getChildren()[0]).contextValue,
+      'agentSession.attached'
+    );
+
+    // Still streamed once detached: the name keeps it owned.
+    host.foregrounds = [];
+    await tree.syncSessions();
+    assert.strictEqual(host.watchers.get('app')!.disposed, false);
+    assert.deepStrictEqual(labels(tree, tree.getChildren()), ['app']);
+
+    host.workspaceSessions = [];
+    await tree.syncSessions();
+    assert.strictEqual(host.watchers.get('app')!.disposed, true);
+    assert.deepStrictEqual(tree.getChildren(), []);
+    tree.dispose();
+  });
+
+  test('an attached session shows without agents', async () => {
+    const { host, source } = fakeHost();
+    host.sessions = [session('app')];
+    host.foregrounds = ['herdr --session app'];
+    const tree = treeWith(source);
+    await tree.syncSessions();
+    assert.deepStrictEqual(labels(tree, tree.getChildren()), ['app']);
     tree.dispose();
   });
 

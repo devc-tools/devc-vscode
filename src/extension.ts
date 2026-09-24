@@ -135,6 +135,8 @@ export function activate(context: vscode.ExtensionContext) {
         return found.flatMap(fg => (fg ? [fg.args] : []));
       },
       folders: getHostFolders,
+      workspaceSessions: () =>
+        workspaceSessionDirs().map(dir => path.basename(dir)),
       read: readHostSession,
       watch: watchHostSession,
     }
@@ -261,6 +263,9 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node));
   register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node));
   register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node));
+  register('devc-vscode.attachAgentGroup', (node?: AgentNode) =>
+    attachAgentGroup(node)
+  );
   register('devc-vscode.attachTerminal', (node?: ContainerNode) =>
     attachTerminal(node)
   );
@@ -627,6 +632,7 @@ function syncAttached(): void {
     // A later sync saw newer terminals; its answer wins.
     if (run === attachedSync) {
       treeProvider.setAttached(ids);
+      agentTree.setAttachedContainers(ids);
     }
   })().catch(err => {
     console.error('devc-vscode: terminal sync error', err);
@@ -818,6 +824,34 @@ async function focusHostAgent(
   }
   if (!(await focusHostHerdrAgent(session, agent))) {
     vscode.window.showErrorMessage(`Could not focus ${agent.agent} in herdr.`);
+  }
+}
+
+/**
+ * Show a terminal on an Agents view group: a client of a host session, or a
+ * container terminal, opening one attached to herdr when there is none.
+ */
+async function attachAgentGroup(node?: AgentNode): Promise<void> {
+  if (node?.kind === 'session' && node.host) {
+    const session = node.host;
+    const existing = await findHostClient(session);
+    if (existing) {
+      existing.show();
+      return;
+    }
+    const dirs = workspaceSessionDirs();
+    openHostHerdrTerminal(
+      session,
+      dirs.find(dir => path.basename(dir) === session.name) ??
+        getHostFolders()[0]
+    );
+  } else if (node?.kind === 'container' && !node.remote) {
+    const existing = await containerTerminals(node.container.id);
+    if (existing.length) {
+      existing[0].show();
+      return;
+    }
+    openContainerTerminal(node.container.localFolder, getHerdrAttachCommand());
   }
 }
 
@@ -1191,6 +1225,20 @@ function getHostFolders(): string[] {
       ?.filter(f => f.uri.scheme === 'file')
       .map(f => f.uri.fsPath) ?? []
   );
+}
+
+/**
+ * Host directories a herdr session named by `herdrs` (after the directory's
+ * basename) belongs to this window from: its folders and the directory its
+ * saved workspace file is in.
+ */
+function workspaceSessionDirs(): string[] {
+  const file = vscode.workspace.workspaceFile;
+  const dirs = getHostFolders();
+  if (file?.scheme === 'file') {
+    dirs.push(path.dirname(file.fsPath));
+  }
+  return [...new Set(dirs)];
 }
 
 /** Cache of host folder -> terminal context, cleared on docker events. */

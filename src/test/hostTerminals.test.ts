@@ -238,6 +238,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
       list: async () => [{ name: 'app', default: false, socketPath: '/s' }],
       foregrounds: async () => ['herdr --session app'],
       folders: () => [],
+      workspaceSessions: () => [],
       read: async () => [agent('w1:p1')],
       watch(_s, onAgents) {
         onAgents([agent('w1:p1')]);

@@ -104,6 +104,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "devc-vscode.attachAgentGroup",
+        "title": "Attach Terminal",
+        "category": "Dev Container FS",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "devc-vscode.stopContainer",
         "title": "Stop Container",
         "category": "Dev Container FS",
@@ -173,24 +179,29 @@
           "group": "inline"
         },
         {
-          "command": "devc-vscode.stopContainer",
-          "when": "view == devc-vscode.agents && viewItem == agentContainer",
+          "command": "devc-vscode.attachAgentGroup",
+          "when": "view == devc-vscode.agents && viewItem =~ /^(agentContainer|agentSession(\\.default)?)$/",
           "group": "inline@1"
+        },
+        {
+          "command": "devc-vscode.stopContainer",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
+          "group": "inline@2"
         },
         {
           "command": "devc-vscode.downContainer",
-          "when": "view == devc-vscode.agents && viewItem == agentContainer",
-          "group": "inline@2"
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
+          "group": "inline@3"
         },
         {
           "command": "devc-vscode.stopSession",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.default)?$/",
-          "group": "inline@1"
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.default)?(\\.attached)?$/",
+          "group": "inline@2"
         },
         {
           "command": "devc-vscode.deleteSession",
-          "when": "view == devc-vscode.agents && viewItem == agentSession",
-          "group": "inline@2"
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.attached)?$/",
+          "group": "inline@3"
         }
       ],
       "explorer/context": [
@@ -227,6 +238,10 @@
         {
           "command": "devc-vscode.deleteSession",
           "when": "false"
+        },
+        {
+          "command": "devc-vscode.attachAgentGroup",
+          "when": "false"
         }
       ]
     },
@@ -257,7 +272,7 @@
     "viewsWelcome": [
       {
         "view": "devc-vscode.agents",
-        "contents": "No agents detected. Agents running in herdr inside this workspace's dev containers, or in host herdr sessions attached in this window's terminals or working in its folders, appear here."
+        "contents": "No agents detected. herdr in this workspace's dev containers, host herdr sessions named after its folders or attached in this window's terminals, and agents working in its folders appear here."
       }
     ]
   },

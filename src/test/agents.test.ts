@@ -141,7 +141,7 @@ suite('AgentTreeDataProvider', () => {
     const watchers = new Map<
       string,
       {
-        push: (agents: AgentInfo[]) => void;
+        push: (agents: AgentInfo[], running?: boolean) => void;
         exit: () => void;
         disposed: boolean;
       }
@@ -178,6 +178,30 @@ suite('AgentTreeDataProvider', () => {
       ['w1:p1']
     );
     assert.strictEqual(tree.attentionCount(), 1);
+    tree.dispose();
+  });
+
+  test('shows a container whose herdr is running without agents', async () => {
+    const source = new FakeSource();
+    source.containers = [container('a')];
+    const { watch, watchers } = fakeWatch();
+    const tree = new AgentTreeDataProvider(source, watch);
+    await tree.sync();
+
+    watchers.get('a')!.push([], false);
+    assert.deepStrictEqual(tree.getChildren(), []);
+    watchers.get('a')!.push([], true);
+    const [root] = tree.getChildren();
+    assert.strictEqual(root.kind === 'container' && root.container.id, 'a');
+    assert.strictEqual(tree.getTreeItem(root).contextValue, 'agentContainer');
+
+    tree.setAttachedContainers(new Set(['a']));
+    assert.strictEqual(
+      tree.getTreeItem(root).contextValue,
+      'agentContainer.attached'
+    );
+    watchers.get('a')!.push([], false);
+    assert.deepStrictEqual(tree.getChildren(), []);
     tree.dispose();
   });
 
