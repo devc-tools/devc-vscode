@@ -234,7 +234,7 @@ suite('AgentTreeDataProvider across windows', () => {
     tree.setOtherWindows([snapshot(2, 'beta', 0)]);
     assert.deepStrictEqual(
       tree.getChildren().map(n => n.kind),
-      ['thisWindow']
+      ['container']
     );
     tree.dispose();
   });

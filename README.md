@@ -30,7 +30,7 @@ Each container gets one long-lived `docker exec -i -u <remoteUser> <id> sh -c â€
 
 ### Across windows
 
-Each VS Code window publishes what its Agents view shows to a file in the extension's global storage, which every window shares, and watches that directory for the other windows' files. This window's groups sit under a node labelled with its workspace name. Once another window has agents, a collapsed **Other Windows** node follows it, holding one node per other window labelled with its workspace name, so it's always clear which window a click lands in. The badge counts agents needing attention in every window.
+Each VS Code window publishes what its Agents view shows to a file in the extension's global storage, which every window shares, and watches that directory for the other windows' files. Once another window has agents, this window's groups move under a node labelled with its workspace name, followed by a collapsed **Other Windows** node holding one node per other window labelled with its workspace name, so it's always clear which window a click lands in. The badge counts agents needing attention in every window.
 
 Clicking an agent owned by another window drops a focus request for that window, which reveals its own terminal and herdr pane, then brings that window to the front with `vscode.openFolder` on its workspace. VS Code focuses a window that already has that folder or workspace open rather than opening a second one. An untitled multi-root workspace has nothing to reopen, so its agents are listed but not switchable.
 

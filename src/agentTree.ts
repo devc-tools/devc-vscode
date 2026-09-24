@@ -80,7 +80,7 @@ type GroupNode = Extract<
   { kind: 'container' | 'session' | 'local' }
 >;
 
-/** The root holding this window's groups. */
+/** Holds this window's groups while Other Windows is shown. */
 export const THIS_WINDOW: AgentNode = { kind: 'thisWindow' };
 
 /**
@@ -773,8 +773,9 @@ export class AgentTreeDataProvider
 
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
+      // This window's groups get a node of their own only beside others'.
       return this.othersWithAgents().length === 0
-        ? [THIS_WINDOW]
+        ? this.localGroups()
         : [THIS_WINDOW, { kind: 'otherWindows' }];
     }
     if (node.kind === 'thisWindow') {
