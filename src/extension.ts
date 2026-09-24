@@ -2,7 +2,13 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
-import { AgentNode, AgentTreeDataProvider, folderOf } from './agentTree';
+import {
+  AgentNode,
+  AgentTreeDataProvider,
+  CONTAINER_ICON,
+  SESSION_ICON,
+  folderOf,
+} from './agentTree';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
 import {
   ContainerNode,
@@ -532,6 +538,7 @@ function openContainerTerminal(
   const t = vscode.window.createTerminal({
     name: 'devcontainer',
     cwd,
+    iconPath: CONTAINER_ICON,
     location: vscode.TerminalLocation.Editor,
     isTransient: true,
     hideFromUser: true,
@@ -769,6 +776,7 @@ function openHostHerdrTerminal(
   const t = vscode.window.createTerminal({
     name: `herdr ${session.default ? 'default' : session.name}`,
     cwd,
+    iconPath: SESSION_ICON,
     location: vscode.TerminalLocation.Editor,
     isTransient: true,
     // See openContainerTerminal.

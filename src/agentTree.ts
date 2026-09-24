@@ -144,6 +144,13 @@ function sessionLabel(session: HostSession): string {
   return session.default ? 'default' : session.name;
 }
 
+/**
+ * Group icons, shared with the terminals the extension opens so a terminal tab
+ * matches the group its agents appear under.
+ */
+export const CONTAINER_ICON = new vscode.ThemeIcon('vm');
+export const SESSION_ICON = new vscode.ThemeIcon('terminal-tmux');
+
 const STATUS_ICONS: Record<AgentStatus, vscode.ThemeIcon> = {
   working: new vscode.ThemeIcon(
     'loading~spin',
@@ -690,7 +697,7 @@ export class AgentTreeDataProvider
         vscode.TreeItemCollapsibleState.Expanded
       );
       item.id = `${scope}container:${node.container.id}`;
-      item.iconPath = new vscode.ThemeIcon('vm');
+      item.iconPath = CONTAINER_ICON;
       item.description = summarize(this.agentsUnder(node));
       item.tooltip = node.container.containerName;
       item.contextValue = 'agentContainer';
@@ -702,7 +709,7 @@ export class AgentTreeDataProvider
         vscode.TreeItemCollapsibleState.Expanded
       );
       item.id = `${scope}session:${node.session}`;
-      item.iconPath = new vscode.ThemeIcon('terminal-tmux');
+      item.iconPath = SESSION_ICON;
       item.description = summarize(this.agentsUnder(node));
       item.tooltip = [
         `herdr session "${node.session}" on the host`,
