@@ -16,8 +16,9 @@ function snapshot(pid: number, name: string, agents = 1): WindowSnapshot {
     pid,
     name,
     workspaceUri: `file:///work/${name}`,
-    containers: [
+    groups: [
       {
+        kind: 'container',
         container: {
           id: `c${pid}`,
           name,
@@ -144,6 +145,33 @@ suite('WindowRegistry', () => {
     b.r.dispose();
   });
 
+  test('container and session groups round-trip', () => {
+    const a = registry(1);
+    const b = registry(2);
+    const published: WindowSnapshot = {
+      ...snapshot(2, 'beta'),
+      groups: [
+        ...snapshot(2, 'beta').groups,
+        {
+          kind: 'session',
+          session: 'devc-vscode',
+          agents: [
+            {
+              key: 'host-herdr:devc-vscode:w1:p1',
+              agent: { paneId: 'w1:p1', agent: 'pi', status: 'idle' },
+              herdr: true,
+            },
+          ],
+        },
+      ],
+    };
+    b.r.publish(published);
+    a.r.scan();
+    assert.deepStrictEqual(a.seen.others.at(-1), [published]);
+    a.r.dispose();
+    b.r.dispose();
+  });
+
   test('changes arrive through the directory watch', async () => {
     const a = registry(1);
     const b = registry(2);
@@ -231,7 +259,7 @@ suite('AgentTreeDataProvider across windows', () => {
     });
     await tree.sync();
     push([{ paneId: 'w1:p1', agent: 'claude', status: 'idle' }]);
-    const [published] = tree.snapshotContainers();
+    const [published] = tree.snapshotGroups();
     const key = published.agents[0].key;
     const node = tree.findLocal(key);
     assert.strictEqual(node?.kind === 'agent' && node.agent.paneId, 'w1:p1');

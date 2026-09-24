@@ -138,7 +138,7 @@
         },
         {
           "id": "devc-vscode.agents",
-          "name": "Dev Container Agents"
+          "name": "Agents"
         }
       ]
     },
@@ -157,7 +157,7 @@
     "viewsWelcome": [
       {
         "view": "devc-vscode.agents",
-        "contents": "No agents detected. Agents running in herdr inside this workspace's dev containers appear here."
+        "contents": "No agents detected. Agents running in herdr inside this workspace's dev containers, or in host herdr sessions attached in this window's terminals or working in its folders, appear here."
       }
     ]
   },

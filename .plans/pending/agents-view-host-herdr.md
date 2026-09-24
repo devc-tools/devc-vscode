@@ -5,14 +5,14 @@ running on the host (not in a container), alongside the existing container agent
 
 ## Checklist
 
-- [ ] Rename the view and output channel to "Agents"
-- [ ] `src/hostHerdr.ts`: list host sessions, watch one session, focus an agent in one
-- [ ] `src/hostProcesses.ts`: a VS Code terminal's tty and foreground process on the host
-- [ ] Session ownership: attached in this window's terminals, or matched by folder
-- [ ] Tree: session groups under the window, beside container groups
-- [ ] Window registry snapshot reshaped to `groups`, published and read
-- [ ] Focus: host herdr agents in this window and from another window
-- [ ] Tests (see Validation)
+- [x] Rename the view and output channel to "Agents"
+- [x] `src/hostHerdr.ts`: list host sessions, watch one session, focus an agent in one
+- [x] `src/hostProcesses.ts`: a VS Code terminal's tty and foreground process on the host
+- [x] Session ownership: attached in this window's terminals, or matched by folder
+- [x] Tree: session groups under the window, beside container groups
+- [x] Window registry snapshot reshaped to `groups`, published and read
+- [x] Focus: host herdr agents in this window and from another window
+- [x] Tests (see Validation)
 
 ## Scope decisions
 

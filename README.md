@@ -22,7 +22,7 @@ The terminal is created with `hideFromUser` and then immediately shown. That is 
 
 ## Agent status
 
-A second Explorer view, **Dev Container Agents**, lists the coding agents [herdr](https://herdr.dev) is running inside each in-scope container, with each agent's state: working, blocked, done, idle or unknown. Each container row also shows a count per state. The view's badge counts agents that are blocked or done, since those are waiting on you. Clicking an agent reveals that container's terminal and tells herdr to focus the agent's pane.
+A second Explorer view, **Agents**, lists the coding agents [herdr](https://herdr.dev) is running inside each in-scope container, with each agent's state: working, blocked, done, idle or unknown. It also lists agents in herdr sessions running on the host (macOS and Linux): every agent of a session attached in one of the window's terminals (`herdr --session <name>`, or a bare `herdr` for the default session), and otherwise only the agents working in one of the window's folders. Each container or session row also shows a count per state. The view's badge counts agents that are blocked or done, since those are waiting on you. Clicking an agent reveals the terminal showing it and tells herdr to focus the agent's pane; for a host session with no attached terminal, one is opened.
 
 The extension does no detection of its own. herdr already classifies every pane from its output (spinners, OSC titles, prompt boxes, permission dialogs), and its socket API reports the result, so the view shows exactly what herdr's sidebar shows. Reading herdr's state avoids reading the VS Code terminal at all. With herdr running, that terminal only ever carries herdr's composited screen, never the agent's raw output.
 

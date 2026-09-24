@@ -2,7 +2,7 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
-import { AgentNode, AgentTreeDataProvider } from './agentTree';
+import { AgentNode, AgentTreeDataProvider, folderOf } from './agentTree';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
 import {
   ContainerNode,
@@ -15,7 +15,22 @@ import {
   findMatchingBindMount,
   getContainerHome,
 } from './containerTree';
-import { focusHerdrAgent, getRemoteUser, watchHerdr } from './herdr';
+import {
+  AgentInfo,
+  focusHerdrAgent,
+  getRemoteUser,
+  watchHerdr,
+} from './herdr';
+import {
+  HostSession,
+  attachCommand,
+  focusHostHerdrAgent,
+  listHostSessions,
+  readHostSession,
+  sessionFromClientArgs,
+  watchHostSession,
+} from './hostHerdr';
+import { hostTerminalForeground } from './hostProcesses';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
   TerminalAgentTracker,
@@ -83,13 +98,27 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
-  const agentLog = vscode.window.createOutputChannel('Dev Container Agents', {
+  const agentLog = vscode.window.createOutputChannel('Agents', {
     log: true,
   });
   context.subscriptions.push(agentLog);
   agentTree = new AgentTreeDataProvider(
     new DockerContainerSource(getDockerCommand, getHostFolders),
-    watchContainerAgents
+    watchContainerAgents,
+    {
+      list: listHostSessions,
+      async foregrounds() {
+        const found = await Promise.all(
+          vscode.window.terminals
+            .filter(t => !isContainerTerminal(t))
+            .map(t => hostTerminalForeground(t))
+        );
+        return found.flatMap(fg => (fg ? [fg.args] : []));
+      },
+      folders: getHostFolders,
+      read: readHostSession,
+      watch: watchHostSession,
+    }
   );
   const agentView = vscode.window.createTreeView(AGENTS_VIEW_ID, {
     treeDataProvider: agentTree,
@@ -107,7 +136,18 @@ export function activate(context: vscode.ExtensionContext) {
         : undefined;
       publishWindow();
     }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => syncAgents()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      syncAgents();
+      syncSessions();
+    }),
+    // Which host sessions this window owns follows its terminals: re-check
+    // when one opens, closes, or starts or ends a command (e.g. `herdr`).
+    vscode.window.onDidOpenTerminal(() => scheduleSessionSync()),
+    vscode.window.onDidCloseTerminal(() => scheduleSessionSync()),
+    vscode.window.onDidStartTerminalShellExecution(() =>
+      scheduleSessionSync()
+    ),
+    vscode.window.onDidEndTerminalShellExecution(() => scheduleSessionSync()),
     (terminalAgents = new TerminalAgentTracker({
       isContainerTerminal,
       async resolveContainer(terminal) {
@@ -131,6 +171,11 @@ export function activate(context: vscode.ExtensionContext) {
     }))
   );
   syncAgents();
+  syncSessions();
+  // Also catches foreground changes no terminal event reports, and sessions
+  // that start doing work in this window's folders.
+  const sessionPoll = setInterval(syncSessions, SESSION_POLL_MS);
+  context.subscriptions.push({ dispose: () => clearInterval(sessionPoll) });
 
   // Other VS Code windows' agents, shared through global storage.
   windows = new WindowRegistry(
@@ -487,6 +532,26 @@ function syncAgents(): void {
   });
 }
 
+/** How often host sessions are re-checked for ownership without an event. */
+const SESSION_POLL_MS = 5000;
+
+function syncSessions(): void {
+  agentTree.syncSessions().catch(err => {
+    console.error('devc-vscode: host session sync error', err);
+  });
+}
+
+let sessionSyncTimer: NodeJS.Timeout | undefined;
+
+/**
+ * Sync host sessions shortly after a terminal event, once a command it
+ * reports has had a moment to become the foreground process.
+ */
+function scheduleSessionSync(): void {
+  clearTimeout(sessionSyncTimer);
+  sessionSyncTimer = setTimeout(syncSessions, 500);
+}
+
 /**
  * Stream a container's agents from the herdr server inside it, as the user
  * the devcontainer CLI execs as — the herdr socket lives in their home.
@@ -519,7 +584,7 @@ function publishWindow(): void {
     pid: process.pid,
     name: vscode.workspace.name ?? '',
     workspaceUri: workspaceIdentity()?.toString(),
-    containers: agentTree.snapshotContainers(),
+    groups: agentTree.snapshotGroups(),
   });
 }
 
@@ -564,6 +629,10 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     );
     return;
   }
+  if (node.session !== undefined) {
+    await focusHostAgent(node.session, node.agent);
+    return;
+  }
   if (node.terminal) {
     node.terminal.show();
     return;
@@ -605,6 +674,117 @@ async function focusAgent(node?: AgentNode): Promise<void> {
       `Could not focus ${node.agent.agent} in herdr.`
     );
   }
+}
+
+/**
+ * Bring a host herdr agent into view: reveal a terminal in this window that
+ * is a client of the agent's session, or open one that attaches to it, then
+ * have herdr switch to the agent's pane.
+ */
+async function focusHostAgent(
+  sessionName: string,
+  agent: AgentInfo
+): Promise<void> {
+  const session = agentTree.hostSession(sessionName);
+  if (!session) {
+    vscode.window.showErrorMessage(
+      `herdr session "${sessionName}" is no longer running.`
+    );
+    return;
+  }
+  const terminal = await findHostClient(session);
+  if (terminal) {
+    terminal.show();
+  } else {
+    const folders = getHostFolders();
+    const opened = openHostHerdrTerminal(
+      session,
+      folderOf(agent, folders) ?? folders[0]
+    );
+    await waitForHostClient(opened, session, HERDR_ATTACH_TIMEOUT_MS);
+  }
+  if (!(await focusHostHerdrAgent(session, agent))) {
+    vscode.window.showErrorMessage(`Could not focus ${agent.agent} in herdr.`);
+  }
+}
+
+/** A host terminal in this window with a client of `session` in front. */
+async function findHostClient(
+  session: HostSession
+): Promise<vscode.Terminal | undefined> {
+  for (const terminal of vscode.window.terminals) {
+    if (
+      !isContainerTerminal(terminal) &&
+      (await isHostClient(terminal, session))
+    ) {
+      return terminal;
+    }
+  }
+  return undefined;
+}
+
+async function isHostClient(
+  terminal: vscode.Terminal,
+  session: HostSession
+): Promise<boolean> {
+  const fg = await hostTerminalForeground(terminal);
+  return (
+    !!fg &&
+    sessionFromClientArgs(fg.args, agentTree.defaultSessionName()) ===
+      session.name
+  );
+}
+
+/**
+ * Open a host terminal attached to a herdr session, in an editor tab as
+ * container terminals are. The HERDR_* variables this extension host may have
+ * inherited from a herdr pane are unset, so the client attaches as asked
+ * rather than to that pane's session.
+ */
+function openHostHerdrTerminal(
+  session: HostSession,
+  cwd: string | undefined
+): vscode.Terminal {
+  const t = vscode.window.createTerminal({
+    name: `herdr ${session.default ? 'default' : session.name}`,
+    cwd,
+    location: vscode.TerminalLocation.Editor,
+    isTransient: true,
+    // See openContainerTerminal.
+    hideFromUser: true,
+    env: Object.fromEntries(
+      Object.keys(process.env)
+        .filter(key => key.startsWith('HERDR_'))
+        .map(key => [key, null])
+    ),
+  });
+  t.show();
+  t.sendText(attachCommand(session));
+  return t;
+}
+
+/**
+ * Resolves true once a host terminal has a client of `session` in front,
+ * false if the terminal closes or `timeoutMs` passes first.
+ */
+function waitForHostClient(
+  terminal: vscode.Terminal,
+  session: HostSession,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise(resolve => {
+    const check = async () => {
+      if (await isHostClient(terminal, session)) {
+        resolve(true);
+      } else if (terminal.exitStatus || Date.now() >= deadline) {
+        resolve(false);
+      } else {
+        setTimeout(check, 250);
+      }
+    };
+    check();
+  });
 }
 
 /** How long a newly opened terminal gets to bring herdr up. */
