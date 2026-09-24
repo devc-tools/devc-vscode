@@ -10,7 +10,7 @@ running on the host (not in a container), alongside the existing container agent
 - [ ] `src/hostProcesses.ts`: a VS Code terminal's tty and foreground process on the host
 - [ ] Session ownership: attached in this window's terminals, or matched by folder
 - [ ] Tree: session groups under the window, beside container groups
-- [ ] Window registry snapshot v2 (`groups`), published and read
+- [ ] Window registry snapshot reshaped to `groups`, published and read
 - [ ] Focus: host herdr agents in this window and from another window
 - [ ] Tests (see Validation)
 
@@ -45,7 +45,7 @@ These were settled with the user; do not re-open them.
 - `src/agentTree.ts` — `AgentNode`, `AgentTreeDataProvider`. Currently window → container →
   agent. Gains a session group kind; `snapshotContainers` becomes a snapshot of all groups.
 - `src/windowRegistry.ts` — `WindowSnapshot`, `PublishedContainer`, `SNAPSHOT_VERSION`.
-  Changes to the v2 shape below.
+  Changes to the shape below.
 - `src/extension.ts` — wiring: output channel `'Dev Container Agents'`, `publishWindow`,
   `focusAgent`, `isContainerTerminal`, `openContainerTerminal`, `waitForForeground`.
 - `src/terminalAgents.ts` — `TerminalAgentTracker.foregroundFor` covers **container**
@@ -154,7 +154,7 @@ or change foreground, and when workspace folders change.
   - host herdr: `host-herdr:<sessionName>:<paneId>` (pane ids collide across sessions)
 - `attentionCount` includes host herdr agents.
 
-### Window registry snapshot v2
+### Window registry snapshot
 
 ```ts
 export const SNAPSHOT_VERSION = 2;
@@ -172,9 +172,9 @@ export interface WindowSnapshot {
 }
 ```
 
-`PublishedAgent` is unchanged. `containers` is removed. Readers **skip group kinds they do
-not recognise**; the follow-up plan adds a kind without bumping the version. Windows on
-v1 and v2 simply don't see each other, which is acceptable.
+`PublishedAgent` is unchanged. `containers` is removed outright. No backward compatibility:
+all windows are updated and reloaded together, so there is no handling for older snapshot
+shapes or unknown group kinds beyond the existing version check.
 
 ### Focus
 
@@ -214,7 +214,7 @@ v1 and v2 simply don't see each other, which is acceptable.
     workspace folder; an unowned session is left out.
   - Tree: session groups appear beside container groups; keys follow the contract; two
     sessions with the same pane id give distinct ids.
-  - Registry: v2 round-trip; an unknown group kind is skipped; a v1 file is ignored.
+  - Registry: a snapshot with container and session groups round-trips.
 - `npm test` and `npm run lint` pass.
 - Manual (macOS, host herdr running): a window with an attached `herdr --session <name>`
   terminal lists that session's agents; clicking one switches herdr's tab; with the

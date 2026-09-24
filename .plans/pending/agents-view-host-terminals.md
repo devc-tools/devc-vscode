@@ -4,7 +4,7 @@ Detect agents run directly in a host VS Code terminal (no herdr, no container) a
 them in the Agents view, with status from herdr's detection rules on the host.
 
 Depends on [agents-view-host-herdr.md](agents-view-host-herdr.md): the "Scope decisions",
-`hostProcesses.ts`, and the v2 registry snapshot come from there.
+`hostProcesses.ts`, and the `groups` registry snapshot come from there.
 
 ## Checklist
 
@@ -75,7 +75,7 @@ Depends on [agents-view-host-herdr.md](agents-view-host-herdr.md): the "Scope de
 
 ### Window registry
 
-Add the group kind below; `SNAPSHOT_VERSION` stays 2 (readers skip unknown kinds).
+Add the group kind below and bump `SNAPSHOT_VERSION` (no backward compatibility needed).
 
 ```ts
 | { kind: 'local'; agents: PublishedAgent[] }
@@ -107,8 +107,7 @@ Add the group kind below; `SNAPSHOT_VERSION` stays 2 (readers skip unknown kinds
     with the classifier's status; one with a herdr client, `docker`, or a plain shell in
     the foreground is not.
   - Presence-only: no execution stream plus an agent in the foreground → `unknown`.
-  - Registry: a `local` group round-trips; a reader that doesn't know `local` still reads
-    the rest of the snapshot.
+  - Registry: a `local` group round-trips.
   - Keys `local-terminal:<n>` are distinct from container terminal keys.
 - `npm test` and `npm run lint` pass.
 - Manual (macOS, herdr installed on host): run `claude` in a plain VS Code terminal; it
