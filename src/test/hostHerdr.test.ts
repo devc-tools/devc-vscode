@@ -430,7 +430,8 @@ suite('AgentTreeDataProvider with host sessions', () => {
     assert.strictEqual(item.label, 'claude');
     const herdrNode = tree.getChildren(roots[2])[0];
     const herdrItem = tree.getTreeItem(herdrNode);
-    assert.strictEqual(herdrItem.label, 'herdr');
+    assert.strictEqual(herdrItem.label, 'default');
+    assert.strictEqual(herdrItem.description, 'herdr · 1 blocked');
     assert.strictEqual(
       (herdrItem.iconPath as vscode.ThemeIcon).id,
       'terminal-tmux'
@@ -502,7 +503,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const item = tree.getTreeItem(placeholder);
     assert.strictEqual(item.label, 'app');
     assert.strictEqual(item.id, 'session:work.app');
-    assert.strictEqual(item.description, 'local · not running');
+    assert.strictEqual(item.description, 'herdr · not running');
     assert.strictEqual(item.contextValue, 'agentSession.placeholder');
     assert.deepStrictEqual(tree.snapshotGroups(), []);
 

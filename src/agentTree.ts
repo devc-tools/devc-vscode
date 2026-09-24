@@ -178,7 +178,7 @@ function sessionLabel(name: string, isDefault = false): string {
 }
 
 /** A group's description: what kind of group it is, then its state. */
-function groupDescription(kind: 'local' | 'container', detail: string): string {
+function groupDescription(kind: 'herdr' | 'container', detail: string): string {
   return detail ? `${kind} · ${detail}` : kind;
 }
 
@@ -927,7 +927,7 @@ export class AgentTreeDataProvider
       );
       item.id = `session:${node.session}`;
       item.iconPath = SESSION_ICON_IDLE;
-      item.description = groupDescription('local', 'not running');
+      item.description = groupDescription('herdr', 'not running');
       item.tooltip = [
         `herdr session "${node.session}" on the host, this window's own`,
         'Attach Terminal starts it',
@@ -943,7 +943,7 @@ export class AgentTreeDataProvider
       );
       item.id = `${scope}session:${node.session}`;
       item.iconPath = SESSION_ICON;
-      item.description = groupDescription('local', summarize(agents));
+      item.description = groupDescription('herdr', summarize(agents));
       item.tooltip = [
         `herdr session "${node.session}" on the host`,
         node.host?.socketPath,
@@ -965,11 +965,12 @@ export class AgentTreeDataProvider
     }
     if (node.kind === 'containerHerdr') {
       const agents = this.agentsUnder(node);
-      const item = new vscode.TreeItem('herdr', groupState(agents));
+      // The container's herdr runs its default session.
+      const item = new vscode.TreeItem('default', groupState(agents));
       item.id = `${scope}containerHerdr:${node.container.id}`;
       item.iconPath = SESSION_ICON;
-      item.description = summarize(agents);
-      item.tooltip = `herdr in ${node.container.containerName}`;
+      item.description = groupDescription('herdr', summarize(agents));
+      item.tooltip = `herdr's default session in ${node.container.containerName}`;
       item.contextValue = 'agentContainerHerdr';
       return item;
     }
