@@ -17,8 +17,10 @@ interface AgentNodeBase {
 }
 
 export type AgentNode =
-  /** A VS Code window's group, this window first; `remote` unset for it. */
-  | { kind: 'window'; remote?: WindowSnapshot }
+  /** Holds a window node per other VS Code window with agents. */
+  | { kind: 'otherWindows' }
+  /** Another VS Code window's groups. */
+  | { kind: 'window'; remote: WindowSnapshot }
   | { kind: 'container'; container: ContainerInfo; remote?: WindowSnapshot }
   | {
       kind: 'session';
@@ -91,10 +93,10 @@ export interface HostSessionSource {
   /** This window's file:// workspace folders, as host paths. */
   folders(): string[];
   /**
-   * Names of the sessions that belong to this window whether or not they have
-   * agents: those `herdrs` names after its folders.
+   * The session that belongs to this window whether or not it has agents —
+   * see workspaceSessionName — if any.
    */
-  workspaceSessions(): string[];
+  workspaceSession(): string | undefined;
   /** One reading of a session's agents; undefined when it cannot be read. */
   read(session: HostSession): Promise<AgentInfo[] | undefined>;
   /** Stream a session's agents, as WatchAgents does for a container. */
@@ -110,7 +112,7 @@ interface WatchedSession {
   agents: AgentInfo[];
   /** A terminal in this window is a client of the session. */
   attached: boolean;
-  /** Named after one of this window's folders. */
+  /** This window's workspace session. */
   workspace: boolean;
   watcher: { dispose(): void };
 }
@@ -201,8 +203,9 @@ export function summarize(agents: AgentInfo[]): string {
  * Agents herdr is tracking in each of the workspace's dev containers, one
  * watcher per container, and in the host herdr sessions this window owns, one
  * watcher per session. A container shows while its herdr is running or it has
- * agents; a session while it is attached here, named after a workspace folder,
- * or has agents in this window's folders.
+ * agents; a session while it is attached here, is this window's workspace
+ * session, or has agents in this window's folders. Other windows' agents sit
+ * under one Other Windows node after this window's groups.
  */
 export class AgentTreeDataProvider
   implements vscode.TreeDataProvider<AgentNode>, vscode.Disposable
@@ -212,7 +215,7 @@ export class AgentTreeDataProvider
   private readonly sessions = new Map<string, WatchedSession>();
   private folders: string[] = [];
   private defaultSession: string | undefined;
-  private workspaceSessions: string[] = [];
+  private workspaceSession: string | undefined;
   /** Containers with a terminal open on them in this window. */
   private attachedContainers = new Set<string>();
   private sessionSync: Promise<void> | undefined;
@@ -327,17 +330,16 @@ export class AgentTreeDataProvider
       )
     );
     const folders = hosts.folders();
-    const workspaceSessions = hosts.workspaceSessions();
+    const workspaceSession = hosts.workspaceSession();
     if (this.disposed) {
       return;
     }
     let changed =
       JSON.stringify(folders) !== JSON.stringify(this.folders) ||
-      JSON.stringify(workspaceSessions) !==
-        JSON.stringify(this.workspaceSessions) ||
+      workspaceSession !== this.workspaceSession ||
       defaultSession !== this.defaultSession;
     this.folders = folders;
-    this.workspaceSessions = workspaceSessions;
+    this.workspaceSession = workspaceSession;
     this.defaultSession = defaultSession;
 
     const live = new Map(sessions.map(s => [s.name, s]));
@@ -393,9 +395,8 @@ export class AgentTreeDataProvider
     }
   }
 
-  /** Named after a workspace folder; the default session never is. */
   private isWorkspaceSession(session: HostSession): boolean {
-    return !session.default && this.workspaceSessions.includes(session.name);
+    return session.name === this.workspaceSession;
   }
 
   private watchSession(
@@ -641,20 +642,17 @@ export class AgentTreeDataProvider
 
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
-      const others = this.othersWithAgents();
-      // Grouped by window only once another window has agents; this window
-      // always comes first.
-      return others.length === 0
+      return this.othersWithAgents().length === 0
         ? this.localGroups()
-        : [
-            { kind: 'window' },
-            ...others.map(remote => ({ kind: 'window' as const, remote })),
-          ];
+        : [...this.localGroups(), { kind: 'otherWindows' }];
+    }
+    if (node.kind === 'otherWindows') {
+      return this.othersWithAgents().map(remote => ({
+        kind: 'window' as const,
+        remote,
+      }));
     }
     if (node.kind === 'window') {
-      if (!node.remote) {
-        return this.localGroups();
-      }
       const remote = node.remote;
       return remote.groups
         .filter(g => g.agents.length)
@@ -726,13 +724,24 @@ export class AgentTreeDataProvider
   }
 
   getTreeItem(node: AgentNode): vscode.TreeItem {
-    if (node.kind === 'window') {
+    if (node.kind === 'otherWindows') {
       const item = new vscode.TreeItem(
-        (node.remote ? node.remote.name : vscode.workspace.name) ||
-          'Untitled window',
+        'Other Windows',
         vscode.TreeItemCollapsibleState.Expanded
       );
-      item.id = node.remote ? `window:${node.remote.pid}` : 'window:current';
+      item.id = 'otherWindows';
+      item.iconPath = new vscode.ThemeIcon('multiple-windows');
+      item.description = summarize(this.agentsUnder(node));
+      item.tooltip = 'Agents in other VS Code windows';
+      item.contextValue = 'agentOtherWindows';
+      return item;
+    }
+    if (node.kind === 'window') {
+      const item = new vscode.TreeItem(
+        node.remote.name || 'Untitled window',
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = `window:${node.remote.pid}`;
       item.iconPath = new vscode.ThemeIcon('window');
       item.description = summarize(this.agentsUnder(node));
       item.contextValue = 'agentWindow';

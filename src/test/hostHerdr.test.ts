@@ -16,6 +16,7 @@ import {
   herdrEnv,
   parseSessionList,
   sessionFromClientArgs,
+  sessionNameForDir,
 } from '../hostHerdr';
 import { foregroundFromPs } from '../hostProcesses';
 import { SNAPSHOT_VERSION, WindowSnapshot } from '../windowRegistry';
@@ -199,6 +200,15 @@ suite('ownedAgents', () => {
   });
 });
 
+suite('sessionNameForDir', () => {
+  test('is the basename, normalized as herdrs does', () => {
+    assert.strictEqual(sessionNameForDir('/work/devc-vscode'), 'devc-vscode');
+    assert.strictEqual(sessionNameForDir('/work/My Project!'), 'my-project');
+    assert.strictEqual(sessionNameForDir('/work/a  b__c.d'), 'a-b__c.d');
+    assert.strictEqual(sessionNameForDir('/work/---'), undefined);
+  });
+});
+
 suite('AgentTreeDataProvider with host sessions', () => {
   const session = (name: string, isDefault = false): HostSession => ({
     name,
@@ -212,7 +222,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       sessions: [] as HostSession[],
       foregrounds: [] as string[],
       folders: [] as string[],
-      workspaceSessions: [] as string[],
+      workspaceSession: undefined as string | undefined,
       agents: new Map<string, AgentInfo[]>(),
       watchers: new Map<
         string,
@@ -223,7 +233,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       list: async () => host.sessions,
       foregrounds: async () => host.foregrounds,
       folders: () => host.folders,
-      workspaceSessions: () => host.workspaceSessions,
+      workspaceSession: () => host.workspaceSession,
       read: async s => host.agents.get(s.name),
       watch(s, onAgents, onExit) {
         const w = { push: onAgents, exit: onExit, disposed: false };
@@ -403,18 +413,17 @@ suite('AgentTreeDataProvider with host sessions', () => {
     tree.dispose();
   });
 
-  test('a session named after a folder shows without agents', async () => {
+  test("the window's workspace session shows without agents", async () => {
     const { host, source } = fakeHost();
     host.sessions = [session('default', true), session('app'), session('x')];
     host.folders = ['/work/app'];
-    host.workspaceSessions = ['app', 'default'];
+    host.workspaceSession = 'app';
     host.agents.set('app', []);
     host.agents.set('default', []);
     const tree = treeWith(source);
     await tree.syncSessions();
 
     const roots = tree.getChildren();
-    // The default session is never matched by name.
     assert.deepStrictEqual(labels(tree, roots), ['app']);
     assert.deepStrictEqual(tree.getChildren(roots[0]), []);
     // No terminal here is a client, so it offers to attach.
@@ -433,7 +442,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     assert.strictEqual(host.watchers.get('app')!.disposed, false);
     assert.deepStrictEqual(labels(tree, tree.getChildren()), ['app']);
 
-    host.workspaceSessions = [];
+    host.workspaceSession = undefined;
     await tree.syncSessions();
     assert.strictEqual(host.watchers.get('app')!.disposed, true);
     assert.deepStrictEqual(tree.getChildren(), []);
@@ -473,7 +482,8 @@ suite('AgentTreeDataProvider with host sessions', () => {
       ],
     };
     tree.setOtherWindows([remote]);
-    const [, window] = tree.getChildren();
+    const [others] = tree.getChildren();
+    const [window] = tree.getChildren(others);
     const [group] = tree.getChildren(window);
     assert.strictEqual(group.kind, 'session');
     assert.strictEqual(tree.getTreeItem(group).id, 'w7:session:beta');

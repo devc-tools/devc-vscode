@@ -312,6 +312,21 @@ export function sessionFromClientArgs(
   return undefined;
 }
 
+/**
+ * The session name `herdrs` gives a directory: its basename lowercased, each
+ * run of characters outside `[a-z0-9._-]` made one `-`, and `-` trimmed from
+ * both ends. herdr-plugins' scripts/bash_aliases.sh applies the same rule, so
+ * keep the two in step. Undefined when nothing is left.
+ */
+export function sessionNameForDir(dir: string): string | undefined {
+  const name = path
+    .basename(dir)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return name || undefined;
+}
+
 /** The shell command that opens a client on a session. */
 export function attachCommand(session: HostSession): string {
   return session.default

@@ -238,7 +238,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
       list: async () => [{ name: 'app', default: false, socketPath: '/s' }],
       foregrounds: async () => ['herdr --session app'],
       folders: () => [],
-      workspaceSessions: () => [],
+      workspaceSession: () => undefined,
       read: async () => [agent('w1:p1')],
       watch(_s, onAgents) {
         onAgents([agent('w1:p1')]);
@@ -335,7 +335,8 @@ suite('AgentTreeDataProvider with host terminals', () => {
       ],
     };
     t.setOtherWindows([remote]);
-    const [, window] = t.getChildren();
+    const [others] = t.getChildren();
+    const [window] = t.getChildren(others);
     const [group] = t.getChildren(window);
     assert.strictEqual(group.kind, 'local');
     assert.strictEqual(t.getTreeItem(group).id, 'w9:local');

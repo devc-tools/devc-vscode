@@ -37,6 +37,12 @@
           "default": "devc herdr",
           "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr."
         },
+        "devc-vscode.herdrSession": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "markdownDescription": "Host herdr session that belongs to this window: the Agents view shows it even with no agents, and attaches to it. Empty uses the name `herdrs` gives the workspace file's directory, or the first folder: its basename lowercased, with anything outside `[a-z0-9._-]` made `-`."
+        },
         "devc-vscode.stopCommand": {
           "type": "string",
           "default": "devc stop",
@@ -272,7 +278,7 @@
     "viewsWelcome": [
       {
         "view": "devc-vscode.agents",
-        "contents": "No agents detected. herdr in this workspace's dev containers, host herdr sessions named after its folders or attached in this window's terminals, and agents working in its folders appear here."
+        "contents": "No agents detected. herdr in this workspace's dev containers, this window's host herdr session (named after its folder, or the herdrSession setting) or any attached in its terminals, and agents working in its folders appear here."
       }
     ]
   },

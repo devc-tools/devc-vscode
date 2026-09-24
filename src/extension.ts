@@ -38,6 +38,7 @@ import {
   listHostSessions,
   readHostSession,
   sessionFromClientArgs,
+  sessionNameForDir,
   stopHostSession,
   watchHostSession,
 } from './hostHerdr';
@@ -135,8 +136,7 @@ export function activate(context: vscode.ExtensionContext) {
         return found.flatMap(fg => (fg ? [fg.args] : []));
       },
       folders: getHostFolders,
-      workspaceSessions: () =>
-        workspaceSessionDirs().map(dir => path.basename(dir)),
+      workspaceSession: workspaceSessionName,
       read: readHostSession,
       watch: watchHostSession,
     }
@@ -160,6 +160,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       syncAgents();
       syncSessions();
+    }),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('devc-vscode.herdrSession')) {
+        syncSessions();
+      }
     }),
     // Which host sessions this window owns follows its terminals: re-check
     // when one opens, closes, or starts or ends a command (e.g. `herdr`).
@@ -839,12 +844,7 @@ async function attachAgentGroup(node?: AgentNode): Promise<void> {
       existing.show();
       return;
     }
-    const dirs = workspaceSessionDirs();
-    openHostHerdrTerminal(
-      session,
-      dirs.find(dir => path.basename(dir) === session.name) ??
-        getHostFolders()[0]
-    );
+    openHostHerdrTerminal(session, workspaceDir());
   } else if (node?.kind === 'container' && !node.remote) {
     const existing = await containerTerminals(node.container.id);
     if (existing.length) {
@@ -1228,17 +1228,30 @@ function getHostFolders(): string[] {
 }
 
 /**
- * Host directories a herdr session named by `herdrs` (after the directory's
- * basename) belongs to this window from: its folders and the directory its
- * saved workspace file is in.
+ * The directory that stands for this window on the host: the one its saved
+ * workspace file is in, else its first folder.
  */
-function workspaceSessionDirs(): string[] {
+function workspaceDir(): string | undefined {
   const file = vscode.workspace.workspaceFile;
-  const dirs = getHostFolders();
-  if (file?.scheme === 'file') {
-    dirs.push(path.dirname(file.fsPath));
+  return file?.scheme === 'file'
+    ? path.dirname(file.fsPath)
+    : getHostFolders()[0];
+}
+
+/**
+ * The host herdr session that belongs to this window: the herdrSession
+ * setting when set, else the name `herdrs` gives workspaceDir.
+ */
+function workspaceSessionName(): string | undefined {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>('herdrSession')
+    ?.trim();
+  if (configured) {
+    return configured;
   }
-  return [...new Set(dirs)];
+  const dir = workspaceDir();
+  return dir ? sessionNameForDir(dir) : undefined;
 }
 
 /** Cache of host folder -> terminal context, cleared on docker events. */

@@ -238,7 +238,7 @@ suite('AgentTreeDataProvider across windows', () => {
     tree.dispose();
   });
 
-  test('grouped by window, this window first', async () => {
+  test("this window's groups, then other windows under one node", async () => {
     const { tree, push } = localTree({
       id: 'c0',
       name: 'here',
@@ -250,10 +250,16 @@ suite('AgentTreeDataProvider across windows', () => {
     tree.setOtherWindows([snapshot(2, 'beta'), snapshot(3, 'alpha')]);
     const roots = tree.getChildren();
     assert.deepStrictEqual(
-      roots.map(n => (n.kind === 'window' ? (n.remote?.name ?? 'this') : '')),
-      ['this', 'beta', 'alpha']
+      roots.map(n => n.kind),
+      ['container', 'otherWindows']
     );
-    const remoteAgent = tree.getChildren(tree.getChildren(roots[1])[0])[0];
+    const windows = tree.getChildren(roots[1]);
+    assert.deepStrictEqual(
+      windows.map(n => n.kind === 'window' && n.remote.name),
+      ['beta', 'alpha']
+    );
+    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows');
+    const remoteAgent = tree.getChildren(tree.getChildren(windows[0])[0])[0];
     assert.strictEqual(remoteAgent.kind, 'agent');
     assert.strictEqual(
       remoteAgent.kind === 'agent' && remoteAgent.remote?.published.key,
