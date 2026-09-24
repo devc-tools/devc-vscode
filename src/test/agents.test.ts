@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as assert from 'assert';
-import { AgentTreeDataProvider, WatchAgents, summarize } from '../agentTree';
+import {
+  AgentTreeDataProvider,
+  THIS_WINDOW,
+  WatchAgents,
+  summarize,
+} from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
 import { AgentInfo, parseSnapshot, remoteUserFromMetadata } from '../herdr';
 
@@ -171,11 +176,11 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
 
     const ids = () =>
-      tree.getChildren().map(n => n.kind === 'container' && n.container.id);
+      tree.getChildren(THIS_WINDOW).map(n => n.kind === 'container' && n.container.id);
     assert.deepStrictEqual(ids(), ['a', 'b']);
     watchers.get('b')!.push([agent('w1:p1', 'blocked')]);
 
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(ids(), ['a', 'b']);
     const [herdrNode] = tree.getChildren(roots[1]);
     assert.strictEqual(herdrNode.kind, 'containerHerdr');
@@ -195,7 +200,7 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
 
     watchers.get('a')!.push([], false);
-    const [root] = tree.getChildren();
+    const [root] = tree.getChildren(THIS_WINDOW);
     const item = tree.getTreeItem(root);
     assert.strictEqual(item.description, 'container · herdr not running');
     assert.strictEqual(item.contextValue, 'agentContainer');
@@ -223,7 +228,7 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
 
     assert.strictEqual(watchers.has('b'), false);
-    const [, stopped] = tree.getChildren();
+    const [, stopped] = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(
       stopped.kind === 'container' && stopped.state,
       'stopped'
@@ -240,7 +245,7 @@ suite('AgentTreeDataProvider', () => {
     // Down removes it, leaving nothing for a folder that is not primary.
     source.stopped = [];
     await tree.sync();
-    assert.strictEqual(tree.getChildren().length, 1);
+    assert.strictEqual(tree.getChildren(THIS_WINDOW).length, 1);
     tree.dispose();
   });
 
@@ -251,7 +256,7 @@ suite('AgentTreeDataProvider', () => {
     tree.setPrimaryFolder('/work/a');
     await tree.sync();
 
-    const [placeholder] = tree.getChildren();
+    const [placeholder] = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(
       placeholder.kind === 'container' && placeholder.state,
       'absent'
@@ -264,7 +269,7 @@ suite('AgentTreeDataProvider', () => {
 
     source.stopped = [container('a')];
     await tree.sync();
-    const [stopped] = tree.getChildren();
+    const [stopped] = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(
       stopped.kind === 'container' && stopped.state,
       'stopped'
@@ -273,7 +278,7 @@ suite('AgentTreeDataProvider', () => {
     source.stopped = [];
     source.containers = [container('a')];
     await tree.sync();
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(roots.length, 1);
     assert.strictEqual(
       roots[0].kind === 'container' && roots[0].state,

@@ -4,6 +4,7 @@ import {
   AgentNode,
   AgentTreeDataProvider,
   HostSessionSource,
+  THIS_WINDOW,
   WatchAgents,
   ownedAgents,
 } from '../agentTree';
@@ -311,7 +312,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
 
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(labels(tree, roots), ['app']);
     assert.strictEqual(tree.getChildren(roots[0]).length, 2);
     assert.strictEqual(host.watchers.has('default'), false);
@@ -326,10 +327,12 @@ suite('AgentTreeDataProvider with host sessions', () => {
     host.agents.set('main', [agent('w1:p1')]);
     const tree = treeWith(source);
     await tree.syncSessions();
-    assert.deepStrictEqual(labels(tree, tree.getChildren()), ['default']);
+    assert.deepStrictEqual(labels(tree, tree.getChildren(THIS_WINDOW)), [
+      'default',
+    ]);
     // Stoppable but not deletable: herdr refuses to delete it.
     assert.strictEqual(
-      tree.getTreeItem(tree.getChildren()[0]).contextValue,
+      tree.getTreeItem(tree.getChildren(THIS_WINDOW)[0]).contextValue,
       'agentSession.default.attached'
     );
     tree.dispose();
@@ -347,7 +350,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
 
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(labels(tree, roots), ['default']);
     assert.deepStrictEqual(
       tree.getChildren(roots[0]).map(n => n.kind === 'agent' && n.agent.paneId),
@@ -365,12 +368,12 @@ suite('AgentTreeDataProvider with host sessions', () => {
     host.agents.set('app', [agent('w1:p1', '/elsewhere')]);
     const tree = treeWith(source);
     await tree.syncSessions();
-    assert.strictEqual(tree.getChildren().length, 1);
+    assert.strictEqual(tree.getChildren(THIS_WINDOW).length, 1);
 
     host.foregrounds = [];
     await tree.syncSessions();
     assert.strictEqual(host.watchers.get('app')!.disposed, true);
-    assert.deepStrictEqual(tree.getChildren(), []);
+    assert.deepStrictEqual(tree.getChildren(THIS_WINDOW), []);
     tree.dispose();
   });
 
@@ -382,7 +385,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
     host.watchers.get('app')!.exit();
-    assert.deepStrictEqual(tree.getChildren(), []);
+    assert.deepStrictEqual(tree.getChildren(THIS_WINDOW), []);
     tree.dispose();
   });
 
@@ -402,7 +405,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     await tree.sync();
     await tree.syncSessions();
 
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(
       roots.map(n => `${n.kind}:${tree.getTreeItem(n).label}`),
       ['session:beta', 'session:delta', 'container:alpha', 'container:gamma']
@@ -462,7 +465,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
 
-    const roots = tree.getChildren();
+    const roots = tree.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(labels(tree, roots), ['app']);
     assert.deepStrictEqual(tree.getChildren(roots[0]), []);
     // No terminal here is a client, so it offers to attach.
@@ -471,7 +474,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     host.foregrounds = ['herdr --session app'];
     await tree.syncSessions();
     assert.strictEqual(
-      tree.getTreeItem(tree.getChildren()[0]).contextValue,
+      tree.getTreeItem(tree.getChildren(THIS_WINDOW)[0]).contextValue,
       'agentSession.attached'
     );
 
@@ -479,12 +482,14 @@ suite('AgentTreeDataProvider with host sessions', () => {
     host.foregrounds = [];
     await tree.syncSessions();
     assert.strictEqual(host.watchers.get('app')!.disposed, false);
-    assert.deepStrictEqual(labels(tree, tree.getChildren()), ['app']);
+    assert.deepStrictEqual(labels(tree, tree.getChildren(THIS_WINDOW)), [
+      'app',
+    ]);
 
     host.workspaceSession = undefined;
     await tree.syncSessions();
     assert.strictEqual(host.watchers.get('app')!.disposed, true);
-    assert.deepStrictEqual(tree.getChildren(), []);
+    assert.deepStrictEqual(tree.getChildren(THIS_WINDOW), []);
     tree.dispose();
   });
 
@@ -495,7 +500,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
 
-    const [placeholder] = tree.getChildren();
+    const [placeholder] = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(
       placeholder.kind === 'session' && placeholder.placeholder,
       true
@@ -510,7 +515,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     // Started: the real session takes its place, under the same id.
     host.sessions.push(session('work.app'));
     await tree.syncSessions();
-    const [real] = tree.getChildren();
+    const [real] = tree.getChildren(THIS_WINDOW);
     assert.strictEqual(real.kind === 'session' && real.placeholder, undefined);
     assert.strictEqual(tree.getTreeItem(real).id, 'session:work.app');
     tree.dispose();
@@ -522,7 +527,9 @@ suite('AgentTreeDataProvider with host sessions', () => {
     host.foregrounds = ['herdr --session app'];
     const tree = treeWith(source);
     await tree.syncSessions();
-    assert.deepStrictEqual(labels(tree, tree.getChildren()), ['app']);
+    assert.deepStrictEqual(labels(tree, tree.getChildren(THIS_WINDOW)), [
+      'app',
+    ]);
     tree.dispose();
   });
 
@@ -549,7 +556,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
       ],
     };
     tree.setOtherWindows([remote]);
-    const [others] = tree.getChildren();
+    const [, others] = tree.getChildren();
     const [window] = tree.getChildren(others);
     const [group] = tree.getChildren(window);
     assert.strictEqual(group.kind, 'session');

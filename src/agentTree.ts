@@ -17,6 +17,8 @@ interface AgentNodeBase {
 }
 
 export type AgentNode =
+  /** Holds this window's groups. */
+  | { kind: 'thisWindow' }
   /** Holds a window node per other VS Code window with agents. */
   | { kind: 'otherWindows' }
   /** Another VS Code window's groups. */
@@ -77,6 +79,9 @@ type GroupNode = Extract<
   AgentNode,
   { kind: 'container' | 'session' | 'local' }
 >;
+
+/** The root holding this window's groups. */
+export const THIS_WINDOW: AgentNode = { kind: 'thisWindow' };
 
 /**
  * Starts streaming one container's agents. Injected so the tree can be
@@ -769,8 +774,11 @@ export class AgentTreeDataProvider
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
       return this.othersWithAgents().length === 0
-        ? this.localGroups()
-        : [...this.localGroups(), { kind: 'otherWindows' }];
+        ? [THIS_WINDOW]
+        : [THIS_WINDOW, { kind: 'otherWindows' }];
+    }
+    if (node.kind === 'thisWindow') {
+      return this.localGroups();
     }
     if (node.kind === 'otherWindows') {
       return this.othersWithAgents().map(remote => ({
@@ -884,6 +892,19 @@ export class AgentTreeDataProvider
   }
 
   private buildTreeItem(node: AgentNode): vscode.TreeItem {
+    if (node.kind === 'thisWindow') {
+      const item = new vscode.TreeItem(
+        vscode.workspace.name || 'This Window',
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = 'thisWindow';
+      item.iconPath = new vscode.ThemeIcon('window');
+      const summary = summarize(this.agentsUnder(node));
+      item.description = summary ? `this window · ${summary}` : 'this window';
+      item.tooltip = 'Agents in this VS Code window';
+      item.contextValue = 'agentThisWindow';
+      return item;
+    }
     if (node.kind === 'otherWindows') {
       // Collapsed so other windows' agents stay out of the way until wanted.
       const item = new vscode.TreeItem(

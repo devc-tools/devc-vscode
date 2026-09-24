@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { AgentTreeDataProvider, WatchAgents } from '../agentTree';
+import { AgentTreeDataProvider, THIS_WINDOW, WatchAgents } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
 import {
   SNAPSHOT_VERSION,
@@ -234,7 +234,7 @@ suite('AgentTreeDataProvider across windows', () => {
     tree.setOtherWindows([snapshot(2, 'beta', 0)]);
     assert.deepStrictEqual(
       tree.getChildren().map(n => n.kind),
-      ['container']
+      ['thisWindow']
     );
     tree.dispose();
   });
@@ -252,7 +252,15 @@ suite('AgentTreeDataProvider across windows', () => {
     const roots = tree.getChildren();
     assert.deepStrictEqual(
       roots.map(n => n.kind),
-      ['container', 'otherWindows']
+      ['thisWindow', 'otherWindows']
+    );
+    assert.deepStrictEqual(
+      tree.getChildren(roots[0]).map(n => n.kind),
+      ['container']
+    );
+    assert.strictEqual(
+      tree.getTreeItem(roots[0]).description,
+      'this window · 1 working'
     );
     const windows = tree.getChildren(roots[1]);
     assert.deepStrictEqual(

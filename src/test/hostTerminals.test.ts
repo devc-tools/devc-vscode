@@ -4,6 +4,7 @@ import {
   AgentNode,
   AgentTreeDataProvider,
   HostSessionSource,
+  THIS_WINDOW,
   WatchAgents,
 } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
@@ -261,7 +262,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
     t.setTerminalAgent('c1', inContainer, agent('terminal:pts/3'));
     t.setLocalTerminalAgent(onHost, agent('terminal:ttys004', 'blocked'));
 
-    const roots = t.getChildren();
+    const roots = t.getChildren(THIS_WINDOW);
     assert.deepStrictEqual(
       roots.map(n => n.kind),
       ['session', 'container', 'local']
@@ -314,7 +315,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
 
     t.setLocalTerminalAgent(onHost, undefined);
     assert.deepStrictEqual(
-      t.getChildren().map(n => n.kind),
+      t.getChildren(THIS_WINDOW).map(n => n.kind),
       ['session', 'container']
     );
     t.dispose();
@@ -344,7 +345,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
       ],
     };
     t.setOtherWindows([remote]);
-    const [others] = t.getChildren();
+    const [, others] = t.getChildren();
     const [window] = t.getChildren(others);
     const [group] = t.getChildren(window);
     assert.strictEqual(group.kind, 'local');
