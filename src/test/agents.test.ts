@@ -195,7 +195,7 @@ suite('AgentTreeDataProvider', () => {
     watchers.get('a')!.push([], false);
     const [root] = tree.getChildren();
     const item = tree.getTreeItem(root);
-    assert.strictEqual(item.description, 'herdr not running');
+    assert.strictEqual(item.description, 'container · herdr not running');
     assert.strictEqual(item.contextValue, 'agentContainer');
     assert.strictEqual(
       item.collapsibleState,
@@ -203,7 +203,7 @@ suite('AgentTreeDataProvider', () => {
     );
 
     watchers.get('a')!.push([], true);
-    assert.strictEqual(tree.getTreeItem(root).description, '');
+    assert.strictEqual(tree.getTreeItem(root).description, 'container');
     tree.setAttachedContainers(new Set(['a']));
     assert.strictEqual(
       tree.getTreeItem(root).contextValue,
@@ -227,7 +227,7 @@ suite('AgentTreeDataProvider', () => {
       'stopped'
     );
     const item = tree.getTreeItem(stopped);
-    assert.strictEqual(item.description, 'stopped');
+    assert.strictEqual(item.description, 'container · stopped');
     assert.strictEqual(item.contextValue, 'agentContainer.stopped');
     // Not published: other windows only show groups with agents.
     assert.deepStrictEqual(
@@ -256,7 +256,7 @@ suite('AgentTreeDataProvider', () => {
     );
     const item = tree.getTreeItem(placeholder);
     assert.strictEqual(item.label, 'a');
-    assert.strictEqual(item.description, 'not created');
+    assert.strictEqual(item.description, 'container · not created');
     assert.strictEqual(item.contextValue, 'agentContainer.absent');
     assert.deepStrictEqual(tree.snapshotGroups(), []);
 

@@ -493,9 +493,9 @@ suite('AgentTreeDataProvider with host sessions', () => {
       true
     );
     const item = tree.getTreeItem(placeholder);
-    assert.strictEqual(item.label, 'work.app');
+    assert.strictEqual(item.label, 'app');
     assert.strictEqual(item.id, 'session:work.app');
-    assert.strictEqual(item.description, 'not running');
+    assert.strictEqual(item.description, 'herdr · not running');
     assert.strictEqual(item.contextValue, 'agentSession.placeholder');
     assert.deepStrictEqual(tree.snapshotGroups(), []);
 

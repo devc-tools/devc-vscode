@@ -163,8 +163,17 @@ export function ownedAgents(
 }
 
 /** How a host session is labelled: its name, or `default`. */
-function sessionLabel(session: HostSession): string {
-  return session.default ? 'default' : session.name;
+/**
+ * A session's tree label: its last folder, since names are paths under home
+ * joined with '.' (see sessionNameForDir). The full name is in the tooltip.
+ */
+function sessionLabel(name: string, isDefault = false): string {
+  return isDefault ? 'default' : (name.split('.').pop() || name);
+}
+
+/** A group's description: what kind of group it is, then its state. */
+function groupDescription(kind: 'herdr' | 'container', detail: string): string {
+  return detail ? `${kind} · ${detail}` : kind;
 }
 
 /**
@@ -641,13 +650,13 @@ export class AgentTreeDataProvider
         s => s.attached || s.workspace || this.nodesForSession(s).length > 0
       )
       .map(s => ({
-        label: sessionLabel(s.session),
+        label: sessionLabel(s.session.name, s.session.default),
         node: { kind: 'session', session: s.session.name, host: s.session },
       }));
     const own = this.workspaceSession;
     if (this.hosts && own !== undefined && !this.sessions.has(own)) {
       sessions.push({
-        label: own,
+        label: sessionLabel(own),
         node: { kind: 'session', session: own, placeholder: true },
       });
     }
@@ -843,14 +852,16 @@ export class AgentTreeDataProvider
         !this.watched.get(node.container.id)?.running;
       item.iconPath =
         node.state || herdrDown ? CONTAINER_ICON_IDLE : CONTAINER_ICON;
-      item.description =
+      item.description = groupDescription(
+        'container',
         node.state === 'stopped'
           ? 'stopped'
           : node.state === 'absent'
             ? 'not created'
             : herdrDown
               ? 'herdr not running'
-              : summarize(agents);
+              : summarize(agents)
+      );
       item.tooltip = [
         node.container.containerName,
         node.state === 'absent' &&
@@ -872,12 +883,12 @@ export class AgentTreeDataProvider
     }
     if (node.kind === 'session' && node.placeholder) {
       const item = new vscode.TreeItem(
-        node.session,
+        sessionLabel(node.session),
         vscode.TreeItemCollapsibleState.None
       );
       item.id = `session:${node.session}`;
       item.iconPath = SESSION_ICON_IDLE;
-      item.description = 'not running';
+      item.description = groupDescription('herdr', 'not running');
       item.tooltip = [
         `herdr session "${node.session}" on the host, this window's own`,
         'Attach Terminal starts it',
@@ -888,12 +899,12 @@ export class AgentTreeDataProvider
     if (node.kind === 'session') {
       const agents = this.agentsUnder(node);
       const item = new vscode.TreeItem(
-        node.host ? sessionLabel(node.host) : node.session,
+        sessionLabel(node.session, node.host?.default),
         groupState(agents)
       );
       item.id = `${scope}session:${node.session}`;
       item.iconPath = SESSION_ICON;
-      item.description = summarize(agents);
+      item.description = groupDescription('herdr', summarize(agents));
       item.tooltip = [
         `herdr session "${node.session}" on the host`,
         node.host?.socketPath,
