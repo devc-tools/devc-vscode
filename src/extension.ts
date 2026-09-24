@@ -159,8 +159,14 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     // Which host sessions this window owns follows its terminals: re-check
     // when one opens, closes, or starts or ends a command (e.g. `herdr`).
-    vscode.window.onDidOpenTerminal(() => scheduleSessionSync()),
-    vscode.window.onDidCloseTerminal(() => scheduleSessionSync()),
+    vscode.window.onDidOpenTerminal(() => {
+      scheduleSessionSync();
+      syncAttached();
+    }),
+    vscode.window.onDidCloseTerminal(() => {
+      scheduleSessionSync();
+      syncAttached();
+    }),
     vscode.window.onDidStartTerminalShellExecution(() =>
       scheduleSessionSync()
     ),
@@ -247,6 +253,9 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node));
   register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node));
   register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node));
+  register('devc-vscode.attachTerminal', (node?: ContainerNode) =>
+    attachTerminal(node)
+  );
   register('devc-vscode.openFolderInContainer', (uri: vscode.Uri) =>
     openFolderInContainer(uri)
   );
@@ -325,6 +334,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Watch for container start/stop events so roots appear and vanish live.
   startDockerEventsWatcher();
+  syncAttached();
 }
 
 export function deactivate() {
@@ -555,6 +565,64 @@ function openContainerTerminal(
   t.show();
   t.sendText(command);
   return t;
+}
+
+/**
+ * Show a container's terminal, opening one from its host folder when there
+ * is none.
+ */
+async function attachTerminal(node?: ContainerNode): Promise<void> {
+  const target = node ?? treeView.selection[0];
+  if (target?.kind !== 'container') {
+    return;
+  }
+  const existing = await containerTerminals(target.containerId);
+  if (existing.length) {
+    existing[0].show();
+    return;
+  }
+  openContainerTerminal(target.localFolder, getOpenFolderCommand());
+}
+
+/** This window's open terminals on a container, oldest first. */
+async function containerTerminals(
+  containerId: string
+): Promise<vscode.Terminal[]> {
+  const found: vscode.Terminal[] = [];
+  for (const terminal of vscode.window.terminals) {
+    if (
+      isContainerTerminal(terminal) &&
+      !terminal.exitStatus &&
+      (await resolveTerminalContext(terminal))?.containerId === containerId
+    ) {
+      found.push(terminal);
+    }
+  }
+  return found;
+}
+
+let attachedSync = 0;
+
+/** Tell the container tree which containers have a terminal open on them. */
+function syncAttached(): void {
+  const run = ++attachedSync;
+  (async () => {
+    const ids = new Set<string>();
+    for (const terminal of vscode.window.terminals) {
+      if (isContainerTerminal(terminal) && !terminal.exitStatus) {
+        const id = (await resolveTerminalContext(terminal))?.containerId;
+        if (id) {
+          ids.add(id);
+        }
+      }
+    }
+    // A later sync saw newer terminals; its answer wins.
+    if (run === attachedSync) {
+      treeProvider.setAttached(ids);
+    }
+  })().catch(err => {
+    console.error('devc-vscode: terminal sync error', err);
+  });
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────
@@ -1009,6 +1077,7 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
   }
   treeProvider.refresh();
   syncAgents();
+  syncAttached();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

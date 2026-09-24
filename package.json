@@ -30,7 +30,7 @@
         "devc-vscode.openFolderCommand": {
           "type": "string",
           "default": "devc herdr",
-          "description": "Command sent to the terminal by \"Open Folder in Container\"."
+          "description": "Command sent to the terminal by \"Open Folder in Container\" and by the Dev Containers view's Attach Terminal action."
         },
         "devc-vscode.herdrAttachCommand": {
           "type": "string",
@@ -60,6 +60,12 @@
         "command": "devc-vscode.openFolderInContainer",
         "title": "Open Folder in Container",
         "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.attachTerminal",
+        "title": "Attach Terminal",
+        "category": "Dev Container FS",
+        "icon": "$(terminal)"
       },
       {
         "command": "devc-vscode.newFile",
@@ -120,23 +126,28 @@
       ],
       "view/item/context": [
         {
+          "command": "devc-vscode.attachTerminal",
+          "when": "view == devc-vscode.containers && viewItem == container",
+          "group": "inline"
+        },
+        {
           "command": "devc-vscode.newFile",
-          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container(\\.attached)?|directory)$/",
           "group": "1_new"
         },
         {
           "command": "devc-vscode.newFolder",
-          "when": "view == devc-vscode.containers && viewItem =~ /^(container|directory)$/",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container(\\.attached)?|directory)$/",
           "group": "1_new@2"
         },
         {
           "command": "devc-vscode.rename",
-          "when": "view == devc-vscode.containers && viewItem != container",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(directory|file)$/",
           "group": "2_edit"
         },
         {
           "command": "devc-vscode.delete",
-          "when": "view == devc-vscode.containers && viewItem != container",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(directory|file)$/",
           "group": "2_edit@2"
         },
         {
@@ -181,6 +192,10 @@
         },
         {
           "command": "devc-vscode.downContainer",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.attachTerminal",
           "when": "false"
         }
       ]

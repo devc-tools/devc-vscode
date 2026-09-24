@@ -266,6 +266,32 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
     assert.strictEqual(parent!.uri.path, '/');
   });
 
+  test('a container with a terminal open on it is marked attached', async () => {
+    const { provider } = fixture();
+    const root = await rootFor(provider, 'c1');
+    assert.strictEqual(
+      root.kind === 'container' && root.localFolder,
+      '/work/app'
+    );
+
+    const fired: (ContainerNode | undefined)[] = [];
+    provider.onDidChangeTreeData(node => fired.push(node));
+    provider.setAttached(['c1']);
+    assert.strictEqual(
+      provider.getTreeItem(root).contextValue,
+      'container.attached'
+    );
+    assert.deepStrictEqual(fired, [root]);
+
+    // Unchanged state refreshes nothing.
+    provider.setAttached(['c1']);
+    assert.strictEqual(fired.length, 1);
+
+    provider.setAttached([]);
+    assert.strictEqual(provider.getTreeItem(root).contextValue, 'container');
+    assert.strictEqual(fired.length, 2);
+  });
+
   test('getTreeItem maps kind to contextValue and opens files', async () => {
     const { provider } = fixture();
     const root = await rootFor(provider, 'c1');

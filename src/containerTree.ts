@@ -47,6 +47,8 @@ export type ContainerNode =
       containerId: string;
       name: string;
       containerName: string;
+      /** The project folder on the host the container serves. */
+      localFolder: string;
       uri: vscode.Uri;
     }
   | {
@@ -119,6 +121,8 @@ export class ContainerTreeDataProvider
 
   /** Container roots, cached so getParent can terminate without a docker call. */
   private readonly roots = new Map<string, ContainerNode>();
+  /** Containers with a terminal open on them in this window. */
+  private attached = new Set<string>();
 
   constructor(
     private readonly source: ContainerSource,
@@ -131,6 +135,24 @@ export class ContainerTreeDataProvider
       this.roots.clear();
     }
     this._onDidChangeTreeData.fire(node);
+  }
+
+  /**
+   * Record which containers have a terminal open on them, refreshing the
+   * roots whose state changed.
+   */
+  setAttached(containerIds: Iterable<string>): void {
+    const next = new Set(containerIds);
+    const changed = [...next, ...this.attached].filter(
+      id => next.has(id) !== this.attached.has(id)
+    );
+    this.attached = next;
+    for (const id of changed) {
+      const root = this.roots.get(id);
+      if (root) {
+        this._onDidChangeTreeData.fire(root);
+      }
+    }
   }
 
   // --- tree data
@@ -173,7 +195,9 @@ export class ContainerTreeDataProvider
           : node.containerId.slice(0, 12);
       // No resourceUri: the file icon theme would paint a folder icon over this.
       item.iconPath = new vscode.ThemeIcon('vm-running');
-      item.contextValue = 'container';
+      item.contextValue = this.attached.has(node.containerId)
+        ? 'container.attached'
+        : 'container';
       item.tooltip = node.containerName || node.name;
       return item;
     }
@@ -249,6 +273,7 @@ export class ContainerTreeDataProvider
         containerId: c.id,
         name: c.name || c.containerName || c.id.slice(0, 12),
         containerName: c.containerName,
+        localFolder: c.localFolder,
         // One root per container, at its filesystem root.
         uri: containerUri(c.id, '/'),
       };
