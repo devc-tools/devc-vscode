@@ -254,6 +254,12 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
   register('devc-vscode.refresh', () => treeProvider.refresh());
+  register('devc-vscode.expandAllAgents', () =>
+    agentTree.setExpansion('expanded')
+  );
+  register('devc-vscode.collapseAllAgents', () =>
+    agentTree.setExpansion('collapsed')
+  );
   register('devc-vscode.focusAgent', (node?: AgentNode) => focusAgent(node));
   register('devc-vscode.closeAgent', (node?: AgentNode) => closeAgent(node));
   register('devc-vscode.stopContainer', (node?: AgentNode) =>

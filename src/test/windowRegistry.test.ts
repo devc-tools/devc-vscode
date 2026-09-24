@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { AgentTreeDataProvider, WatchAgents } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
 import {
@@ -259,6 +260,29 @@ suite('AgentTreeDataProvider across windows', () => {
       ['beta', 'alpha']
     );
     assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows');
+    assert.strictEqual(
+      tree.getTreeItem(roots[1]).collapsibleState,
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
+    // Expand All and Collapse All set every group, under fresh ids.
+    tree.setExpansion('expanded');
+    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows#1');
+    assert.deepStrictEqual(
+      roots.map(n => tree.getTreeItem(n).collapsibleState),
+      [
+        vscode.TreeItemCollapsibleState.Expanded,
+        vscode.TreeItemCollapsibleState.Expanded,
+      ]
+    );
+    tree.setExpansion('collapsed');
+    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows#2');
+    assert.deepStrictEqual(
+      roots.map(n => tree.getTreeItem(n).collapsibleState),
+      [
+        vscode.TreeItemCollapsibleState.Collapsed,
+        vscode.TreeItemCollapsibleState.Collapsed,
+      ]
+    );
     // A container's herdr agents sit under its herdr node.
     const [remoteHerdr] = tree.getChildren(tree.getChildren(windows[0])[0]);
     assert.strictEqual(remoteHerdr.kind, 'containerHerdr');

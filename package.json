@@ -99,6 +99,18 @@
         "category": "Dev Container FS"
       },
       {
+        "command": "devc-vscode.expandAllAgents",
+        "title": "Expand All",
+        "category": "Dev Container FS",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "devc-vscode.collapseAllAgents",
+        "title": "Collapse All",
+        "category": "Dev Container FS",
+        "icon": "$(collapse-all)"
+      },
+      {
         "command": "devc-vscode.focusAgent",
         "title": "Focus Agent",
         "category": "Dev Container FS"
@@ -146,6 +158,16 @@
           "command": "devc-vscode.refresh",
           "when": "view == devc-vscode.containers",
           "group": "navigation"
+        },
+        {
+          "command": "devc-vscode.expandAllAgents",
+          "when": "view == devc-vscode.agents",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devc-vscode.collapseAllAgents",
+          "when": "view == devc-vscode.agents",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -254,12 +276,12 @@
     "views": {
       "explorer": [
         {
-          "id": "devc-vscode.containers",
-          "name": "Dev Containers"
-        },
-        {
           "id": "devc-vscode.agents",
           "name": "Agents"
+        },
+        {
+          "id": "devc-vscode.containers",
+          "name": "Dev Containers"
         }
       ]
     },

@@ -281,6 +281,13 @@ export class AgentTreeDataProvider
   private nextTerminalId = 1;
   /** Other VS Code windows' published views. */
   private others: WindowSnapshot[] = [];
+  /**
+   * Set by Expand All or Collapse All: every group's state until the next
+   * one. Each bumps `generation`, which is folded into item ids so VS Code
+   * forgets the states it remembered and takes the new ones.
+   */
+  private expansion?: 'expanded' | 'collapsed';
+  private generation = 0;
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     AgentNode | undefined
   >();
@@ -554,6 +561,13 @@ export class AgentTreeDataProvider
     } else {
       this.localAgents.delete(terminal);
     }
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** Expand or collapse every group, as the view's title actions do. */
+  setExpansion(expansion: 'expanded' | 'collapsed'): void {
+    this.expansion = expansion;
+    this.generation++;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -853,10 +867,28 @@ export class AgentTreeDataProvider
   }
 
   getTreeItem(node: AgentNode): vscode.TreeItem {
+    const item = this.buildTreeItem(node);
+    if (this.generation > 0) {
+      item.id = `${item.id}#${this.generation}`;
+    }
+    if (
+      this.expansion &&
+      item.collapsibleState !== vscode.TreeItemCollapsibleState.None
+    ) {
+      item.collapsibleState =
+        this.expansion === 'expanded'
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed;
+    }
+    return item;
+  }
+
+  private buildTreeItem(node: AgentNode): vscode.TreeItem {
     if (node.kind === 'otherWindows') {
+      // Collapsed so other windows' agents stay out of the way until wanted.
       const item = new vscode.TreeItem(
         'Other Windows',
-        vscode.TreeItemCollapsibleState.Expanded
+        vscode.TreeItemCollapsibleState.Collapsed
       );
       item.id = 'otherWindows';
       item.iconPath = new vscode.ThemeIcon('multiple-windows');
