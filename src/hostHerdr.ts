@@ -1,7 +1,9 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AgentInfo, parseSnapshot } from './herdr';
+import { Classification, parseExplain } from './terminalAgents';
 
 /**
  * herdr running on the host, outside any container. Unlike a container's
@@ -199,6 +201,39 @@ export async function focusHostHerdrAgent(
     session.socketPath
   );
   return res?.exitCode === 0;
+}
+
+/**
+ * Classify an agent's screen with the host's herdr, as classifyScreen does
+ * with a container's. Undefined when herdr is missing or cannot tell.
+ */
+export async function classifyHostScreen(
+  agent: string,
+  screen: string
+): Promise<Classification | undefined> {
+  let dir: string | undefined;
+  try {
+    dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'devc-screen-'));
+    const file = path.join(dir, 'screen.txt');
+    await fs.promises.writeFile(file, screen, 'utf8');
+    const res = await runHerdr([
+      'agent',
+      'explain',
+      '--file',
+      file,
+      '--agent',
+      agent,
+      '--format',
+      'json',
+    ]);
+    return res?.exitCode === 0 ? parseExplain(res.stdout.trim()) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (dir) {
+      fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
 }
 
 /**

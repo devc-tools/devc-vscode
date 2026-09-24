@@ -15,7 +15,7 @@ import { AgentInfo } from './herdr';
  * that crashed is recognised by its extension host pid no longer running.
  */
 
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 export interface PublishedAgent {
   /** Identifies the agent to its own window, for focus requests. */
@@ -25,10 +25,14 @@ export interface PublishedAgent {
   herdr: boolean;
 }
 
-/** One group of a window's agents: a dev container or a host herdr session. */
+/**
+ * One group of a window's agents: a dev container, a host herdr session, or
+ * the window's plain host terminals.
+ */
 export type PublishedGroup =
   | { kind: 'container'; container: ContainerInfo; agents: PublishedAgent[] }
-  | { kind: 'session'; session: string; agents: PublishedAgent[] };
+  | { kind: 'session'; session: string; agents: PublishedAgent[] }
+  | { kind: 'local'; agents: PublishedAgent[] };
 
 export interface WindowSnapshot {
   version: number;

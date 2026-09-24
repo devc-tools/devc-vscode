@@ -1,4 +1,7 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { hostHerdrSupported } from './hostHerdr';
 
@@ -58,6 +61,90 @@ export async function hostTerminalForeground(
   const output = await ps(['-t', tty, '-o', 'pid=,pgid=,tpgid=,command=']);
   const fg = output === undefined ? undefined : foregroundFromPs(output);
   return fg && { tty, ...fg };
+}
+
+/** How long a foreground reading is reused before `ps` is asked again. */
+const FOREGROUND_TTL_MS = 1000;
+
+/**
+ * hostTerminalForeground, shared by everything that polls host terminals —
+ * session ownership and agent detection — so a terminal is read by `ps` at
+ * most once per second however many callers ask.
+ */
+export class HostForegroundCache {
+  private readonly cache = new WeakMap<
+    vscode.Terminal,
+    { at: number; result: Promise<HostForeground | undefined> }
+  >();
+
+  constructor(
+    private readonly read: (
+      terminal: vscode.Terminal
+    ) => Promise<HostForeground | undefined> = hostTerminalForeground,
+    private readonly ttlMs = FOREGROUND_TTL_MS
+  ) {}
+
+  get(terminal: vscode.Terminal): Promise<HostForeground | undefined> {
+    const hit = this.cache.get(terminal);
+    if (hit && Date.now() - hit.at < this.ttlMs) {
+      return hit.result;
+    }
+    const result = this.read(terminal);
+    this.cache.set(terminal, { at: Date.now(), result });
+    return result;
+  }
+}
+
+/** The rows and columns in `stty size` output ("43 181"). */
+export function parseSttySize(
+  output: string
+): { rows: number; cols: number } | undefined {
+  const m = /^(\d+) (\d+)$/.exec(output.trim());
+  return m && Number(m[1]) > 0 && Number(m[2]) > 0
+    ? { rows: Number(m[1]), cols: Number(m[2]) }
+    : undefined;
+}
+
+/**
+ * A host tty's size, which tracks its VS Code terminal's. `tty` is as `ps`
+ * names it; BSD stty names the device with -f, GNU stty with -F.
+ */
+export function hostTtySize(
+  tty: string
+): Promise<{ rows: number; cols: number } | undefined> {
+  const flag = process.platform === 'darwin' ? '-f' : '-F';
+  return new Promise(resolve => {
+    cp.execFile(
+      'stty',
+      [flag, `/dev/${tty}`, 'size'],
+      { timeout: 5000 },
+      (err, stdout) => resolve(err ? undefined : parseSttySize(stdout))
+    );
+  });
+}
+
+/**
+ * The agents host herdr knows how to detect: one cached manifest per agent
+ * id. Empty when herdr is not installed, which turns host terminal detection
+ * off.
+ */
+export async function hostAgentIds(): Promise<ReadonlySet<string>> {
+  const dir = path.join(
+    os.homedir(),
+    '.local',
+    'state',
+    'herdr',
+    'agent-detection',
+    'remote'
+  );
+  try {
+    const names = await fs.promises.readdir(dir);
+    return new Set(
+      names.filter(n => n.endsWith('.toml')).map(n => n.slice(0, -5))
+    );
+  } catch {
+    return new Set();
+  }
 }
 
 function ps(args: string[]): Promise<string | undefined> {

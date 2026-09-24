@@ -28,9 +28,12 @@ export type AgentNode =
       host?: HostSession;
       remote?: WindowSnapshot;
     }
+  /** A window's plain host terminals with agents in them. */
+  | { kind: 'local'; remote?: WindowSnapshot }
   | (AgentNodeBase & {
       container: ContainerInfo;
       session?: undefined;
+      local?: undefined;
       /** Set when detected from a terminal's output rather than by herdr. */
       terminal?: vscode.Terminal;
     })
@@ -38,11 +41,23 @@ export type AgentNode =
       /** The host herdr session the agent runs in. */
       session: string;
       container?: undefined;
+      local?: undefined;
       terminal?: undefined;
+    })
+  | (AgentNodeBase & {
+      /** Runs in a plain host terminal. */
+      local: true;
+      container?: undefined;
+      session?: undefined;
+      /** Always set for this window's agents. */
+      terminal?: vscode.Terminal;
     });
 
-/** A container or host session under a window. */
-type GroupNode = Extract<AgentNode, { kind: 'container' | 'session' }>;
+/** A container, host session, or the host terminals, under a window. */
+type GroupNode = Extract<
+  AgentNode,
+  { kind: 'container' | 'session' | 'local' }
+>;
 
 /**
  * Starts streaming one container's agents. Injected so the tree can be
@@ -186,6 +201,8 @@ export class AgentTreeDataProvider
     string,
     Map<vscode.Terminal, AgentInfo>
   >();
+  /** Agents detected in plain host terminals, by terminal. */
+  private readonly localAgents = new Map<vscode.Terminal, AgentInfo>();
   private readonly terminalIds = new WeakMap<vscode.Terminal, number>();
   private nextTerminalId = 1;
   /** Other VS Code windows' published views. */
@@ -402,6 +419,23 @@ export class AgentTreeDataProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /** Record (or clear, with undefined) the agent a host terminal is showing. */
+  setLocalTerminalAgent(
+    terminal: vscode.Terminal,
+    agent: AgentInfo | undefined
+  ): void {
+    const previous = this.localAgents.get(terminal);
+    if (JSON.stringify(previous) === JSON.stringify(agent)) {
+      return;
+    }
+    if (agent) {
+      this.localAgents.set(terminal, agent);
+    } else {
+      this.localAgents.delete(terminal);
+    }
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   /** Replace what other windows show; fires only when it changed. */
   setOtherWindows(windows: WindowSnapshot[]): void {
     if (JSON.stringify(windows) === JSON.stringify(this.others)) {
@@ -425,9 +459,14 @@ export class AgentTreeDataProvider
             ]
           : []
       );
-      return group.kind === 'session'
-        ? { kind: 'session', session: group.session, agents }
-        : { kind: 'container', container: group.container, agents };
+      switch (group.kind) {
+        case 'session':
+          return { kind: 'session', session: group.session, agents };
+        case 'local':
+          return { kind: 'local', agents };
+        case 'container':
+          return { kind: 'container', container: group.container, agents };
+      }
     });
   }
 
@@ -439,6 +478,9 @@ export class AgentTreeDataProvider
   }
 
   private keyOf(node: AgentNode & { kind: 'agent' }): string {
+    if (node.local) {
+      return `local-terminal:${this.terminalId(node.terminal!)}`;
+    }
     if (node.session !== undefined) {
       // Pane ids repeat across sessions, so the session is part of the key.
       return `host-herdr:${node.session}:${node.agent.paneId}`;
@@ -448,7 +490,10 @@ export class AgentTreeDataProvider
       : `herdr:${node.container.id}:${node.agent.paneId}`;
   }
 
-  /** This window's container and session groups with agents, by label. */
+  /**
+   * This window's groups with agents: containers and sessions by label, then
+   * the host terminals.
+   */
   private localGroups(): GroupNode[] {
     const containers: { label: string; node: GroupNode }[] = [
       ...this.watched.values(),
@@ -466,9 +511,19 @@ export class AgentTreeDataProvider
         label: sessionLabel(s.session),
         node: { kind: 'session', session: s.session.name, host: s.session },
       }));
-    return [...containers, ...sessions]
+    const groups = [...containers, ...sessions]
       .sort((a, b) => a.label.localeCompare(b.label))
       .map(g => g.node);
+    return this.localAgents.size > 0 ? [...groups, { kind: 'local' }] : groups;
+  }
+
+  private nodesForLocal(): AgentNode[] {
+    return [...this.localAgents].map(([terminal, agent]) => ({
+      kind: 'agent',
+      local: true,
+      agent,
+      terminal,
+    }));
   }
 
   private othersWithAgents(): WindowSnapshot[] {
@@ -510,6 +565,7 @@ export class AgentTreeDataProvider
     return [
       ...[...this.watched.values()].flatMap(w => w.agents),
       ...[...this.terminalAgents.values()].flatMap(m => [...m.values()]),
+      ...this.localAgents.values(),
       ...[...this.sessions.values()].flatMap(s =>
         ownedAgents(s.agents, s.attached, this.folders)
       ),
@@ -544,11 +600,16 @@ export class AgentTreeDataProvider
       const remote = node.remote;
       return remote.groups
         .filter(g => g.agents.length)
-        .map(g =>
-          g.kind === 'session'
-            ? { kind: 'session', session: g.session, remote }
-            : { kind: 'container', container: g.container, remote }
-        );
+        .map((g): GroupNode => {
+          switch (g.kind) {
+            case 'session':
+              return { kind: 'session', session: g.session, remote };
+            case 'local':
+              return { kind: 'local', remote };
+            case 'container':
+              return { kind: 'container', container: g.container, remote };
+          }
+        });
     }
     if (node.kind === 'container') {
       if (!node.remote) {
@@ -579,6 +640,20 @@ export class AgentTreeDataProvider
       return published.map(p => ({
         kind: 'agent',
         session: node.session,
+        agent: p.agent,
+        remote: { window, published: p },
+      }));
+    }
+    if (node.kind === 'local') {
+      if (!node.remote) {
+        return this.nodesForLocal();
+      }
+      const window = node.remote;
+      const published =
+        window.groups.find(g => g.kind === 'local')?.agents ?? [];
+      return published.map(p => ({
+        kind: 'agent',
+        local: true,
         agent: p.agent,
         remote: { window, published: p },
       }));
@@ -638,6 +713,18 @@ export class AgentTreeDataProvider
       item.contextValue = 'agentSession';
       return item;
     }
+    if (node.kind === 'local') {
+      const item = new vscode.TreeItem(
+        'Terminals',
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = `${scope}local`;
+      item.iconPath = new vscode.ThemeIcon('terminal');
+      item.description = summarize(this.agentsUnder(node));
+      item.tooltip = 'Agents in plain terminals on the host';
+      item.contextValue = 'agentTerminals';
+      return item;
+    }
 
     const { agent } = node;
     const herdr = node.remote ? node.remote.published.herdr : !node.terminal;
@@ -650,11 +737,12 @@ export class AgentTreeDataProvider
       : this.keyOf(node);
     item.iconPath = STATUS_ICONS[agent.status];
     item.description = agent.status;
+    const terminalName = node.terminal ? ` "${node.terminal.name}"` : '';
     item.tooltip = [
       `${agent.agent} — ${agent.status}`,
       herdr
         ? `herdr workspace ${agent.workspace ?? '?'}, pane ${agent.paneId}`
-        : `terminal${node.terminal ? ` "${node.terminal.name}"` : ''} (detected from its output)`,
+        : `terminal${terminalName}${node.local ? ' on the host' : ' (detected from its output)'}`,
       agent.title,
       agent.cwd,
       node.remote &&
@@ -684,6 +772,7 @@ export class AgentTreeDataProvider
     }
     this.sessions.clear();
     this.terminalAgents.clear();
+    this.localAgents.clear();
     this._onDidChangeTreeData.dispose();
   }
 }

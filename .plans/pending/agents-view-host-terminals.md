@@ -8,14 +8,14 @@ Depends on [agents-view-host-herdr.md](../implemented/agents-view-host-herdr.md)
 
 ## Checklist
 
-- [ ] Track host terminals' command output (all non-container terminals)
-- [ ] Identify the agent from the terminal's foreground process on the host
-- [ ] Classify the screen with the host's `herdr agent explain`
-- [ ] Tree: a "Terminals" group under the window
-- [ ] Registry: `local` group kind
-- [ ] Focus: show the terminal, locally and from another window
-- [ ] Presence-only fallback for commands already running when the extension loaded
-- [ ] Tests (see Validation)
+- [x] Track host terminals' command output (all non-container terminals)
+- [x] Identify the agent from the terminal's foreground process on the host
+- [x] Classify the screen with the host's `herdr agent explain`
+- [x] Tree: a "Terminals" group under the window
+- [x] Registry: `local` group kind
+- [x] Focus: show the terminal, locally and from another window
+- [x] Presence-only fallback for commands already running when the extension loaded
+- [x] Tests (see Validation)
 
 ## Scope decisions (in addition to the host herdr plan's)
 

@@ -145,7 +145,7 @@ suite('WindowRegistry', () => {
     b.r.dispose();
   });
 
-  test('container and session groups round-trip', () => {
+  test('container, session and local groups round-trip', () => {
     const a = registry(1);
     const b = registry(2);
     const published: WindowSnapshot = {
@@ -160,6 +160,20 @@ suite('WindowRegistry', () => {
               key: 'host-herdr:devc-vscode:w1:p1',
               agent: { paneId: 'w1:p1', agent: 'pi', status: 'idle' },
               herdr: true,
+            },
+          ],
+        },
+        {
+          kind: 'local',
+          agents: [
+            {
+              key: 'local-terminal:3',
+              agent: {
+                paneId: 'terminal:ttys004',
+                agent: 'claude',
+                status: 'working',
+              },
+              herdr: false,
             },
           ],
         },

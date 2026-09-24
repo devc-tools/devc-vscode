@@ -24,13 +24,19 @@ import {
 import {
   HostSession,
   attachCommand,
+  classifyHostScreen,
   focusHostHerdrAgent,
   listHostSessions,
   readHostSession,
   sessionFromClientArgs,
   watchHostSession,
 } from './hostHerdr';
-import { hostTerminalForeground } from './hostProcesses';
+import {
+  HostForegroundCache,
+  hostAgentIds,
+  hostTerminalForeground,
+  hostTtySize,
+} from './hostProcesses';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
   TerminalAgentTracker,
@@ -102,6 +108,9 @@ export function activate(context: vscode.ExtensionContext) {
     log: true,
   });
   context.subscriptions.push(agentLog);
+  // Session ownership and host terminal agent detection both poll host
+  // terminals' foregrounds; they share one reading per terminal.
+  const hostForegrounds = new HostForegroundCache();
   agentTree = new AgentTreeDataProvider(
     new DockerContainerSource(getDockerCommand, getHostFolders),
     watchContainerAgents,
@@ -111,7 +120,7 @@ export function activate(context: vscode.ExtensionContext) {
         const found = await Promise.all(
           vscode.window.terminals
             .filter(t => !isContainerTerminal(t))
-            .map(t => hostTerminalForeground(t))
+            .map(t => hostForegrounds.get(t))
         );
         return found.flatMap(fg => (fg ? [fg.args] : []));
       },
@@ -167,6 +176,14 @@ export function activate(context: vscode.ExtensionContext) {
         classifyScreen(id, user, agent, screen, getDockerCommand()),
       report: (terminal, id, agent) =>
         agentTree.setTerminalAgent(id, terminal, agent),
+      host: {
+        foreground: terminal => hostForegrounds.get(terminal),
+        agentIds: hostAgentIds,
+        size: hostTtySize,
+        classify: classifyHostScreen,
+        report: (terminal, agent) =>
+          agentTree.setLocalTerminalAgent(terminal, agent),
+      },
       log: message => agentLog.info(message),
     }))
   );
@@ -631,6 +648,10 @@ async function focusAgent(node?: AgentNode): Promise<void> {
   }
   if (node.session !== undefined) {
     await focusHostAgent(node.session, node.agent);
+    return;
+  }
+  if (node.local) {
+    node.terminal?.show();
     return;
   }
   if (node.terminal) {
