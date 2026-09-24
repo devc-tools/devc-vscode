@@ -3,7 +3,7 @@
 Detect agents run directly in a host VS Code terminal (no herdr, no container) and show
 them in the Agents view, with status from herdr's detection rules on the host.
 
-Depends on [agents-view-host-herdr.md](agents-view-host-herdr.md): the "Scope decisions",
+Depends on [agents-view-host-herdr.md](../implemented/agents-view-host-herdr.md): the "Scope decisions",
 `hostProcesses.ts`, and the `groups` registry snapshot come from there.
 
 ## Checklist

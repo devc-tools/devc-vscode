@@ -31,7 +31,7 @@ These were settled with the user; do not re-open them.
 - **macOS and Linux hosts.** On Windows, host herdr support is simply off (no sessions
   listed, no errors shown).
 - Plain host terminals (no herdr) are the follow-up plan,
-  [agents-view-host-terminals.md](agents-view-host-terminals.md).
+  [agents-view-host-terminals.md](../pending/agents-view-host-terminals.md).
 
 ## Existing touchpoints
 
