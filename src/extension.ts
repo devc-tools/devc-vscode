@@ -23,6 +23,7 @@ import {
 } from './containerTree';
 import {
   AgentInfo,
+  closeHerdrPane,
   focusHerdrAgent,
   getRemoteUser,
   watchHerdr,
@@ -31,6 +32,7 @@ import {
   HostSession,
   attachCommand,
   classifyHostScreen,
+  closeHostHerdrPane,
   focusHostHerdrAgent,
   listHostSessions,
   readHostSession,
@@ -229,6 +231,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   register('devc-vscode.refresh', () => treeProvider.refresh());
   register('devc-vscode.focusAgent', (node?: AgentNode) => focusAgent(node));
+  register('devc-vscode.closeAgent', (node?: AgentNode) => closeAgent(node));
+  register('devc-vscode.stopContainer', (node?: AgentNode) =>
+    shutDownContainer(node, 'stop')
+  );
+  register('devc-vscode.downContainer', (node?: AgentNode) =>
+    shutDownContainer(node, 'down')
+  );
   register('devc-vscode.newFile', (node?: ContainerNode) =>
     createEntry(node, 'file')
   );
@@ -816,6 +825,93 @@ function waitForHostClient(
   });
 }
 
+/**
+ * End an agent's session: close its herdr pane, or the terminal it was
+ * detected in. Only this window's agents can be closed.
+ */
+async function closeAgent(node?: AgentNode): Promise<void> {
+  if (node?.kind !== 'agent' || node.remote) {
+    return;
+  }
+  const { agent } = node;
+  const what = node.terminal
+    ? `the terminal "${node.terminal.name}"`
+    : 'its herdr pane';
+  const answer = await vscode.window.showWarningMessage(
+    `Close ${agent.agent}? This ends ${what} and anything running in it.`,
+    { modal: true },
+    'Close'
+  );
+  if (answer !== 'Close') {
+    return;
+  }
+  if (node.terminal) {
+    node.terminal.dispose();
+    return;
+  }
+  let closed = false;
+  if (node.session !== undefined) {
+    const session = agentTree.hostSession(node.session);
+    closed = !!session && (await closeHostHerdrPane(session, agent.paneId));
+  } else if (node.container) {
+    const docker = getDockerCommand();
+    const user = await getRemoteUser(node.container.id, docker);
+    closed = await closeHerdrPane(
+      node.container.id,
+      user,
+      agent.paneId,
+      docker
+    );
+  }
+  if (!closed) {
+    vscode.window.showErrorMessage(`Could not close ${agent.agent} in herdr.`);
+  }
+}
+
+/**
+ * Close a container's terminals, then run `devc stop` or `devc down` for it
+ * from the host folder they were opened in. devc is usually a shell function,
+ * so it runs in a terminal's interactive shell rather than as a child process.
+ */
+async function shutDownContainer(
+  node: AgentNode | undefined,
+  action: 'stop' | 'down'
+): Promise<void> {
+  if (node?.kind !== 'container' || node.remote) {
+    return;
+  }
+  const { container } = node;
+  const answer = await vscode.window.showWarningMessage(
+    action === 'stop'
+      ? `Stop ${container.name}? Its terminals are closed and every agent in it ends.`
+      : `Take down ${container.name}? Its terminals are closed, every agent in it ends, and the container is removed.`,
+    { modal: true },
+    action === 'stop' ? 'Stop' : 'Down'
+  );
+  if (!answer) {
+    return;
+  }
+  let cwd: string | undefined;
+  for (const terminal of [...vscode.window.terminals]) {
+    if (
+      isContainerTerminal(terminal) &&
+      (await resolveTerminalContext(terminal))?.containerId === container.id
+    ) {
+      cwd ??= terminalCwd(terminal);
+      terminal.dispose();
+    }
+  }
+  const t = vscode.window.createTerminal({
+    name: `devc ${action}`,
+    cwd: cwd ?? container.localFolder,
+    iconPath: CONTAINER_ICON,
+    // See openContainerTerminal.
+    hideFromUser: true,
+  });
+  t.show();
+  t.sendText(getContainerCommand(action));
+}
+
 /** How long a newly opened terminal gets to bring herdr up. */
 const HERDR_ATTACH_TIMEOUT_MS = 20000;
 
@@ -950,6 +1046,21 @@ function getHerdrAttachCommand(): string {
   return configured && configured.trim() !== '' ? configured : 'devc herdr';
 }
 
+/** Command run by the Agents view's stop or down action on a container. */
+function getContainerCommand(action: 'stop' | 'down'): string {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>(`${action}Command`);
+  return configured && configured.trim() !== '' ? configured : `devc ${action}`;
+}
+
+/** The host folder a terminal was opened in. */
+function terminalCwd(terminal: vscode.Terminal): string | undefined {
+  const opts = terminal.creationOptions;
+  const cwd = 'cwd' in opts ? opts.cwd : undefined;
+  return typeof cwd === 'string' ? cwd : cwd?.fsPath;
+}
+
 /** Return the fsPath of all file:// workspace folders. */
 function getHostFolders(): string[] {
   return (
@@ -969,12 +1080,10 @@ const terminalContainerCache = new Map<string, TerminalContext | undefined>();
 async function resolveTerminalContext(
   terminal: vscode.Terminal
 ): Promise<TerminalContext | undefined> {
-  const opts = terminal.creationOptions;
-  const cwd = 'cwd' in opts ? opts.cwd : undefined;
-  if (!cwd) {
+  const hostFolder = terminalCwd(terminal);
+  if (!hostFolder) {
     return undefined;
   }
-  const hostFolder = typeof cwd === 'string' ? cwd : cwd.fsPath;
 
   if (terminalContainerCache.has(hostFolder)) {
     return terminalContainerCache.get(hostFolder);

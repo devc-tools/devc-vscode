@@ -203,6 +203,15 @@ export async function focusHostHerdrAgent(
   return res?.exitCode === 0;
 }
 
+/** Close an agent's pane in a host session, as closeHerdrPane does in containers. */
+export async function closeHostHerdrPane(
+  session: HostSession,
+  paneId: string
+): Promise<boolean> {
+  const res = await runHerdr(['pane', 'close', paneId], session.socketPath);
+  return res?.exitCode === 0;
+}
+
 /**
  * Classify an agent's screen with the host's herdr, as classifyScreen does
  * with a container's. Undefined when herdr is missing or cannot tell.

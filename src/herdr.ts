@@ -258,6 +258,30 @@ export async function focusHerdrAgent(
   return res.exitCode === 0;
 }
 
+/** Close an agent's herdr pane, ending the agent and whatever else runs there. */
+export async function closeHerdrPane(
+  containerId: string,
+  user: string | undefined,
+  paneId: string,
+  dockerCommand: string
+): Promise<boolean> {
+  const res = await execDocker(
+    [
+      'exec',
+      ...userArgs(user),
+      containerId,
+      'sh',
+      '-c',
+      'PATH="$HOME/.local/bin:$PATH" exec herdr pane close "$1"',
+      'sh',
+      paneId,
+    ],
+    undefined,
+    dockerCommand
+  );
+  return res.exitCode === 0;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -283,7 +283,9 @@ suite('AgentTreeDataProvider with host terminals', () => {
     const [local] = t.getChildren(roots[2]);
     const item = t.getTreeItem(local);
     assert.strictEqual(item.label, 'claude');
+    assert.strictEqual(item.contextValue, 'agent');
     assert.ok(String(item.tooltip).includes('"zsh"'));
+    assert.strictEqual(t.getTreeItem(roots[1]).contextValue, 'agentContainer');
 
     // Published as a `local` group and found again by key.
     const published = t.snapshotGroups().find(g => g.kind === 'local');
@@ -340,6 +342,8 @@ suite('AgentTreeDataProvider with host terminals', () => {
     const item = t.getTreeItem(remoteAgent);
     assert.strictEqual(item.id, 'w9:local-terminal:4');
     assert.strictEqual(item.label, 'claude');
+    // Another window's agents cannot be closed from here.
+    assert.strictEqual(item.contextValue, 'agentRemote');
     assert.strictEqual(t.attentionCount(), 1);
     t.dispose();
   });

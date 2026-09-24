@@ -700,7 +700,10 @@ export class AgentTreeDataProvider
       item.iconPath = CONTAINER_ICON;
       item.description = summarize(this.agentsUnder(node));
       item.tooltip = node.container.containerName;
-      item.contextValue = 'agentContainer';
+      // Only this window's containers can be stopped: their terminals are here.
+      item.contextValue = node.remote
+        ? 'agentContainerRemote'
+        : 'agentContainer';
       return item;
     }
     if (node.kind === 'session') {
@@ -759,7 +762,7 @@ export class AgentTreeDataProvider
     ]
       .filter(Boolean)
       .join('\n');
-    item.contextValue = 'agent';
+    item.contextValue = node.remote ? 'agentRemote' : 'agent';
     item.command = {
       command: 'devc-vscode.focusAgent',
       title: 'Focus Agent',

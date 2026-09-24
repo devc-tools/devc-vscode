@@ -36,6 +36,16 @@
           "type": "string",
           "default": "devc herdr",
           "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr."
+        },
+        "devc-vscode.stopCommand": {
+          "type": "string",
+          "default": "devc stop",
+          "description": "Command run from a container's host folder by the Agents view's Stop Container action, after its terminals are closed."
+        },
+        "devc-vscode.downCommand": {
+          "type": "string",
+          "default": "devc down",
+          "description": "Command run from a container's host folder by the Agents view's Down Container action, after its terminals are closed."
         }
       }
     },
@@ -80,6 +90,24 @@
         "command": "devc-vscode.focusAgent",
         "title": "Focus Agent",
         "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.closeAgent",
+        "title": "Close Agent",
+        "category": "Dev Container FS",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devc-vscode.stopContainer",
+        "title": "Stop Container",
+        "category": "Dev Container FS",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "devc-vscode.downContainer",
+        "title": "Down Container",
+        "category": "Dev Container FS",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -115,6 +143,21 @@
           "command": "devc-vscode.copyPath",
           "when": "view == devc-vscode.containers",
           "group": "3_copy"
+        },
+        {
+          "command": "devc-vscode.closeAgent",
+          "when": "view == devc-vscode.agents && viewItem == agent",
+          "group": "inline"
+        },
+        {
+          "command": "devc-vscode.stopContainer",
+          "when": "view == devc-vscode.agents && viewItem == agentContainer",
+          "group": "inline@1"
+        },
+        {
+          "command": "devc-vscode.downContainer",
+          "when": "view == devc-vscode.agents && viewItem == agentContainer",
+          "group": "inline@2"
         }
       ],
       "explorer/context": [
@@ -126,6 +169,18 @@
       "commandPalette": [
         {
           "command": "devc-vscode.focusAgent",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.closeAgent",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.stopContainer",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.downContainer",
           "when": "false"
         }
       ]
