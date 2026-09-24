@@ -259,7 +259,10 @@ suite('AgentTreeDataProvider across windows', () => {
       ['beta', 'alpha']
     );
     assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows');
-    const remoteAgent = tree.getChildren(tree.getChildren(windows[0])[0])[0];
+    // A container's herdr agents sit under its herdr node.
+    const [remoteHerdr] = tree.getChildren(tree.getChildren(windows[0])[0]);
+    assert.strictEqual(remoteHerdr.kind, 'containerHerdr');
+    const remoteAgent = tree.getChildren(remoteHerdr)[0];
     assert.strictEqual(remoteAgent.kind, 'agent');
     assert.strictEqual(
       remoteAgent.kind === 'agent' && remoteAgent.remote?.published.key,

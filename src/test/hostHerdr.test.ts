@@ -386,7 +386,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     tree.dispose();
   });
 
-  test('session groups sit beside container groups, by label', async () => {
+  test('session groups come before container groups, each by label', async () => {
     const { host, source } = fakeHost();
     host.sessions = [session('beta'), session('delta')];
     host.foregrounds = ['herdr --session beta', 'herdr --session delta'];
@@ -405,14 +405,9 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const roots = tree.getChildren();
     assert.deepStrictEqual(
       roots.map(n => `${n.kind}:${tree.getTreeItem(n).label}`),
-      [
-        'container:alpha',
-        'session:beta',
-        'session:delta',
-        'container:gamma',
-      ]
+      ['session:beta', 'session:delta', 'container:alpha', 'container:gamma']
     );
-    const sessionItem = tree.getTreeItem(roots[1]);
+    const sessionItem = tree.getTreeItem(roots[0]);
     assert.strictEqual(sessionItem.contextValue, 'agentSession.attached');
     assert.strictEqual(
       (sessionItem.iconPath as vscode.ThemeIcon).id,
@@ -425,19 +420,31 @@ suite('AgentTreeDataProvider with host sessions', () => {
       tree.getChildren(group).map(n => tree.getTreeItem(n).id)
     );
     assert.deepStrictEqual(ids, [
-      'herdr:alpha:w1:p1',
       'host-herdr:beta:w1:p1',
       'host-herdr:delta:w1:p1',
-      'herdr:gamma:w1:p1',
+      'containerHerdr:alpha',
+      'containerHerdr:gamma',
     ]);
-    const item = tree.getTreeItem(tree.getChildren(roots[1])[0]);
-    assert.strictEqual(item.label, 'claude (herdr)');
+    // Agents under a herdr node need no "(herdr)" to say so.
+    const item = tree.getTreeItem(tree.getChildren(roots[0])[0]);
+    assert.strictEqual(item.label, 'claude');
+    const herdrNode = tree.getChildren(roots[2])[0];
+    const herdrItem = tree.getTreeItem(herdrNode);
+    assert.strictEqual(herdrItem.label, 'herdr');
+    assert.strictEqual(
+      (herdrItem.iconPath as vscode.ThemeIcon).id,
+      'terminal-tmux'
+    );
+    assert.deepStrictEqual(
+      tree.getChildren(herdrNode).map(n => tree.getTreeItem(n).id),
+      ['herdr:alpha:w1:p1']
+    );
 
     // Published and found again by key.
     const groups = tree.snapshotGroups();
     assert.deepStrictEqual(
       groups.map(g => g.kind),
-      ['container', 'session', 'session', 'container']
+      ['session', 'session', 'container', 'container']
     );
     const node = tree.findLocal('host-herdr:delta:w1:p1');
     assert.strictEqual(node?.kind === 'agent' && node.session, 'delta');
@@ -495,7 +502,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const item = tree.getTreeItem(placeholder);
     assert.strictEqual(item.label, 'app');
     assert.strictEqual(item.id, 'session:work.app');
-    assert.strictEqual(item.description, 'herdr · not running');
+    assert.strictEqual(item.description, 'local · not running');
     assert.strictEqual(item.contextValue, 'agentSession.placeholder');
     assert.deepStrictEqual(tree.snapshotGroups(), []);
 

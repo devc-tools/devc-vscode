@@ -273,7 +273,16 @@ suite('AgentTreeDataProvider with host terminals', () => {
     assert.strictEqual(group.description, '1 blocked');
 
     // Container and host terminal keys share one counter but never collide.
-    const all = roots.flatMap(g => ids(t, t.getChildren(g)));
+    // A container's herdr agents sit under its herdr node, before its
+    // terminals' agents.
+    const all = roots.flatMap(g =>
+      ids(
+        t,
+        t.getChildren(g).flatMap(n =>
+          n.kind === 'containerHerdr' ? t.getChildren(n) : [n]
+        )
+      )
+    );
     assert.deepStrictEqual(all, [
       'host-herdr:app:w1:p1',
       'herdr:c1:w1:p1',

@@ -177,8 +177,10 @@ suite('AgentTreeDataProvider', () => {
 
     const roots = tree.getChildren();
     assert.deepStrictEqual(ids(), ['a', 'b']);
+    const [herdrNode] = tree.getChildren(roots[1]);
+    assert.strictEqual(herdrNode.kind, 'containerHerdr');
     assert.deepStrictEqual(
-      tree.getChildren(roots[1]).map(n => n.kind === 'agent' && n.agent.paneId),
+      tree.getChildren(herdrNode).map(n => n.kind === 'agent' && n.agent.paneId),
       ['w1:p1']
     );
     assert.strictEqual(tree.attentionCount(), 1);

@@ -41,6 +41,12 @@ export type AgentNode =
       /** This window's workspace session, while it is not running. */
       placeholder?: true;
     }
+  /** A container's herdr, holding the agents herdr manages there. */
+  | {
+      kind: 'containerHerdr';
+      container: ContainerInfo;
+      remote?: WindowSnapshot;
+    }
   /** A window's plain host terminals with agents in them. */
   | { kind: 'local'; remote?: WindowSnapshot }
   | (AgentNodeBase & {
@@ -168,11 +174,11 @@ export function ownedAgents(
  * joined with '.' (see sessionNameForDir). The full name is in the tooltip.
  */
 function sessionLabel(name: string, isDefault = false): string {
-  return isDefault ? 'default' : (name.split('.').pop() || name);
+  return isDefault ? 'default' : name.split('.').pop() || name;
 }
 
 /** A group's description: what kind of group it is, then its state. */
-function groupDescription(kind: 'herdr' | 'container', detail: string): string {
+function groupDescription(kind: 'local' | 'container', detail: string): string {
   return detail ? `${kind} · ${detail}` : kind;
 }
 
@@ -186,6 +192,14 @@ export const SESSION_ICON = new vscode.ThemeIcon('terminal-tmux');
 const IDLE = new vscode.ThemeColor('disabledForeground');
 const CONTAINER_ICON_IDLE = new vscode.ThemeIcon('vm', IDLE);
 const SESSION_ICON_IDLE = new vscode.ThemeIcon('terminal-tmux', IDLE);
+
+/** Whether herdr manages an agent, rather than it being found in a terminal. */
+function isHerdrAgent(node: AgentNode): boolean {
+  if (node.kind !== 'agent') {
+    return false;
+  }
+  return node.remote ? node.remote.published.herdr : !node.terminal;
+}
 
 /** A group only gets a twistie when it has agents to show. */
 function groupState(agents: AgentInfo[]): vscode.TreeItemCollapsibleState {
@@ -561,7 +575,7 @@ export class AgentTreeDataProvider
         !(group.kind === 'session' && group.placeholder)
     );
     return real.map(group => {
-      const agents = this.getChildren(group).flatMap(node =>
+      const agents = this.agentNodesUnder(group).flatMap(node =>
         node.kind === 'agent'
           ? [
               {
@@ -586,8 +600,14 @@ export class AgentTreeDataProvider
   /** This window's agent with a key from snapshotGroups. */
   findLocal(key: string): AgentNode | undefined {
     return this.localGroups()
-      .flatMap(group => this.getChildren(group))
+      .flatMap(group => this.agentNodesUnder(group))
       .find(node => node.kind === 'agent' && this.keyOf(node) === key);
+  }
+
+  private agentNodesUnder(node: AgentNode): AgentNode[] {
+    return this.getChildren(node).flatMap(child =>
+      child.kind === 'agent' ? [child] : this.agentNodesUnder(child)
+    );
   }
 
   private keyOf(node: AgentNode & { kind: 'agent' }): string {
@@ -604,8 +624,8 @@ export class AgentTreeDataProvider
   }
 
   /**
-   * This window's groups: containers and sessions by label, then the host
-   * terminals. Every running or stopped container shows, plus a placeholder
+   * This window's groups: sessions, then containers, each by label, then the
+   * host terminals. Every running or stopped container shows, plus a placeholder
    * for the primary folder's when it has none, and one for the workspace
    * session when it is not running.
    */
@@ -660,9 +680,11 @@ export class AgentTreeDataProvider
         node: { kind: 'session', session: own, placeholder: true },
       });
     }
-    const groups = [...containers, ...sessions]
-      .sort((a, b) => a.label.localeCompare(b.label))
-      .map(g => g.node);
+    const byLabel = (a: { label: string }, b: { label: string }) =>
+      a.label.localeCompare(b.label);
+    const groups = [...sessions.sort(byLabel), ...containers.sort(byLabel)].map(
+      g => g.node
+    );
     return this.localAgents.size > 0 ? [...groups, { kind: 'local' }] : groups;
   }
 
@@ -758,20 +780,17 @@ export class AgentTreeDataProvider
         });
     }
     if (node.kind === 'container') {
-      if (!node.remote) {
-        return this.nodesFor(node.container);
-      }
-      const window = node.remote;
-      const published =
-        window.groups.find(
-          g => g.kind === 'container' && g.container.id === node.container.id
-        )?.agents ?? [];
-      return published.map(p => ({
-        kind: 'agent',
-        container: node.container,
-        agent: p.agent,
-        remote: { window, published: p },
-      }));
+      const { container, remote } = node;
+      const agents = this.containerAgents(container, remote);
+      const byTerminal = agents.filter(a => !isHerdrAgent(a));
+      return agents.length > byTerminal.length
+        ? [{ kind: 'containerHerdr', container, remote }, ...byTerminal]
+        : byTerminal;
+    }
+    if (node.kind === 'containerHerdr') {
+      return this.containerAgents(node.container, node.remote).filter(
+        isHerdrAgent
+      );
     }
     if (node.kind === 'session') {
       if (!node.remote) {
@@ -805,6 +824,26 @@ export class AgentTreeDataProvider
       }));
     }
     return [];
+  }
+
+  /** A container's agents, herdr's and terminals', not yet split up. */
+  private containerAgents(
+    container: ContainerInfo,
+    window?: WindowSnapshot
+  ): AgentNode[] {
+    if (!window) {
+      return this.nodesFor(container);
+    }
+    const published =
+      window.groups.find(
+        g => g.kind === 'container' && g.container.id === container.id
+      )?.agents ?? [];
+    return published.map(p => ({
+      kind: 'agent',
+      container,
+      agent: p.agent,
+      remote: { window, published: p },
+    }));
   }
 
   private agentsUnder(node: AgentNode): AgentInfo[] {
@@ -888,7 +927,7 @@ export class AgentTreeDataProvider
       );
       item.id = `session:${node.session}`;
       item.iconPath = SESSION_ICON_IDLE;
-      item.description = groupDescription('herdr', 'not running');
+      item.description = groupDescription('local', 'not running');
       item.tooltip = [
         `herdr session "${node.session}" on the host, this window's own`,
         'Attach Terminal starts it',
@@ -904,7 +943,7 @@ export class AgentTreeDataProvider
       );
       item.id = `${scope}session:${node.session}`;
       item.iconPath = SESSION_ICON;
-      item.description = groupDescription('herdr', summarize(agents));
+      item.description = groupDescription('local', summarize(agents));
       item.tooltip = [
         `herdr session "${node.session}" on the host`,
         node.host?.socketPath,
@@ -924,6 +963,16 @@ export class AgentTreeDataProvider
             .join('');
       return item;
     }
+    if (node.kind === 'containerHerdr') {
+      const agents = this.agentsUnder(node);
+      const item = new vscode.TreeItem('herdr', groupState(agents));
+      item.id = `${scope}containerHerdr:${node.container.id}`;
+      item.iconPath = SESSION_ICON;
+      item.description = summarize(agents);
+      item.tooltip = `herdr in ${node.container.containerName}`;
+      item.contextValue = 'agentContainerHerdr';
+      return item;
+    }
     if (node.kind === 'local') {
       const item = new vscode.TreeItem(
         'Terminals',
@@ -938,9 +987,9 @@ export class AgentTreeDataProvider
     }
 
     const { agent } = node;
-    const herdr = node.remote ? node.remote.published.herdr : !node.terminal;
+    const herdr = isHerdrAgent(node);
     const item = new vscode.TreeItem(
-      herdr ? `${agent.agent} (herdr)` : agent.agent,
+      agent.agent,
       vscode.TreeItemCollapsibleState.None
     );
     item.id = node.remote
