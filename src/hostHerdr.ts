@@ -213,6 +213,42 @@ export async function closeHostHerdrPane(
 }
 
 /**
+ * Stop a host session's server, ending every pane in it; clients attached to
+ * it exit. Undefined on success, else why it failed.
+ */
+export function stopHostSession(name: string): Promise<string | undefined> {
+  return runSessionCommand(['session', 'stop', name]);
+}
+
+/**
+ * Delete a stopped host session, removing its saved state. herdr refuses
+ * the default session. Undefined on success, else why it failed.
+ */
+export function deleteHostSession(name: string): Promise<string | undefined> {
+  return runSessionCommand(['session', 'delete', name]);
+}
+
+async function runSessionCommand(args: string[]): Promise<string | undefined> {
+  const res = await runHerdr(args);
+  if (!res) {
+    return 'herdr could not be run';
+  }
+  return res.exitCode === 0
+    ? undefined
+    : (errorMessage(res.stdout) ?? `herdr exited with ${res.exitCode}`);
+}
+
+/** The message in a herdr `{"error":{...}}` response. */
+export function errorMessage(output: string): string | undefined {
+  try {
+    const message = JSON.parse(output)?.error?.message;
+    return typeof message === 'string' ? message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Classify an agent's screen with the host's herdr, as classifyScreen does
  * with a container's. Undefined when herdr is missing or cannot tell.
  */

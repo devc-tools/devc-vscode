@@ -114,6 +114,18 @@
         "title": "Down Container",
         "category": "Dev Container FS",
         "icon": "$(trash)"
+      },
+      {
+        "command": "devc-vscode.stopSession",
+        "title": "Stop herdr Session",
+        "category": "Dev Container FS",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "devc-vscode.deleteSession",
+        "title": "Delete herdr Session",
+        "category": "Dev Container FS",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -169,6 +181,16 @@
           "command": "devc-vscode.downContainer",
           "when": "view == devc-vscode.agents && viewItem == agentContainer",
           "group": "inline@2"
+        },
+        {
+          "command": "devc-vscode.stopSession",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.default)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devc-vscode.deleteSession",
+          "when": "view == devc-vscode.agents && viewItem == agentSession",
+          "group": "inline@2"
         }
       ],
       "explorer/context": [
@@ -196,6 +218,14 @@
         },
         {
           "command": "devc-vscode.attachTerminal",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.stopSession",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.deleteSession",
           "when": "false"
         }
       ]

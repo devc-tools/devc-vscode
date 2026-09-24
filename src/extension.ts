@@ -33,10 +33,12 @@ import {
   attachCommand,
   classifyHostScreen,
   closeHostHerdrPane,
+  deleteHostSession,
   focusHostHerdrAgent,
   listHostSessions,
   readHostSession,
   sessionFromClientArgs,
+  stopHostSession,
   watchHostSession,
 } from './hostHerdr';
 import {
@@ -243,6 +245,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
   register('devc-vscode.downContainer', (node?: AgentNode) =>
     shutDownContainer(node, 'down')
+  );
+  register('devc-vscode.stopSession', (node?: AgentNode) =>
+    shutDownSession(node, false)
+  );
+  register('devc-vscode.deleteSession', (node?: AgentNode) =>
+    shutDownSession(node, true)
   );
   register('devc-vscode.newFile', (node?: ContainerNode) =>
     createEntry(node, 'file')
@@ -978,6 +986,52 @@ async function shutDownContainer(
   });
   t.show();
   t.sendText(getContainerCommand(action));
+}
+
+/**
+ * Close this window's terminals attached to a host herdr session, stop the
+ * session, and with `remove`, delete it too.
+ */
+async function shutDownSession(
+  node: AgentNode | undefined,
+  remove: boolean
+): Promise<void> {
+  if (node?.kind !== 'session' || !node.host) {
+    return;
+  }
+  const session = node.host;
+  const label = session.default
+    ? 'the default herdr session'
+    : `herdr session "${session.name}"`;
+  const answer = await vscode.window.showWarningMessage(
+    remove
+      ? `Delete ${label}? Its terminals are closed, every agent in it ends, and its saved state is removed.`
+      : `Stop ${label}? Its terminals are closed and every agent in it ends.`,
+    { modal: true },
+    remove ? 'Delete' : 'Stop'
+  );
+  if (!answer) {
+    return;
+  }
+  for (const terminal of [...vscode.window.terminals]) {
+    if (
+      !isContainerTerminal(terminal) &&
+      (await isHostClient(terminal, session))
+    ) {
+      terminal.dispose();
+    }
+  }
+  const stopError = await stopHostSession(session.name);
+  const deleteError =
+    !stopError && remove ? await deleteHostSession(session.name) : undefined;
+  if (stopError) {
+    vscode.window.showErrorMessage(`Could not stop ${label}: ${stopError}`);
+  } else if (deleteError) {
+    vscode.window.showErrorMessage(
+      `Stopped ${label} but could not delete it: ${deleteError}`
+    );
+  }
+  scheduleSessionSync();
 }
 
 /** How long a newly opened terminal gets to bring herdr up. */

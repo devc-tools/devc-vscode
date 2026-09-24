@@ -720,7 +720,13 @@ export class AgentTreeDataProvider
       ]
         .filter(Boolean)
         .join('\n');
-      item.contextValue = 'agentSession';
+      // Only this window's sessions can be stopped: their clients are here.
+      // herdr will not delete the default session.
+      item.contextValue = !node.host
+        ? 'agentSessionRemote'
+        : node.host.default
+          ? 'agentSession.default'
+          : 'agentSession';
       return item;
     }
     if (node.kind === 'local') {

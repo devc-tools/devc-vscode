@@ -12,6 +12,7 @@ import { AgentInfo } from '../herdr';
 import {
   HostSession,
   attachCommand,
+  errorMessage,
   herdrEnv,
   parseSessionList,
   sessionFromClientArgs,
@@ -119,6 +120,17 @@ suite('host herdr commands', () => {
       KEEP: 'yes',
       HERDR_SOCKET_PATH: '/s/herdr.sock',
     });
+  });
+
+  test('error message from a herdr error response', () => {
+    assert.strictEqual(
+      errorMessage(
+        '{"error":{"code":"session_delete_failed","message":"deleting the default session is not supported"}}'
+      ),
+      'deleting the default session is not supported'
+    );
+    assert.strictEqual(errorMessage('{"deleted":true}'), undefined);
+    assert.strictEqual(errorMessage('not json'), undefined);
   });
 
   test('attach command', () => {
@@ -272,6 +284,11 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const tree = treeWith(source);
     await tree.syncSessions();
     assert.deepStrictEqual(labels(tree, tree.getChildren()), ['default']);
+    // Stoppable but not deletable: herdr refuses to delete it.
+    assert.strictEqual(
+      tree.getTreeItem(tree.getChildren()[0]).contextValue,
+      'agentSession.default'
+    );
     tree.dispose();
   });
 
@@ -411,6 +428,10 @@ suite('AgentTreeDataProvider with host sessions', () => {
     const [group] = tree.getChildren(window);
     assert.strictEqual(group.kind, 'session');
     assert.strictEqual(tree.getTreeItem(group).id, 'w7:session:beta');
+    assert.strictEqual(
+      tree.getTreeItem(group).contextValue,
+      'agentSessionRemote'
+    );
     const [remoteAgent] = tree.getChildren(group);
     assert.strictEqual(
       tree.getTreeItem(remoteAgent).id,
