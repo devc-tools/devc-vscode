@@ -39,6 +39,7 @@ import {
   readHostSession,
   sessionFromClientArgs,
   sessionNameForDir,
+  hostHerdrSupported,
   stopHostSession,
   watchHostSession,
 } from './hostHerdr';
@@ -123,7 +124,13 @@ export function activate(context: vscode.ExtensionContext) {
   // terminals' foregrounds; they share one reading per terminal.
   const hostForegrounds = new HostForegroundCache();
   agentTree = new AgentTreeDataProvider(
-    new DockerContainerSource(getDockerCommand, getHostFolders),
+    // The primary folder's container shows even when the workspace file's
+    // directory is not itself one of the folders.
+    new DockerContainerSource(getDockerCommand, () => {
+      const dir = workspaceDir();
+      const folders = getHostFolders();
+      return dir && !folders.includes(dir) ? [...folders, dir] : folders;
+    }),
     watchContainerAgents,
     {
       list: listHostSessions,
@@ -158,6 +165,7 @@ export function activate(context: vscode.ExtensionContext) {
       publishWindow();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      agentTree.setPrimaryFolder(workspaceDir());
       syncAgents();
       syncSessions();
     }),
@@ -210,6 +218,7 @@ export function activate(context: vscode.ExtensionContext) {
       log: message => agentLog.info(message),
     }))
   );
+  agentTree.setPrimaryFolder(workspaceDir());
   syncAgents();
   syncSessions();
   // Also catches foreground changes no terminal event reports, and sessions
@@ -834,10 +843,17 @@ async function focusHostAgent(
 
 /**
  * Show a terminal on an Agents view group: a client of a host session, or a
- * container terminal, opening one attached to herdr when there is none.
+ * container terminal, opening one attached to herdr when there is none. For a
+ * session or container that is not running, the opened terminal starts it.
  */
 async function attachAgentGroup(node?: AgentNode): Promise<void> {
-  if (node?.kind === 'session' && node.host) {
+  if (node?.kind === 'session' && node.placeholder) {
+    // Starts the session, as herdrs would from the workspace.
+    openHostHerdrTerminal(
+      { name: node.session, default: false, socketPath: '' },
+      workspaceDir()
+    );
+  } else if (node?.kind === 'session' && node.host) {
     const session = node.host;
     const existing = await findHostClient(session);
     if (existing) {
@@ -1243,6 +1259,9 @@ function workspaceDir(): string | undefined {
  * setting when set, else the name `herdrs` gives workspaceDir.
  */
 function workspaceSessionName(): string | undefined {
+  if (!hostHerdrSupported()) {
+    return undefined;
+  }
   const configured = vscode.workspace
     .getConfiguration('devc-vscode')
     .get<string>('herdrSession')

@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import * as assert from 'assert';
 import { AgentTreeDataProvider, WatchAgents, summarize } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
@@ -118,8 +119,12 @@ suite('summarize', () => {
 suite('AgentTreeDataProvider', () => {
   class FakeSource implements ContainerSource {
     containers: ContainerInfo[] = [];
+    stopped: ContainerInfo[] = [];
     async listRunning(): Promise<ContainerInfo[]> {
       return this.containers;
+    }
+    async listStopped(): Promise<ContainerInfo[]> {
+      return this.stopped;
     }
   }
 
@@ -158,30 +163,29 @@ suite('AgentTreeDataProvider', () => {
     return { watch, watchers };
   }
 
-  test('shows only containers with agents', async () => {
+  test('shows every running container, with its agents', async () => {
     const source = new FakeSource();
     source.containers = [container('a'), container('b')];
     const { watch, watchers } = fakeWatch();
     const tree = new AgentTreeDataProvider(source, watch);
     await tree.sync();
 
-    assert.deepStrictEqual(tree.getChildren(), []);
+    const ids = () =>
+      tree.getChildren().map(n => n.kind === 'container' && n.container.id);
+    assert.deepStrictEqual(ids(), ['a', 'b']);
     watchers.get('b')!.push([agent('w1:p1', 'blocked')]);
 
     const roots = tree.getChildren();
+    assert.deepStrictEqual(ids(), ['a', 'b']);
     assert.deepStrictEqual(
-      roots.map(n => n.kind === 'container' && n.container.id),
-      ['b']
-    );
-    assert.deepStrictEqual(
-      tree.getChildren(roots[0]).map(n => n.kind === 'agent' && n.agent.paneId),
+      tree.getChildren(roots[1]).map(n => n.kind === 'agent' && n.agent.paneId),
       ['w1:p1']
     );
     assert.strictEqual(tree.attentionCount(), 1);
     tree.dispose();
   });
 
-  test('shows a container whose herdr is running without agents', async () => {
+  test("says when a container's herdr is not running", async () => {
     const source = new FakeSource();
     source.containers = [container('a')];
     const { watch, watchers } = fakeWatch();
@@ -189,19 +193,90 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
 
     watchers.get('a')!.push([], false);
-    assert.deepStrictEqual(tree.getChildren(), []);
-    watchers.get('a')!.push([], true);
     const [root] = tree.getChildren();
-    assert.strictEqual(root.kind === 'container' && root.container.id, 'a');
-    assert.strictEqual(tree.getTreeItem(root).contextValue, 'agentContainer');
+    const item = tree.getTreeItem(root);
+    assert.strictEqual(item.description, 'herdr not running');
+    assert.strictEqual(item.contextValue, 'agentContainer');
+    assert.strictEqual(
+      item.collapsibleState,
+      vscode.TreeItemCollapsibleState.None
+    );
 
+    watchers.get('a')!.push([], true);
+    assert.strictEqual(tree.getTreeItem(root).description, '');
     tree.setAttachedContainers(new Set(['a']));
     assert.strictEqual(
       tree.getTreeItem(root).contextValue,
       'agentContainer.attached'
     );
-    watchers.get('a')!.push([], false);
-    assert.deepStrictEqual(tree.getChildren(), []);
+    tree.dispose();
+  });
+
+  test('shows stopped containers, not watched', async () => {
+    const source = new FakeSource();
+    source.containers = [container('a')];
+    source.stopped = [container('b')];
+    const { watch, watchers } = fakeWatch();
+    const tree = new AgentTreeDataProvider(source, watch);
+    await tree.sync();
+
+    assert.strictEqual(watchers.has('b'), false);
+    const [, stopped] = tree.getChildren();
+    assert.strictEqual(
+      stopped.kind === 'container' && stopped.state,
+      'stopped'
+    );
+    const item = tree.getTreeItem(stopped);
+    assert.strictEqual(item.description, 'stopped');
+    assert.strictEqual(item.contextValue, 'agentContainer.stopped');
+    // Not published: other windows only show groups with agents.
+    assert.deepStrictEqual(
+      tree.snapshotGroups().map(g => g.kind === 'container' && g.container.id),
+      ['a']
+    );
+
+    // Down removes it, leaving nothing for a folder that is not primary.
+    source.stopped = [];
+    await tree.sync();
+    assert.strictEqual(tree.getChildren().length, 1);
+    tree.dispose();
+  });
+
+  test("the primary folder's container, real or placeholder", async () => {
+    const source = new FakeSource();
+    const { watch } = fakeWatch();
+    const tree = new AgentTreeDataProvider(source, watch);
+    tree.setPrimaryFolder('/work/a');
+    await tree.sync();
+
+    const [placeholder] = tree.getChildren();
+    assert.strictEqual(
+      placeholder.kind === 'container' && placeholder.state,
+      'absent'
+    );
+    const item = tree.getTreeItem(placeholder);
+    assert.strictEqual(item.label, 'a');
+    assert.strictEqual(item.description, 'not created');
+    assert.strictEqual(item.contextValue, 'agentContainer.absent');
+    assert.deepStrictEqual(tree.snapshotGroups(), []);
+
+    source.stopped = [container('a')];
+    await tree.sync();
+    const [stopped] = tree.getChildren();
+    assert.strictEqual(
+      stopped.kind === 'container' && stopped.state,
+      'stopped'
+    );
+
+    source.stopped = [];
+    source.containers = [container('a')];
+    await tree.sync();
+    const roots = tree.getChildren();
+    assert.strictEqual(roots.length, 1);
+    assert.strictEqual(
+      roots[0].kind === 'container' && roots[0].state,
+      undefined
+    );
     tree.dispose();
   });
 

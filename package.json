@@ -186,7 +186,7 @@
         },
         {
           "command": "devc-vscode.attachAgentGroup",
-          "when": "view == devc-vscode.agents && viewItem =~ /^(agentContainer|agentSession(\\.default)?)$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^(agentContainer(\\.stopped|\\.absent)?|agentSession(\\.default|\\.placeholder)?)$/",
           "group": "inline@1"
         },
         {
@@ -196,7 +196,7 @@
         },
         {
           "command": "devc-vscode.downContainer",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached|\\.stopped)?$/",
           "group": "inline@3"
         },
         {
@@ -278,7 +278,7 @@
     "viewsWelcome": [
       {
         "view": "devc-vscode.agents",
-        "contents": "No agents detected. herdr in this workspace's dev containers, this window's host herdr session (named after its folder, or the herdrSession setting) or any attached in its terminals, and agents working in its folders appear here."
+        "contents": "No agents detected. This workspace's dev containers, this window's host herdr session (named after its folder, or the herdrSession setting) and any attached in its terminals, and agents working in its folders appear here."
       }
     ]
   },

@@ -21,7 +21,16 @@ export type AgentNode =
   | { kind: 'otherWindows' }
   /** Another VS Code window's groups. */
   | { kind: 'window'; remote: WindowSnapshot }
-  | { kind: 'container'; container: ContainerInfo; remote?: WindowSnapshot }
+  | {
+      kind: 'container';
+      container: ContainerInfo;
+      remote?: WindowSnapshot;
+      /**
+       * Unset for a running container. `absent` is the primary folder's
+       * placeholder when it has no container, with a made-up id.
+       */
+      state?: 'stopped' | 'absent';
+    }
   | {
       kind: 'session';
       /** The host herdr session's name. */
@@ -29,6 +38,8 @@ export type AgentNode =
       /** This window's view of the session; unset for another window's. */
       host?: HostSession;
       remote?: WindowSnapshot;
+      /** This window's workspace session, while it is not running. */
+      placeholder?: true;
     }
   /** A window's plain host terminals with agents in them. */
   | { kind: 'local'; remote?: WindowSnapshot }
@@ -162,6 +173,17 @@ function sessionLabel(session: HostSession): string {
  */
 export const CONTAINER_ICON = new vscode.ThemeIcon('vm');
 export const SESSION_ICON = new vscode.ThemeIcon('terminal-tmux');
+/** For a group with no herdr running to show agents from. */
+const IDLE = new vscode.ThemeColor('disabledForeground');
+const CONTAINER_ICON_IDLE = new vscode.ThemeIcon('vm', IDLE);
+const SESSION_ICON_IDLE = new vscode.ThemeIcon('terminal-tmux', IDLE);
+
+/** A group only gets a twistie when it has agents to show. */
+function groupState(agents: AgentInfo[]): vscode.TreeItemCollapsibleState {
+  return agents.length
+    ? vscode.TreeItemCollapsibleState.Expanded
+    : vscode.TreeItemCollapsibleState.None;
+}
 
 const STATUS_ICONS: Record<AgentStatus, vscode.ThemeIcon> = {
   working: new vscode.ThemeIcon(
@@ -216,6 +238,10 @@ export class AgentTreeDataProvider
   private folders: string[] = [];
   private defaultSession: string | undefined;
   private workspaceSession: string | undefined;
+  /** Stopped containers serving the workspace, as of the last sync. */
+  private stopped: ContainerInfo[] = [];
+  /** The folder that always shows a container, real or placeholder. */
+  private primaryFolder: string | undefined;
   /** Containers with a terminal open on them in this window. */
   private attachedContainers = new Set<string>();
   private sessionSync: Promise<void> | undefined;
@@ -245,9 +271,13 @@ export class AgentTreeDataProvider
 
   /** Start watching new containers and stop watching ones that are gone. */
   async sync(): Promise<void> {
-    const containers = await this.source.listRunning();
+    const [containers, stopped] = await Promise.all([
+      this.source.listRunning(),
+      this.source.listStopped?.() ?? [],
+    ]);
     const live = new Set(containers.map(c => c.id));
-    let changed = false;
+    let changed = JSON.stringify(stopped) !== JSON.stringify(this.stopped);
+    this.stopped = stopped;
 
     for (const [id, entry] of this.watched) {
       if (!live.has(id)) {
@@ -441,6 +471,17 @@ export class AgentTreeDataProvider
     return this.defaultSession;
   }
 
+  /**
+   * Set the folder whose container always shows: a placeholder to attach
+   * from when it has none.
+   */
+  setPrimaryFolder(folder: string | undefined): void {
+    if (folder !== this.primaryFolder) {
+      this.primaryFolder = folder;
+      this._onDidChangeTreeData.fire(undefined);
+    }
+  }
+
   /** Record which containers have a terminal open on them in this window. */
   setAttachedContainers(ids: Set<string>): void {
     if (
@@ -504,7 +545,13 @@ export class AgentTreeDataProvider
 
   /** This window's view, for other windows to show. */
   snapshotGroups(): PublishedGroup[] {
-    return this.localGroups().map(group => {
+    // Other windows show only groups with agents, which these never have.
+    const real = this.localGroups().filter(
+      group =>
+        !(group.kind === 'container' && group.state) &&
+        !(group.kind === 'session' && group.placeholder)
+    );
+    return real.map(group => {
       const agents = this.getChildren(group).flatMap(node =>
         node.kind === 'agent'
           ? [
@@ -549,17 +596,44 @@ export class AgentTreeDataProvider
 
   /**
    * This window's groups: containers and sessions by label, then the host
-   * terminals.
+   * terminals. Every running or stopped container shows, plus a placeholder
+   * for the primary folder's when it has none, and one for the workspace
+   * session when it is not running.
    */
   private localGroups(): GroupNode[] {
+    const running = [...this.watched.values()].map(w => w.container);
+    const folders = new Set(running.map(c => path.resolve(c.localFolder)));
+    const stopped = this.stopped.filter(
+      c => !folders.has(path.resolve(c.localFolder))
+    );
+    stopped.forEach(c => folders.add(path.resolve(c.localFolder)));
     const containers: { label: string; node: GroupNode }[] = [
-      ...this.watched.values(),
-    ]
-      .filter(w => w.running || this.nodesFor(w.container).length > 0)
-      .map(w => ({
-        label: w.container.name,
-        node: { kind: 'container', container: w.container },
-      }));
+      ...running.map(container => ({
+        label: container.name,
+        node: { kind: 'container', container } as GroupNode,
+      })),
+      ...stopped.map(container => ({
+        label: container.name,
+        node: { kind: 'container', container, state: 'stopped' } as GroupNode,
+      })),
+    ];
+    const primary = this.primaryFolder;
+    if (primary !== undefined && !folders.has(path.resolve(primary))) {
+      const name = path.basename(primary) || primary;
+      containers.push({
+        label: name,
+        node: {
+          kind: 'container',
+          container: {
+            id: `placeholder:${primary}`,
+            name,
+            containerName: '',
+            localFolder: primary,
+          },
+          state: 'absent',
+        },
+      });
+    }
     const sessions: { label: string; node: GroupNode }[] = [
       ...this.sessions.values(),
     ]
@@ -570,6 +644,13 @@ export class AgentTreeDataProvider
         label: sessionLabel(s.session),
         node: { kind: 'session', session: s.session.name, host: s.session },
       }));
+    const own = this.workspaceSession;
+    if (this.hosts && own !== undefined && !this.sessions.has(own)) {
+      sessions.push({
+        label: own,
+        node: { kind: 'session', session: own, placeholder: true },
+      });
+    }
     const groups = [...containers, ...sessions]
       .sort((a, b) => a.label.localeCompare(b.label))
       .map(g => g.node);
@@ -752,30 +833,67 @@ export class AgentTreeDataProvider
       node.kind === 'agent' ? node.remote?.window.pid : node.remote?.pid;
     const scope = remotePid === undefined ? '' : `w${remotePid}:`;
     if (node.kind === 'container') {
-      const item = new vscode.TreeItem(
-        node.container.name,
-        vscode.TreeItemCollapsibleState.Expanded
-      );
+      const agents = this.agentsUnder(node);
+      const item = new vscode.TreeItem(node.container.name, groupState(agents));
       item.id = `${scope}container:${node.container.id}`;
-      item.iconPath = CONTAINER_ICON;
-      item.description = summarize(this.agentsUnder(node));
-      item.tooltip = node.container.containerName;
+      const herdrDown =
+        !node.remote &&
+        !node.state &&
+        agents.length === 0 &&
+        !this.watched.get(node.container.id)?.running;
+      item.iconPath =
+        node.state || herdrDown ? CONTAINER_ICON_IDLE : CONTAINER_ICON;
+      item.description =
+        node.state === 'stopped'
+          ? 'stopped'
+          : node.state === 'absent'
+            ? 'not created'
+            : herdrDown
+              ? 'herdr not running'
+              : summarize(agents);
+      item.tooltip = [
+        node.container.containerName,
+        node.state === 'absent' &&
+          `No dev container for ${node.container.localFolder} yet`,
+        node.state === 'stopped' && 'Stopped',
+        (node.state || herdrDown) && 'Attach Terminal runs herdr in it',
+      ]
+        .filter(Boolean)
+        .join('\n');
       // Only this window's containers can be stopped: their terminals are here.
       item.contextValue = node.remote
         ? 'agentContainerRemote'
-        : this.attachedContainers.has(node.container.id)
-          ? 'agentContainer.attached'
-          : 'agentContainer';
+        : node.state
+          ? `agentContainer.${node.state}`
+          : this.attachedContainers.has(node.container.id)
+            ? 'agentContainer.attached'
+            : 'agentContainer';
+      return item;
+    }
+    if (node.kind === 'session' && node.placeholder) {
+      const item = new vscode.TreeItem(
+        node.session,
+        vscode.TreeItemCollapsibleState.None
+      );
+      item.id = `session:${node.session}`;
+      item.iconPath = SESSION_ICON_IDLE;
+      item.description = 'not running';
+      item.tooltip = [
+        `herdr session "${node.session}" on the host, this window's own`,
+        'Attach Terminal starts it',
+      ].join('\n');
+      item.contextValue = 'agentSession.placeholder';
       return item;
     }
     if (node.kind === 'session') {
+      const agents = this.agentsUnder(node);
       const item = new vscode.TreeItem(
         node.host ? sessionLabel(node.host) : node.session,
-        vscode.TreeItemCollapsibleState.Expanded
+        groupState(agents)
       );
       item.id = `${scope}session:${node.session}`;
       item.iconPath = SESSION_ICON;
-      item.description = summarize(this.agentsUnder(node));
+      item.description = summarize(agents);
       item.tooltip = [
         `herdr session "${node.session}" on the host`,
         node.host?.socketPath,

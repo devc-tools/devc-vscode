@@ -205,9 +205,18 @@ suite('sessionNameForDir', () => {
   const name = (dir: string) => sessionNameForDir(dir, home);
 
   test('is the path under home, one part per folder', () => {
-    assert.strictEqual(name('/home/me/code/tools/devc-vscode'), 'code.tools.devc-vscode');
-    assert.strictEqual(name('/home/me/code/devc-tools.worktrees/wt'), 'code.devc-tools_worktrees.wt');
-    assert.strictEqual(name('/home/me/My Project!/Sub Dir/'), 'my-project.sub-dir');
+    assert.strictEqual(
+      name('/home/me/code/tools/devc-vscode'),
+      'code.tools.devc-vscode'
+    );
+    assert.strictEqual(
+      name('/home/me/code/devc-tools.worktrees/wt'),
+      'code.devc-tools_worktrees.wt'
+    );
+    assert.strictEqual(
+      name('/home/me/My Project!/Sub Dir/'),
+      'my-project.sub-dir'
+    );
     assert.strictEqual(name('/home/me/---/x'), 'x');
   });
 
@@ -219,7 +228,9 @@ suite('sessionNameForDir', () => {
   });
 
   test('a long name keeps its last whole folders and gains a hash', () => {
-    const long = name('/home/me/code/some/very/deeply/nested/project-folder/long-name')!;
+    const long = name(
+      '/home/me/code/some/very/deeply/nested/project-folder/long-name'
+    )!;
     assert.match(long, /^nested\.project-folder\.long-name-[0-9a-f]{6}$/);
     assert.ok(long.length <= 40);
     assert.notStrictEqual(
@@ -466,6 +477,34 @@ suite('AgentTreeDataProvider with host sessions', () => {
     await tree.syncSessions();
     assert.strictEqual(host.watchers.get('app')!.disposed, true);
     assert.deepStrictEqual(tree.getChildren(), []);
+    tree.dispose();
+  });
+
+  test("the window's session has a placeholder", async () => {
+    const { host, source } = fakeHost();
+    host.sessions = [session('default', true)];
+    host.workspaceSession = 'work.app';
+    const tree = treeWith(source);
+    await tree.syncSessions();
+
+    const [placeholder] = tree.getChildren();
+    assert.strictEqual(
+      placeholder.kind === 'session' && placeholder.placeholder,
+      true
+    );
+    const item = tree.getTreeItem(placeholder);
+    assert.strictEqual(item.label, 'work.app');
+    assert.strictEqual(item.id, 'session:work.app');
+    assert.strictEqual(item.description, 'not running');
+    assert.strictEqual(item.contextValue, 'agentSession.placeholder');
+    assert.deepStrictEqual(tree.snapshotGroups(), []);
+
+    // Started: the real session takes its place, under the same id.
+    host.sessions.push(session('work.app'));
+    await tree.syncSessions();
+    const [real] = tree.getChildren();
+    assert.strictEqual(real.kind === 'session' && real.placeholder, undefined);
+    assert.strictEqual(tree.getTreeItem(real).id, 'session:work.app');
     tree.dispose();
   });
 
