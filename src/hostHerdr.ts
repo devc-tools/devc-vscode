@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -313,18 +314,56 @@ export function sessionFromClientArgs(
 }
 
 /**
- * The session name `herdrs` gives a directory: its basename lowercased, each
- * run of characters outside `[a-z0-9._-]` made one `-`, and `-` trimmed from
- * both ends. herdr-plugins' scripts/bash_aliases.sh applies the same rule, so
- * keep the two in step. Undefined when nothing is left.
+ * Longest session name sessionNameForDir gives. herdr's sockets live at
+ * `~/.config/herdr/sessions/<name>/herdr-client.sock`, and a socket path must
+ * fit in about 104 bytes.
  */
-export function sessionNameForDir(dir: string): string | undefined {
-  const name = path
-    .basename(dir)
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return name || undefined;
+const MAX_SESSION_NAME = 40;
+
+/**
+ * The session name `herdrs` gives a directory: its path relative to `home`
+ * (or its absolute path, outside it or for `home` itself), one part per
+ * folder joined with `.`. Each folder name is lowercased, `.` in it made `_`,
+ * each run of other characters outside `[a-z0-9_-]` made one `-`, and `-`
+ * trimmed from both ends; folders left empty are dropped. A name over
+ * MAX_SESSION_NAME keeps the whole folders at its end that fit and gains a
+ * hash of the whole name.
+ * herdr-plugins' scripts/bash_aliases.sh applies the same rule, so keep the
+ * two in step. Undefined when nothing is left.
+ */
+export function sessionNameForDir(
+  dir: string,
+  home: string = os.homedir()
+): string | undefined {
+  const abs = path.resolve(dir);
+  const rel = path.relative(path.resolve(home), abs);
+  const underHome =
+    rel !== '' &&
+    rel !== '..' &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(rel);
+  const name = (underHome ? rel : abs)
+    .split(/[\\/]+/)
+    .map(part =>
+      part
+        .toLowerCase()
+        .replace(/\./g, '_')
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+    )
+    .filter(Boolean)
+    .join('.');
+  if (name.length <= MAX_SESSION_NAME) {
+    return name || undefined;
+  }
+  const hash = crypto.createHash('sha1').update(name).digest('hex').slice(0, 6);
+  const keep = MAX_SESSION_NAME - hash.length - 1;
+  let tail = name.slice(-keep);
+  // Start at a folder boundary rather than partway through a folder's name.
+  if (name[name.length - keep - 1] !== '.' && tail.includes('.')) {
+    tail = tail.slice(tail.indexOf('.') + 1);
+  }
+  return `${tail.replace(/^[^a-z0-9]+/, '')}-${hash}`;
 }
 
 /** The shell command that opens a client on a session. */

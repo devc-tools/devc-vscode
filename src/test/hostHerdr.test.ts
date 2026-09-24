@@ -201,11 +201,31 @@ suite('ownedAgents', () => {
 });
 
 suite('sessionNameForDir', () => {
-  test('is the basename, normalized as herdrs does', () => {
-    assert.strictEqual(sessionNameForDir('/work/devc-vscode'), 'devc-vscode');
-    assert.strictEqual(sessionNameForDir('/work/My Project!'), 'my-project');
-    assert.strictEqual(sessionNameForDir('/work/a  b__c.d'), 'a-b__c.d');
-    assert.strictEqual(sessionNameForDir('/work/---'), undefined);
+  const home = '/home/me';
+  const name = (dir: string) => sessionNameForDir(dir, home);
+
+  test('is the path under home, one part per folder', () => {
+    assert.strictEqual(name('/home/me/code/tools/devc-vscode'), 'code.tools.devc-vscode');
+    assert.strictEqual(name('/home/me/code/devc-tools.worktrees/wt'), 'code.devc-tools_worktrees.wt');
+    assert.strictEqual(name('/home/me/My Project!/Sub Dir/'), 'my-project.sub-dir');
+    assert.strictEqual(name('/home/me/---/x'), 'x');
+  });
+
+  test('is the absolute path outside home, and for home itself', () => {
+    assert.strictEqual(name('/home/me'), 'home.me');
+    assert.strictEqual(name('/home/meX/app'), 'home.mex.app');
+    assert.strictEqual(name('/opt/work/App'), 'opt.work.app');
+    assert.strictEqual(name('/'), undefined);
+  });
+
+  test('a long name keeps its last whole folders and gains a hash', () => {
+    const long = name('/home/me/code/some/very/deeply/nested/project-folder/long-name')!;
+    assert.match(long, /^nested\.project-folder\.long-name-[0-9a-f]{6}$/);
+    assert.ok(long.length <= 40);
+    assert.notStrictEqual(
+      name('/home/me/code/some/very/deeply/nested/project-folder/long-namf'),
+      long
+    );
   });
 });
 

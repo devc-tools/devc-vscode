@@ -41,7 +41,7 @@
           "type": "string",
           "default": "",
           "scope": "window",
-          "markdownDescription": "Host herdr session that belongs to this window: the Agents view shows it even with no agents, and attaches to it. Empty uses the name `herdrs` gives the workspace file's directory, or the first folder: its basename lowercased, with anything outside `[a-z0-9._-]` made `-`."
+          "markdownDescription": "Host herdr session that belongs to this window: the Agents view shows it even with no agents, and attaches to it. Empty uses the name `herdrs` gives the workspace file's directory, or the first folder: its path under your home folder with folders joined by `.`, e.g. `code.tools.devc-vscode` for `~/code/tools/devc-vscode`."
         },
         "devc-vscode.stopCommand": {
           "type": "string",
