@@ -120,8 +120,8 @@ New command:
 - **Container env inline actions:** `attachAgentGroup`, `stopContainer`, `downContainer`,
   as today.
 - `closeAgent`, `focusAgent`: unchanged in behaviour. They take the new agent node shape.
-- The `when` clauses in `package.json` are rewritten for the contextValues above. Order:
-  `+` first (`inline@0`), then attach, stop, trash.
+- The `when` clauses in `package.json` are rewritten for the contextValues above. Order: attach,
+  stop, trash, then `+` last (`inline@9`), so it is always rightmost.
 
 ## Launching
 

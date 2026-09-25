@@ -227,7 +227,7 @@
         {
           "command": "devc-vscode.addAgent",
           "when": "view == devc-vscode.agents && viewItem =~ /^agent(Workspace|Host|Container)(\\..*)?$/",
-          "group": "inline@0"
+          "group": "inline@9"
         },
         {
           "command": "devc-vscode.attachAgentGroup",
