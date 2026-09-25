@@ -22,8 +22,8 @@ decisions made reviewing it.
 
 ## Decisions
 
-- **Two roots, one view.** `Workspace` (always expanded) and `Other Workspaces` (collapsed
-  by default). Both always show, even when empty. No separate panel for now.
+- **Two roots, one view.** `Workspace` (always expanded, always shown) and `Other
+  Workspaces` (collapsed by default, shown only while another window has agents). No separate panel for now.
 - **One host environment per workspace.** Its agents are everything on the host this
   window owns today: the workspace's herdr session, any other host herdr session attached
   in this window's terminals, and plain host terminals. They merge into one list. The
@@ -67,13 +67,13 @@ Other Workspaces
 | Workspace root | `Workspace` | none | `summarize(agents)` | Expanded, always |
 | Other Workspaces root | `Other Workspaces` | none | `summarize(agents)` | Collapsed by default |
 | Host env | basename of `workspaceDir()` (other windows: the name they publish) | `HOST_ICON` = `ThemeIcon('device-desktop')` | `summarize(agents)` | Expanded when it has agents, else None |
-| Container env | `container.name` | `CONTAINER_ICON` (`remote-explorer`) | `summarize(agents)` | Expanded when it has agents, else None |
+| Container env | `container.name` | `CONTAINER_ICON` (`vm-running`) | `summarize(agents)` | Expanded when it has agents, else None |
 | Agent | task (below) | `STATUS_ICONS[status]` (unchanged) | `agent.agent` | None |
 
 - **Task label:** `agent.title` if it's non-empty. Otherwise the basename of `agent.cwd`.
   Otherwise `agent.agent`.
-- **Host icon:** `device-desktop`; containers use `remote-explorer`. Any codicon works as long as it's clearly
-  different from `remote-explorer` and not `terminal-tmux` (that's still `SESSION_ICON` on host herdr
+- **Host icon:** `device-desktop`; containers use `vm-running`. Any codicon works as long as it's clearly
+  different from `vm-running` and not `terminal-tmux` (that's still `SESSION_ICON` on host herdr
   terminal tabs). Export it next to `CONTAINER_ICON` so terminals the extension opens
   for the host can use it too.
 - **Order under Workspace:** host first, then containers by label.
@@ -133,7 +133,7 @@ The flow in `addAgent`:
    one environment is possible). Items:
    - `$(device-desktop) <workspaceDir basename>` with description `host`. Only present when
      `hostHerdrSupported()`.
-   - `$(remote-explorer) <folder basename>` with description `container`, one per workspace folder
+   - `$(vm-running) <folder basename>` with description `container`, one per workspace folder
      (`getHostFolders()`), whether or not its container is running.
 3. **Start:**
    - **Host:**
@@ -255,7 +255,7 @@ export type PublishedGroup =
 
 - `npm test` passes. Update `agents.test.ts`, `hostHerdr.test.ts`,
   `hostTerminals.test.ts` and `windowRegistry.test.ts` for the new shapes. At minimum:
-  - Roots always present. Workspace holds host first, then containers.
+  - Workspace always present, Other Workspaces only with agents. Workspace holds host first, then containers.
   - A stopped container, and a workspace session that isn't running (with no host
     agents), produce no environment node.
   - Host env merges the workspace session's agents, other attached sessions' agents,

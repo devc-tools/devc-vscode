@@ -176,13 +176,13 @@ export function taskLabel(agent: AgentInfo): string {
  * Environment icons, shared with the terminals the extension opens so a
  * terminal tab matches the environment its agents appear under.
  */
-export const CONTAINER_ICON = new vscode.ThemeIcon('remote-explorer');
+export const CONTAINER_ICON = new vscode.ThemeIcon('vm-running');
 export const HOST_ICON = new vscode.ThemeIcon('device-desktop');
 /** Host herdr client terminals. */
 export const SESSION_ICON = new vscode.ThemeIcon('terminal-tmux');
 /** For a container with no herdr running to show agents from. */
 const CONTAINER_ICON_IDLE = new vscode.ThemeIcon(
-  'remote-explorer',
+  'vm-running',
   new vscode.ThemeColor('disabledForeground')
 );
 
@@ -721,7 +721,10 @@ export class AgentTreeDataProvider
 
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
-      return [WORKSPACE, OTHER_WORKSPACES];
+      // Other Workspaces shows only while another window has agents.
+      return this.remoteEnvs().length
+        ? [WORKSPACE, OTHER_WORKSPACES]
+        : [WORKSPACE];
     }
     switch (node.kind) {
       case 'workspace':

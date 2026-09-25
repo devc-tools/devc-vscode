@@ -961,7 +961,7 @@ async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
         ]
       : []),
     ...getHostFolders().map(folder => ({
-      label: `$(remote-explorer) ${path.basename(folder)}`,
+      label: `$(vm-running) ${path.basename(folder)}`,
       description: 'container',
       target: { kind: 'container', folder } as LaunchTarget,
     })),

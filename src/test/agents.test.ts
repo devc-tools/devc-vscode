@@ -9,6 +9,7 @@ import {
   taskLabel,
 } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
+import { SNAPSHOT_VERSION } from '../windowRegistry';
 import {
   AgentInfo,
   HerdrRunner,
@@ -173,10 +174,10 @@ suite('AgentTreeDataProvider', () => {
     return { watch, watchers };
   }
 
-  test('always shows the two roots', async () => {
+  test('always shows Workspace, and Other Workspaces only with agents', async () => {
     const tree = new AgentTreeDataProvider(new FakeSource(), fakeWatch().watch);
     await tree.sync();
-    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE, OTHER_WORKSPACES]);
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE]);
     assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
     const own = tree.getTreeItem(WORKSPACE);
     assert.strictEqual(own.label, 'Workspace');
@@ -185,6 +186,30 @@ suite('AgentTreeDataProvider', () => {
       own.collapsibleState,
       vscode.TreeItemCollapsibleState.Expanded
     );
+    tree.setOtherWindows([
+      {
+        version: SNAPSHOT_VERSION,
+        pid: 2,
+        name: 'beta',
+        groups: [{ kind: 'host', name: 'beta', agents: [] }],
+      },
+    ]);
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE]);
+    tree.setOtherWindows([
+      {
+        version: SNAPSHOT_VERSION,
+        pid: 2,
+        name: 'beta',
+        groups: [
+          {
+            kind: 'host',
+            name: 'beta',
+            agents: [{ key: 'k', agent: agent('p', 'idle'), herdr: true }],
+          },
+        ],
+      },
+    ]);
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE, OTHER_WORKSPACES]);
     const others = tree.getTreeItem(OTHER_WORKSPACES);
     assert.strictEqual(others.label, 'Other Workspaces');
     assert.strictEqual(
