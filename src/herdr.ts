@@ -32,6 +32,15 @@ const STATUSES: ReadonlySet<string> = new Set<AgentStatus>([
 ]);
 
 /**
+ * The herdr session in a dev container: the one `devc herdr` starts and
+ * attaches to.
+ */
+const CONTAINER_SESSION = 'devc';
+
+/** `herdr` aimed at CONTAINER_SESSION, for scripts run in the container. */
+const HERDR = `herdr --session=${CONTAINER_SESSION}`;
+
+/**
  * Runs inside the container. Polls herdr's socket API through its own CLI and
  * prints the snapshot only when it changes, so the host sees one line per
  * change rather than one per tick. It needs nothing beyond sh and herdr — no
@@ -48,7 +57,7 @@ command -v herdr >/dev/null 2>&1 || exit 127
 (
   prev=
   while :; do
-    cur=$(herdr api snapshot 2>&1 | tr -d '\\n')
+    cur=$(${HERDR} api snapshot 2>&1 | tr -d '\\n')
     if [ "$cur" != "$prev" ]; then
       printf '%s\\n' "$cur"
       prev=$cur
@@ -246,8 +255,8 @@ export async function focusHerdrAgent(
       'sh',
       '-c',
       `PATH="$HOME/.local/bin:$PATH"
-      if [ -n "$2" ]; then herdr tab focus "$2" >/dev/null || exit; fi
-      exec herdr agent focus "$1"`,
+      if [ -n "$2" ]; then ${HERDR} tab focus "$2" >/dev/null || exit; fi
+      exec ${HERDR} agent focus "$1"`,
       'sh',
       agent.paneId,
       agent.tabId ?? '',
@@ -272,7 +281,7 @@ export async function closeHerdrPane(
       containerId,
       'sh',
       '-c',
-      'PATH="$HOME/.local/bin:$PATH" exec herdr pane close "$1"',
+      `PATH="$HOME/.local/bin:$PATH" exec ${HERDR} pane close "$1"`,
       'sh',
       paneId,
     ],
@@ -443,7 +452,7 @@ export function startContainerAgent(
             containerId,
             'sh',
             '-c',
-            'PATH="$HOME/.local/bin:$PATH" exec herdr "$@"',
+            `PATH="$HOME/.local/bin:$PATH" exec ${HERDR} "$@"`,
             'sh',
             ...args,
           ],
