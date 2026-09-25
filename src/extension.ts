@@ -954,14 +954,14 @@ async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
     ...(workspaceSessionName() !== undefined
       ? [
           {
-            label: `$(vm-outline) ${hostName()}`,
+            label: `$(device-desktop) ${hostName()}`,
             description: 'host',
             target: { kind: 'host' } as LaunchTarget,
           },
         ]
       : []),
     ...getHostFolders().map(folder => ({
-      label: `$(vm) ${path.basename(folder)}`,
+      label: `$(remote-explorer) ${path.basename(folder)}`,
       description: 'container',
       target: { kind: 'container', folder } as LaunchTarget,
     })),

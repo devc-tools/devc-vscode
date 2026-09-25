@@ -66,14 +66,14 @@ Other Workspaces
 | --- | --- | --- | --- | --- |
 | Workspace root | `Workspace` | none | `summarize(agents)` | Expanded, always |
 | Other Workspaces root | `Other Workspaces` | none | `summarize(agents)` | Collapsed by default |
-| Host env | basename of `workspaceDir()` (other windows: the name they publish) | `HOST_ICON` = `ThemeIcon('vm-outline')` | `summarize(agents)` | Expanded when it has agents, else None |
-| Container env | `container.name` | `CONTAINER_ICON` (`vm`, unchanged) | `summarize(agents)` | Expanded when it has agents, else None |
+| Host env | basename of `workspaceDir()` (other windows: the name they publish) | `HOST_ICON` = `ThemeIcon('device-desktop')` | `summarize(agents)` | Expanded when it has agents, else None |
+| Container env | `container.name` | `CONTAINER_ICON` (`remote-explorer`) | `summarize(agents)` | Expanded when it has agents, else None |
 | Agent | task (below) | `STATUS_ICONS[status]` (unchanged) | `agent.agent` | None |
 
 - **Task label:** `agent.title` if it's non-empty. Otherwise the basename of `agent.cwd`.
   Otherwise `agent.agent`.
-- **Host icon:** `vm-outline` is a suggestion. Any codicon works as long as it's clearly
-  different from `vm` and not `terminal-tmux` (that's still `SESSION_ICON` on host herdr
+- **Host icon:** `device-desktop`; containers use `remote-explorer`. Any codicon works as long as it's clearly
+  different from `remote-explorer` and not `terminal-tmux` (that's still `SESSION_ICON` on host herdr
   terminal tabs). Export it next to `CONTAINER_ICON` so terminals the extension opens
   for the host can use it too.
 - **Order under Workspace:** host first, then containers by label.
@@ -131,9 +131,9 @@ The flow in `addAgent`:
    kind.
 2. **Environment picker** (skipped when started from an environment node, or when only
    one environment is possible). Items:
-   - `$(vm-outline) <workspaceDir basename>` with description `host`. Only present when
+   - `$(device-desktop) <workspaceDir basename>` with description `host`. Only present when
      `hostHerdrSupported()`.
-   - `$(vm) <folder basename>` with description `container`, one per workspace folder
+   - `$(remote-explorer) <folder basename>` with description `container`, one per workspace folder
      (`getHostFolders()`), whether or not its container is running.
 3. **Start:**
    - **Host:**

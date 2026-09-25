@@ -328,7 +328,7 @@ suite('AgentTreeDataProvider with host sessions', () => {
     assert.deepStrictEqual(paneIds(found.agents), ['w1:p1', 'w1:p2']);
     assert.strictEqual(
       (tree.getTreeItem(found.host).iconPath as vscode.ThemeIcon).id,
-      'vm-outline'
+      'device-desktop'
     );
     assert.strictEqual(host.watchers.has('default'), false);
     assert.strictEqual(tree.attentionCount(), 2);
