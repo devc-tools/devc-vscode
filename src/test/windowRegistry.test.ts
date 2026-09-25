@@ -3,7 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { AgentTreeDataProvider, THIS_WINDOW, WatchAgents } from '../agentTree';
+import {
+  AgentTreeDataProvider,
+  OTHER_WORKSPACES,
+  WORKSPACE,
+  WatchAgents,
+} from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
 import {
   SNAPSHOT_VERSION,
@@ -154,19 +159,14 @@ suite('WindowRegistry', () => {
       groups: [
         ...snapshot(2, 'beta').groups,
         {
-          kind: 'session',
-          session: 'devc-vscode',
+          kind: 'host',
+          name: 'devc-vscode',
           agents: [
             {
               key: 'host-herdr:devc-vscode:w1:p1',
               agent: { paneId: 'w1:p1', agent: 'pi', status: 'idle' },
               herdr: true,
             },
-          ],
-        },
-        {
-          kind: 'local',
-          agents: [
             {
               key: 'local-terminal:3',
               agent: {
@@ -222,24 +222,7 @@ suite('AgentTreeDataProvider across windows', () => {
     return { tree, push: (a: unknown[]) => push(a as never[]) };
   }
 
-  test('flat while no other window has agents', async () => {
-    const { tree, push } = localTree({
-      id: 'c0',
-      name: 'here',
-      containerName: 'devc-here',
-      localFolder: '/work/here',
-    });
-    await tree.sync();
-    push([{ paneId: 'w1:p1', agent: 'claude', status: 'idle' }]);
-    tree.setOtherWindows([snapshot(2, 'beta', 0)]);
-    assert.deepStrictEqual(
-      tree.getChildren().map(n => n.kind),
-      ['container']
-    );
-    tree.dispose();
-  });
-
-  test("this window's groups, then other windows under one node", async () => {
+  test('other windows sit under Other Workspaces, flat', async () => {
     const { tree, push } = localTree({
       id: 'c0',
       name: 'here',
@@ -248,33 +231,37 @@ suite('AgentTreeDataProvider across windows', () => {
     });
     await tree.sync();
     push([{ paneId: 'w1:p1', agent: 'claude', status: 'working' }]);
-    tree.setOtherWindows([snapshot(2, 'beta'), snapshot(3, 'alpha')]);
-    const roots = tree.getChildren();
+    tree.setOtherWindows([
+      snapshot(2, 'beta'),
+      snapshot(3, 'alpha'),
+      snapshot(4, 'empty', 0),
+    ]);
     assert.deepStrictEqual(
-      roots.map(n => n.kind),
-      ['thisWindow', 'otherWindows']
-    );
-    assert.deepStrictEqual(
-      tree.getChildren(roots[0]).map(n => n.kind),
+      tree.getChildren(WORKSPACE).map(n => n.kind),
       ['container']
     );
-    assert.strictEqual(
-      tree.getTreeItem(roots[0]).description,
-      'this window · 1 working'
-    );
-    const windows = tree.getChildren(roots[1]);
+    assert.strictEqual(tree.getTreeItem(WORKSPACE).description, '1 working');
+    // By window name; a window without agents shows nothing.
+    const envs = tree.getChildren(OTHER_WORKSPACES);
     assert.deepStrictEqual(
-      windows.map(n => n.kind === 'window' && n.remote.name),
-      ['beta', 'alpha']
+      envs.map(n => n.kind === 'container' && n.container.id),
+      ['c3', 'c2']
     );
-    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows');
+    const env = tree.getTreeItem(envs[0]);
+    assert.strictEqual(env.id, 'w3:container:c3');
+    assert.strictEqual(env.contextValue, 'agentContainerRemote');
+    assert.ok(String(env.tooltip).includes('"alpha"'));
     assert.strictEqual(
-      tree.getTreeItem(roots[1]).collapsibleState,
-      vscode.TreeItemCollapsibleState.Collapsed
+      tree.getTreeItem(OTHER_WORKSPACES).description,
+      '2 blocked'
     );
-    // Expand All and Collapse All set every group, under fresh ids.
+    // Expand All and Collapse All set every node, under fresh ids.
     tree.setExpansion('expanded');
-    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows#1');
+    assert.strictEqual(
+      tree.getTreeItem(OTHER_WORKSPACES).id,
+      'otherWorkspaces#1'
+    );
+    const roots = tree.getChildren();
     assert.deepStrictEqual(
       roots.map(n => tree.getTreeItem(n).collapsibleState),
       [
@@ -283,7 +270,6 @@ suite('AgentTreeDataProvider across windows', () => {
       ]
     );
     tree.setExpansion('collapsed');
-    assert.strictEqual(tree.getTreeItem(roots[1]).id, 'otherWindows#2');
     assert.deepStrictEqual(
       roots.map(n => tree.getTreeItem(n).collapsibleState),
       [
@@ -291,11 +277,8 @@ suite('AgentTreeDataProvider across windows', () => {
         vscode.TreeItemCollapsibleState.Collapsed,
       ]
     );
-    // A container's herdr agents sit under its herdr node.
-    const [remoteHerdr] = tree.getChildren(tree.getChildren(windows[0])[0]);
-    assert.strictEqual(remoteHerdr.kind, 'containerHerdr');
-    const remoteAgent = tree.getChildren(remoteHerdr)[0];
-    assert.strictEqual(remoteAgent.kind, 'agent');
+    // A container's agents sit right under it.
+    const [remoteAgent] = tree.getChildren(envs[1]);
     assert.strictEqual(
       remoteAgent.kind === 'agent' && remoteAgent.remote?.published.key,
       'herdr:c2:w1:p0'

@@ -4,7 +4,8 @@ import {
   AgentNode,
   AgentTreeDataProvider,
   HostSessionSource,
-  THIS_WINDOW,
+  OTHER_WORKSPACES,
+  WORKSPACE,
   WatchAgents,
 } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
@@ -31,10 +32,7 @@ function fakeTerminal(name: string): vscode.Terminal {
   return { name } as vscode.Terminal;
 }
 
-async function waitFor(
-  check: () => boolean,
-  timeoutMs = 3000
-): Promise<void> {
+async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() > deadline) {
@@ -253,7 +251,7 @@ suite('AgentTreeDataProvider with host terminals', () => {
     return nodes.map(n => t.getTreeItem(n).id);
   }
 
-  test('a Terminals group after container and session groups', async () => {
+  test('host terminals join the host, after its sessions', async () => {
     const t = tree();
     await t.sync();
     await t.syncSessions();
@@ -262,66 +260,48 @@ suite('AgentTreeDataProvider with host terminals', () => {
     t.setTerminalAgent('c1', inContainer, agent('terminal:pts/3'));
     t.setLocalTerminalAgent(onHost, agent('terminal:ttys004', 'blocked'));
 
-    const roots = t.getChildren(THIS_WINDOW);
+    const envs = t.getChildren(WORKSPACE);
     assert.deepStrictEqual(
-      roots.map(n => n.kind),
-      ['session', 'container', 'local']
+      envs.map(n => n.kind),
+      ['host', 'container']
     );
-    const group = t.getTreeItem(roots[2]);
-    assert.strictEqual(group.label, 'Terminals');
-    assert.strictEqual(group.contextValue, 'agentTerminals');
-    assert.strictEqual((group.iconPath as vscode.ThemeIcon).id, 'terminal');
-    assert.strictEqual(group.description, '1 blocked');
+    assert.strictEqual(t.getTreeItem(envs[0]).description, '1 blocked, 1 idle');
 
-    // Container and host terminal keys share one counter but never collide.
-    // A container's herdr agents sit under its herdr node, before its
-    // terminals' agents.
-    const all = roots.flatMap(g =>
-      ids(
-        t,
-        t.getChildren(g).flatMap(n =>
-          n.kind === 'containerHerdr' ? t.getChildren(n) : [n]
-        )
-      )
-    );
+    // Container and host terminal keys share one counter, numbered as the
+    // tree first shows them, but never collide. A container's herdr agents
+    // come before its terminals' agents.
+    const all = envs.flatMap(env => ids(t, t.getChildren(env)));
     assert.deepStrictEqual(all, [
       'host-herdr:app:w1:p1',
+      'local-terminal:1',
       'herdr:c1:w1:p1',
-      'terminal:c1:1',
-      'local-terminal:2',
+      'terminal:c1:2',
     ]);
 
-    const [local] = t.getChildren(roots[2]);
+    const local = t.getChildren(envs[0])[1];
     const item = t.getTreeItem(local);
     assert.strictEqual(item.label, 'claude');
     assert.strictEqual(item.contextValue, 'agent');
     assert.ok(String(item.tooltip).includes('"zsh"'));
-    assert.strictEqual(t.getTreeItem(roots[1]).contextValue, 'agentContainer');
 
-    // Published as a `local` group and found again by key.
-    const published = t.snapshotGroups().find(g => g.kind === 'local');
-    assert.deepStrictEqual(published, {
-      kind: 'local',
-      agents: [
-        {
-          key: 'local-terminal:2',
-          agent: agent('terminal:ttys004', 'blocked'),
-          herdr: false,
-        },
-      ],
+    // Published with the host and found again by key.
+    const published = t.snapshotGroups().find(g => g.kind === 'host');
+    assert.deepStrictEqual(published?.agents[1], {
+      key: 'local-terminal:1',
+      agent: agent('terminal:ttys004', 'blocked'),
+      herdr: false,
     });
-    const found = t.findLocal('local-terminal:2');
+    const found = t.findLocal('local-terminal:1');
     assert.strictEqual(found?.kind === 'agent' && found.terminal, onHost);
 
     t.setLocalTerminalAgent(onHost, undefined);
-    assert.deepStrictEqual(
-      t.getChildren(THIS_WINDOW).map(n => n.kind),
-      ['session', 'container']
-    );
+    assert.deepStrictEqual(ids(t, t.getChildren(envs[0])), [
+      'host-herdr:app:w1:p1',
+    ]);
     t.dispose();
   });
 
-  test("another window's Terminals group", () => {
+  test("another window's host terminal agent", () => {
     const t = new AgentTreeDataProvider(
       { listRunning: async () => [] },
       () => ({ dispose() {} })
@@ -333,7 +313,8 @@ suite('AgentTreeDataProvider with host terminals', () => {
       workspaceUri: 'file:///work/beta',
       groups: [
         {
-          kind: 'local',
+          kind: 'host',
+          name: 'beta',
           agents: [
             {
               key: 'local-terminal:4',
@@ -345,12 +326,9 @@ suite('AgentTreeDataProvider with host terminals', () => {
       ],
     };
     t.setOtherWindows([remote]);
-    const [, others] = t.getChildren();
-    const [window] = t.getChildren(others);
-    const [group] = t.getChildren(window);
-    assert.strictEqual(group.kind, 'local');
-    assert.strictEqual(t.getTreeItem(group).id, 'w9:local');
-    const [remoteAgent] = t.getChildren(group);
+    const [env] = t.getChildren(OTHER_WORKSPACES);
+    assert.strictEqual(env.kind, 'host');
+    const [remoteAgent] = t.getChildren(env);
     const item = t.getTreeItem(remoteAgent);
     assert.strictEqual(item.id, 'w9:local-terminal:4');
     assert.strictEqual(item.label, 'claude');

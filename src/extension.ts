@@ -26,6 +26,7 @@ import {
   closeHerdrPane,
   focusHerdrAgent,
   getRemoteUser,
+  startContainerAgent,
   watchHerdr,
 } from './herdr';
 import {
@@ -40,6 +41,7 @@ import {
   sessionFromClientArgs,
   sessionNameForDir,
   hostHerdrSupported,
+  startHostAgent,
   stopHostSession,
   watchHostSession,
 } from './hostHerdr';
@@ -165,7 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
       publishWindow();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      agentTree.setPrimaryFolder(workspaceDir());
+      agentTree.setHostName(hostName());
       syncAgents();
       syncSessions();
     }),
@@ -184,9 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
       scheduleSessionSync();
       syncAttached();
     }),
-    vscode.window.onDidStartTerminalShellExecution(() =>
-      scheduleSessionSync()
-    ),
+    vscode.window.onDidStartTerminalShellExecution(() => scheduleSessionSync()),
     vscode.window.onDidEndTerminalShellExecution(() => scheduleSessionSync()),
     (terminalAgents = new TerminalAgentTracker({
       isContainerTerminal,
@@ -218,7 +218,7 @@ export function activate(context: vscode.ExtensionContext) {
       log: message => agentLog.info(message),
     }))
   );
-  agentTree.setPrimaryFolder(workspaceDir());
+  agentTree.setHostName(hostName());
   syncAgents();
   syncSessions();
   // Also catches foreground changes no terminal event reports, and sessions
@@ -286,6 +286,7 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.attachAgentGroup', (node?: AgentNode) =>
     attachAgentGroup(node)
   );
+  register('devc-vscode.addAgent', (node?: AgentNode) => addAgent(node));
   register('devc-vscode.attachTerminal', (node?: ContainerNode) =>
     attachTerminal(node)
   );
@@ -848,25 +849,13 @@ async function focusHostAgent(
 }
 
 /**
- * Show a terminal on an Agents view group: a client of a host session, or a
- * container terminal, opening one attached to herdr when there is none. For a
- * session or container that is not running, the opened terminal starts it.
+ * Show a terminal on an Agents view environment: a client of the workspace
+ * session for the host, or a container terminal, opening one attached to
+ * herdr when there is none.
  */
 async function attachAgentGroup(node?: AgentNode): Promise<void> {
-  if (node?.kind === 'session' && node.placeholder) {
-    // Starts the session, as herdrs would from the workspace.
-    openHostHerdrTerminal(
-      { name: node.session, default: false, socketPath: '' },
-      workspaceDir()
-    );
-  } else if (node?.kind === 'session' && node.host) {
-    const session = node.host;
-    const existing = await findHostClient(session);
-    if (existing) {
-      existing.show();
-      return;
-    }
-    openHostHerdrTerminal(session, workspaceDir());
+  if (node?.kind === 'host' && !node.remote) {
+    await attachWorkspaceSession();
   } else if (node?.kind === 'container' && !node.remote) {
     const existing = await containerTerminals(node.container.id);
     if (existing.length) {
@@ -874,6 +863,210 @@ async function attachAgentGroup(node?: AgentNode): Promise<void> {
       return;
     }
     openContainerTerminal(node.container.localFolder, getHerdrAttachCommand());
+  }
+}
+
+/**
+ * Show a terminal attached to this window's workspace session, opening one
+ * when there is none; that starts the session if it is not running, as
+ * `herdrs` would from the workspace. Resolves whether a client is up.
+ */
+async function attachWorkspaceSession(): Promise<boolean> {
+  const name = workspaceSessionName();
+  if (name === undefined) {
+    return false;
+  }
+  const running = agentTree.workspaceHostSession();
+  const existing = running && (await findHostClient(running));
+  if (existing) {
+    existing.show();
+    return true;
+  }
+  const session = running ?? {
+    name,
+    default: name === agentTree.defaultSessionName(),
+    socketPath: '',
+  };
+  const terminal = openHostHerdrTerminal(session, workspaceDir());
+  return waitForHostClient(terminal, session, HERDR_ATTACH_TIMEOUT_MS);
+}
+
+/** Where Add Agent starts an agent. */
+type LaunchTarget =
+  | { kind: 'host' }
+  | {
+      kind: 'container';
+      /** The workspace folder it serves. */ folder: string;
+    };
+
+/**
+ * Start an agent: pick which, then where — unless `node` is the environment
+ * to start it in, or there is only one.
+ */
+async function addAgent(node?: AgentNode): Promise<void> {
+  let target: LaunchTarget | undefined;
+  if (node?.kind === 'host' && !node.remote) {
+    target = { kind: 'host' };
+  } else if (node?.kind === 'container' && !node.remote) {
+    target = { kind: 'container', folder: node.container.localFolder };
+  } else if (node && node.kind !== 'workspace') {
+    return;
+  }
+  const kind = await pickAgentKind();
+  if (!kind) {
+    return;
+  }
+  target ??= await pickLaunchTarget();
+  if (!target) {
+    return;
+  }
+  const chosen = target;
+  const where =
+    chosen.kind === 'host'
+      ? `${hostName()} on the host`
+      : `the ${path.basename(chosen.folder)} dev container`;
+  const error = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `Starting ${kind} in ${where}`,
+      cancellable: true,
+    },
+    (_progress, token) =>
+      chosen.kind === 'host'
+        ? launchOnHost(kind)
+        : launchInContainer(chosen.folder, kind, token)
+  );
+  if (error) {
+    vscode.window.showErrorMessage(`Could not start ${kind}: ${error}`);
+  }
+}
+
+async function pickAgentKind(): Promise<string | undefined> {
+  const kinds = getAgentKinds();
+  if (kinds.length <= 1) {
+    return kinds[0];
+  }
+  return vscode.window.showQuickPick(kinds, { placeHolder: 'Agent to start' });
+}
+
+async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
+  const items: (vscode.QuickPickItem & { target: LaunchTarget })[] = [
+    ...(workspaceSessionName() !== undefined
+      ? [
+          {
+            label: `$(vm-outline) ${hostName()}`,
+            description: 'host',
+            target: { kind: 'host' } as LaunchTarget,
+          },
+        ]
+      : []),
+    ...getHostFolders().map(folder => ({
+      label: `$(vm) ${path.basename(folder)}`,
+      description: 'container',
+      target: { kind: 'container', folder } as LaunchTarget,
+    })),
+  ];
+  if (items.length <= 1) {
+    if (!items.length) {
+      vscode.window.showErrorMessage('There is nowhere to start an agent.');
+    }
+    return items[0]?.target;
+  }
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Where to start it',
+  });
+  return picked?.target;
+}
+
+/**
+ * Start an agent in the workspace session, attaching to it (and so starting
+ * it) first. Resolves why it failed, if it did.
+ */
+async function launchOnHost(kind: string): Promise<string | undefined> {
+  const name = workspaceSessionName();
+  if (name === undefined || !(await attachWorkspaceSession())) {
+    return 'the host herdr session did not start';
+  }
+  const session = await waitFor(
+    async () => (await listHostSessions()).find(s => s.name === name),
+    HERDR_ATTACH_TIMEOUT_MS
+  );
+  if (!session) {
+    return `herdr session "${name}" is not running`;
+  }
+  const result = await startHostAgent(session, workspaceDir(), kind);
+  if ('error' in result) {
+    return result.error;
+  }
+  scheduleSessionSync();
+  await focusHostHerdrAgent(session, result.pane);
+  return undefined;
+}
+
+/**
+ * Start an agent in the herdr of a folder's dev container, first bringing
+ * the container and its herdr up with a terminal attached when they are not,
+ * then show it. Resolves why it failed, if it did.
+ */
+async function launchInContainer(
+  folder: string,
+  kind: string,
+  token: vscode.CancellationToken
+): Promise<string | undefined> {
+  if (!agentTree.containerFor(folder)?.herdrRunning) {
+    // Brings the container, and herdr in it, up.
+    openContainerTerminal(folder, getHerdrAttachCommand());
+  }
+  const found = await waitFor(
+    () => {
+      const entry = agentTree.containerFor(folder);
+      return entry?.herdrRunning ? entry.container : undefined;
+    },
+    CONTAINER_START_TIMEOUT_MS,
+    token
+  );
+  if (!found) {
+    return token.isCancellationRequested
+      ? undefined
+      : `herdr did not come up in the ${path.basename(folder)} dev container`;
+  }
+  const docker = getDockerCommand();
+  const user = await getRemoteUser(found.id, docker);
+  const cwd = (await findMatchingBindMount(found.id, folder, docker))?.destPath;
+  const result = await startContainerAgent(found.id, user, cwd, kind, docker);
+  if ('error' in result) {
+    return result.error;
+  }
+  await focusAgent({
+    kind: 'agent',
+    container: found,
+    agent: { ...result.pane, agent: kind, status: 'unknown' },
+  });
+  return undefined;
+}
+
+/** How long a dev container gets to be created and bring herdr up. */
+const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Resolves `check`'s first defined answer, polled until `timeoutMs` passes or
+ * `token` is cancelled, and undefined then.
+ */
+async function waitFor<T>(
+  check: () => T | undefined | Promise<T | undefined>,
+  timeoutMs: number,
+  token?: vscode.CancellationToken
+): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await check();
+    if (value !== undefined) {
+      return value;
+    }
+    if (Date.now() >= deadline || token?.isCancellationRequested) {
+      return undefined;
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
 
@@ -1052,10 +1245,13 @@ async function shutDownSession(
   node: AgentNode | undefined,
   remove: boolean
 ): Promise<void> {
-  if (node?.kind !== 'session' || !node.host) {
+  const session =
+    node?.kind === 'host' && !node.remote
+      ? agentTree.workspaceHostSession()
+      : undefined;
+  if (!session) {
     return;
   }
-  const session = node.host;
   const label = session.default
     ? 'the default herdr session'
     : `herdr session "${session.name}"`;
@@ -1225,6 +1421,14 @@ function getHerdrAttachCommand(): string {
   return configured && configured.trim() !== '' ? configured : 'devc herdr';
 }
 
+/** Agents Add Agent offers, as herdr `--kind` values. */
+function getAgentKinds(): string[] {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string[]>('agentKinds');
+  return (configured ?? []).map(kind => kind.trim()).filter(Boolean);
+}
+
 /** Command run by the Agents view's stop or down action on a container. */
 function getContainerCommand(action: 'stop' | 'down'): string {
   const configured = vscode.workspace
@@ -1258,6 +1462,12 @@ function workspaceDir(): string | undefined {
   return file?.scheme === 'file'
     ? path.dirname(file.fsPath)
     : getHostFolders()[0];
+}
+
+/** The host environment's label: the name of workspaceDir. */
+function hostName(): string {
+  const dir = workspaceDir();
+  return (dir && path.basename(dir)) || 'Host';
 }
 
 /**

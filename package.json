@@ -37,6 +37,18 @@
           "default": "devc herdr",
           "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr."
         },
+        "devc-vscode.agentKinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "claude",
+            "copilot",
+            "pi"
+          ],
+          "markdownDescription": "Agents offered by the Agents view's Add Agent action, as herdr `--kind` values (see `herdr agent start --help`)."
+        },
         "devc-vscode.herdrSession": {
           "type": "string",
           "default": "",
@@ -120,6 +132,12 @@
         "title": "Close Agent",
         "category": "Dev Container FS",
         "icon": "$(trash)"
+      },
+      {
+        "command": "devc-vscode.addAgent",
+        "title": "Add Agent",
+        "category": "Dev Container FS",
+        "icon": "$(add)"
       },
       {
         "command": "devc-vscode.attachAgentGroup",
@@ -207,8 +225,13 @@
           "group": "inline"
         },
         {
+          "command": "devc-vscode.addAgent",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Workspace|Host|Container)(\\..*)?$/",
+          "group": "inline@0"
+        },
+        {
           "command": "devc-vscode.attachAgentGroup",
-          "when": "view == devc-vscode.agents && viewItem =~ /^(agentContainer(\\.stopped|\\.absent)?|agentSession(\\.default|\\.placeholder)?)$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Host|Container)(\\..*)?$/",
           "group": "inline@1"
         },
         {
@@ -218,17 +241,17 @@
         },
         {
           "command": "devc-vscode.downContainer",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached|\\.stopped)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
           "group": "inline@3"
         },
         {
           "command": "devc-vscode.stopSession",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.default)?(\\.attached)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentHost\\.running/",
           "group": "inline@2"
         },
         {
           "command": "devc-vscode.deleteSession",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentSession(\\.attached)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentHost\\.running(\\.attached)?$/",
           "group": "inline@3"
         }
       ],
@@ -270,6 +293,10 @@
         {
           "command": "devc-vscode.attachAgentGroup",
           "when": "false"
+        },
+        {
+          "command": "devc-vscode.addAgent",
+          "when": "false"
         }
       ]
     },
@@ -295,12 +322,6 @@
         "command": "devc-vscode.delete",
         "key": "delete",
         "when": "view == devc-vscode.containers && listFocus && !inputFocus"
-      }
-    ],
-    "viewsWelcome": [
-      {
-        "view": "devc-vscode.agents",
-        "contents": "No agents detected. This workspace's dev containers, this window's host herdr session (named after its folder, or the herdrSession setting) and any attached in its terminals, and agents working in its folders appear here."
       }
     ]
   },

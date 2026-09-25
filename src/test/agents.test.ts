@@ -2,12 +2,21 @@ import * as vscode from 'vscode';
 import * as assert from 'assert';
 import {
   AgentTreeDataProvider,
-  THIS_WINDOW,
+  OTHER_WORKSPACES,
+  WORKSPACE,
   WatchAgents,
   summarize,
+  taskLabel,
 } from '../agentTree';
 import { ContainerInfo, ContainerSource } from '../containerTree';
-import { AgentInfo, parseSnapshot, remoteUserFromMetadata } from '../herdr';
+import {
+  AgentInfo,
+  HerdrRunner,
+  parseCreatedPane,
+  parseSnapshot,
+  remoteUserFromMetadata,
+  startAgent,
+} from '../herdr';
 
 /** Trimmed from real `herdr api snapshot` output (herdr 0.9.1). */
 const SNAPSHOT = JSON.stringify({
@@ -124,12 +133,8 @@ suite('summarize', () => {
 suite('AgentTreeDataProvider', () => {
   class FakeSource implements ContainerSource {
     containers: ContainerInfo[] = [];
-    stopped: ContainerInfo[] = [];
     async listRunning(): Promise<ContainerInfo[]> {
       return this.containers;
-    }
-    async listStopped(): Promise<ContainerInfo[]> {
-      return this.stopped;
     }
   }
 
@@ -168,27 +173,74 @@ suite('AgentTreeDataProvider', () => {
     return { watch, watchers };
   }
 
-  test('shows every running container, with its agents', async () => {
+  test('always shows the two roots', async () => {
+    const tree = new AgentTreeDataProvider(new FakeSource(), fakeWatch().watch);
+    await tree.sync();
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE, OTHER_WORKSPACES]);
+    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
+    const own = tree.getTreeItem(WORKSPACE);
+    assert.strictEqual(own.label, 'Workspace');
+    assert.strictEqual(own.contextValue, 'agentWorkspace');
+    assert.strictEqual(
+      own.collapsibleState,
+      vscode.TreeItemCollapsibleState.Expanded
+    );
+    const others = tree.getTreeItem(OTHER_WORKSPACES);
+    assert.strictEqual(others.label, 'Other Workspaces');
+    assert.strictEqual(
+      others.collapsibleState,
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
+    tree.dispose();
+  });
+
+  test('shows every running container, with its agents flat', async () => {
     const source = new FakeSource();
-    source.containers = [container('a'), container('b')];
+    source.containers = [container('b'), container('a')];
     const { watch, watchers } = fakeWatch();
     const tree = new AgentTreeDataProvider(source, watch);
     await tree.sync();
 
     const ids = () =>
-      tree.getChildren(THIS_WINDOW).map(n => n.kind === 'container' && n.container.id);
+      tree
+        .getChildren(WORKSPACE)
+        .map(n => n.kind === 'container' && n.container.id);
     assert.deepStrictEqual(ids(), ['a', 'b']);
     watchers.get('b')!.push([agent('w1:p1', 'blocked')]);
+    const terminal = {} as vscode.Terminal;
+    tree.setTerminalAgent('b', terminal, agent('t', 'working'));
 
-    const roots = tree.getChildren(THIS_WINDOW);
+    const envs = tree.getChildren(WORKSPACE);
     assert.deepStrictEqual(ids(), ['a', 'b']);
-    const [herdrNode] = tree.getChildren(roots[1]);
-    assert.strictEqual(herdrNode.kind, 'containerHerdr');
+    const agents = tree.getChildren(envs[1]);
     assert.deepStrictEqual(
-      tree.getChildren(herdrNode).map(n => n.kind === 'agent' && n.agent.paneId),
-      ['w1:p1']
+      agents.map(n => n.kind === 'agent' && n.agent.paneId),
+      ['w1:p1', 't']
+    );
+    const item = tree.getTreeItem(envs[1]);
+    assert.strictEqual(item.description, '1 blocked, 1 working');
+    assert.strictEqual(
+      tree.getTreeItem(WORKSPACE).description,
+      '1 blocked, 1 working'
     );
     assert.strictEqual(tree.attentionCount(), 1);
+    tree.dispose();
+  });
+
+  test('labels an agent by its task', async () => {
+    const source = new FakeSource();
+    source.containers = [container('a')];
+    const { watch, watchers } = fakeWatch();
+    const tree = new AgentTreeDataProvider(source, watch);
+    await tree.sync();
+    watchers
+      .get('a')!
+      .push([{ ...agent('w1:p1', 'working'), title: 'Fixing tests' }]);
+
+    const [env] = tree.getChildren(WORKSPACE);
+    const item = tree.getTreeItem(tree.getChildren(env)[0]);
+    assert.strictEqual(item.label, 'Fixing tests');
+    assert.strictEqual(item.description, 'claude');
     tree.dispose();
   });
 
@@ -200,9 +252,9 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
 
     watchers.get('a')!.push([], false);
-    const [root] = tree.getChildren(THIS_WINDOW);
-    const item = tree.getTreeItem(root);
-    assert.strictEqual(item.description, 'container · herdr not running');
+    const [env] = tree.getChildren(WORKSPACE);
+    const item = tree.getTreeItem(env);
+    assert.strictEqual(item.description, 'herdr not running');
     assert.strictEqual(item.contextValue, 'agentContainer');
     assert.strictEqual(
       item.collapsibleState,
@@ -210,80 +262,30 @@ suite('AgentTreeDataProvider', () => {
     );
 
     watchers.get('a')!.push([], true);
-    assert.strictEqual(tree.getTreeItem(root).description, 'container');
+    assert.strictEqual(tree.getTreeItem(env).description, '');
     tree.setAttachedContainers(new Set(['a']));
     assert.strictEqual(
-      tree.getTreeItem(root).contextValue,
+      tree.getTreeItem(env).contextValue,
       'agentContainer.attached'
     );
+    assert.deepStrictEqual(tree.containerFor('/work/a/'), {
+      container: container('a'),
+      herdrRunning: true,
+    });
+    assert.strictEqual(tree.containerFor('/work/b'), undefined);
     tree.dispose();
   });
 
-  test('shows stopped containers, not watched', async () => {
+  test('drops a container once it stops', async () => {
     const source = new FakeSource();
     source.containers = [container('a')];
-    source.stopped = [container('b')];
-    const { watch, watchers } = fakeWatch();
-    const tree = new AgentTreeDataProvider(source, watch);
-    await tree.sync();
-
-    assert.strictEqual(watchers.has('b'), false);
-    const [, stopped] = tree.getChildren(THIS_WINDOW);
-    assert.strictEqual(
-      stopped.kind === 'container' && stopped.state,
-      'stopped'
-    );
-    const item = tree.getTreeItem(stopped);
-    assert.strictEqual(item.description, 'container · stopped');
-    assert.strictEqual(item.contextValue, 'agentContainer.stopped');
-    // Not published: other windows only show groups with agents.
-    assert.deepStrictEqual(
-      tree.snapshotGroups().map(g => g.kind === 'container' && g.container.id),
-      ['a']
-    );
-
-    // Down removes it, leaving nothing for a folder that is not primary.
-    source.stopped = [];
-    await tree.sync();
-    assert.strictEqual(tree.getChildren(THIS_WINDOW).length, 1);
-    tree.dispose();
-  });
-
-  test("the primary folder's container, real or placeholder", async () => {
-    const source = new FakeSource();
     const { watch } = fakeWatch();
     const tree = new AgentTreeDataProvider(source, watch);
-    tree.setPrimaryFolder('/work/a');
     await tree.sync();
-
-    const [placeholder] = tree.getChildren(THIS_WINDOW);
-    assert.strictEqual(
-      placeholder.kind === 'container' && placeholder.state,
-      'absent'
-    );
-    const item = tree.getTreeItem(placeholder);
-    assert.strictEqual(item.label, 'a');
-    assert.strictEqual(item.description, 'container · not created');
-    assert.strictEqual(item.contextValue, 'agentContainer.absent');
+    source.containers = [];
+    await tree.sync();
+    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
     assert.deepStrictEqual(tree.snapshotGroups(), []);
-
-    source.stopped = [container('a')];
-    await tree.sync();
-    const [stopped] = tree.getChildren(THIS_WINDOW);
-    assert.strictEqual(
-      stopped.kind === 'container' && stopped.state,
-      'stopped'
-    );
-
-    source.stopped = [];
-    source.containers = [container('a')];
-    await tree.sync();
-    const roots = tree.getChildren(THIS_WINDOW);
-    assert.strictEqual(roots.length, 1);
-    assert.strictEqual(
-      roots[0].kind === 'container' && roots[0].state,
-      undefined
-    );
     tree.dispose();
   });
 
@@ -333,5 +335,102 @@ suite('AgentTreeDataProvider', () => {
     await tree.sync();
     assert.notStrictEqual(watchers.get('a'), first);
     tree.dispose();
+  });
+});
+
+suite('taskLabel', () => {
+  test('title, then folder, then the agent', () => {
+    const base: AgentInfo = { paneId: 'p', agent: 'claude', status: 'idle' };
+    assert.strictEqual(
+      taskLabel({ ...base, title: ' Fix it ', cwd: '/w/app' }),
+      'Fix it'
+    );
+    assert.strictEqual(
+      taskLabel({ ...base, title: ' ', cwd: '/w/app' }),
+      'app'
+    );
+    assert.strictEqual(taskLabel(base), 'claude');
+  });
+});
+
+suite('startAgent', () => {
+  /** Trimmed from real herdr 0.8.2 `tab create` output. */
+  const TAB_CREATED = JSON.stringify({
+    id: 'cli:tab:create',
+    result: {
+      root_pane: { pane_id: 'w1:p2', tab_id: 'w1:t2', workspace_id: 'w1' },
+      tab: { tab_id: 'w1:t2', workspace_id: 'w1' },
+      type: 'tab_created',
+    },
+  });
+  const error = (code: string, message = code) =>
+    JSON.stringify({ error: { code, message }, id: 'cli' });
+
+  /** Answers each command by its first two words, recording the calls. */
+  function fakeRun(answers: Record<string, [number, string][]>) {
+    const calls: string[][] = [];
+    const run: HerdrRunner = async args => {
+      calls.push(args);
+      const next = answers[args.slice(0, 2).join(' ')]?.shift();
+      return next && { exitCode: next[0], stdout: next[1] };
+    };
+    return { run, calls };
+  }
+
+  test('parses the new pane', () => {
+    assert.deepStrictEqual(parseCreatedPane(TAB_CREATED), {
+      paneId: 'w1:p2',
+      tabId: 'w1:t2',
+    });
+    assert.strictEqual(parseCreatedPane(error('x')), undefined);
+    assert.strictEqual(parseCreatedPane('nope'), undefined);
+  });
+
+  test('opens a tab and starts the agent in it', async () => {
+    const { run, calls } = fakeRun({
+      'tab create': [[0, TAB_CREATED]],
+      'agent start': [[0, '{}']],
+    });
+    const result = await startAgent(run, '/w/app', 'claude');
+    assert.deepStrictEqual(result, {
+      pane: { paneId: 'w1:p2', tabId: 'w1:t2' },
+    });
+    assert.deepStrictEqual(calls, [
+      ['tab', 'create', '--cwd', '/w/app', '--focus'],
+      ['agent', 'start', 'claude', '--kind', 'claude', '--pane', 'w1:p2'],
+    ]);
+  });
+
+  test('creates a workspace when there is none', async () => {
+    const { run, calls } = fakeRun({
+      'tab create': [[1, error('workspace_not_found')]],
+      'workspace create': [[0, TAB_CREATED]],
+      'agent start': [[0, '{}']],
+    });
+    const result = await startAgent(run, undefined, 'pi');
+    assert.ok('pane' in result);
+    assert.deepStrictEqual(calls[1], ['workspace', 'create', '--focus']);
+  });
+
+  test('an agent waiting at startup still started', async () => {
+    const { run } = fakeRun({
+      'tab create': [[0, TAB_CREATED]],
+      'agent start': [[1, error('agent_not_ready')]],
+    });
+    assert.ok('pane' in (await startAgent(run, undefined, 'claude')));
+  });
+
+  test("reports herdr's error", async () => {
+    const { run } = fakeRun({
+      'tab create': [[0, TAB_CREATED]],
+      'agent start': [[1, error('agent_pane_busy', 'pane is busy')]],
+    });
+    assert.deepStrictEqual(await startAgent(run, undefined, 'claude'), {
+      error: 'pane is busy',
+    });
+    const missing = fakeRun({});
+    assert.deepStrictEqual(await startAgent(missing.run, undefined, 'claude'), {
+      error: 'herdr could not be run',
+    });
   });
 });

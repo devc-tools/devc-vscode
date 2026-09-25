@@ -21,8 +21,6 @@ export interface ContainerInfo {
 export interface ContainerSource {
   /** Running dev containers that serve the current workspace, in display order. */
   listRunning(): Promise<ContainerInfo[]>;
-  /** Stopped (or created, never started) ones, likewise. */
-  listStopped?(): Promise<ContainerInfo[]>;
 }
 
 /**
@@ -574,21 +572,15 @@ interface LabelledContainer {
 }
 
 /**
- * Every running dev container that records a project folder, in one call, or
- * with `stopped` every stopped one. Tab-delimited because host paths can
- * contain spaces.
+ * Every running dev container that records a project folder, in one call.
+ * Tab-delimited because host paths can contain spaces.
  */
 async function listLabelledDevContainers(
-  docker: string,
-  stopped = false
+  docker: string
 ): Promise<LabelledContainer[]> {
   const res = await execDocker(
     [
       'ps',
-      // Repeated status filters match either.
-      ...(stopped
-        ? ['-a', '--filter', 'status=exited', '--filter', 'status=created']
-        : []),
       '--filter',
       'label=devcontainer.local_folder',
       '--format',
@@ -640,15 +632,7 @@ export class DockerContainerSource implements ContainerSource {
     private readonly hostFolders: () => string[]
   ) {}
 
-  listRunning(): Promise<ContainerInfo[]> {
-    return this.list(false);
-  }
-
-  listStopped(): Promise<ContainerInfo[]> {
-    return this.list(true);
-  }
-
-  private async list(stopped: boolean): Promise<ContainerInfo[]> {
+  async listRunning(): Promise<ContainerInfo[]> {
     const hostFolders = this.hostFolders();
     if (hostFolders.length === 0) {
       // Nothing to scope to, so nothing is in scope.
@@ -657,8 +641,7 @@ export class DockerContainerSource implements ContainerSource {
 
     const found = new Map<string, ContainerInfo>();
     for (const container of await listLabelledDevContainers(
-      this.dockerCommand(),
-      stopped
+      this.dockerCommand()
     )) {
       // The most specific workspace folder wins, so a nested folder labels its
       // containers relative to itself rather than to its parent.

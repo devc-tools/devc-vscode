@@ -306,3 +306,161 @@ function arrayOf(value: unknown): Record<string, unknown>[] {
 function stringOr(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
+
+/** Runs `herdr <args>` somewhere; undefined when herdr could not be run. */
+export type HerdrRunner = (
+  args: string[],
+  timeoutMs?: number
+) => Promise<{ exitCode: number; stdout: string; stderr?: string } | undefined>;
+
+/** The pane a new agent was started in, or why it could not be. */
+export type StartResult =
+  { pane: Pick<AgentInfo, 'paneId' | 'tabId'> } | { error: string };
+
+/**
+ * How long `herdr agent start` gets, beyond the 30s herdr itself waits for the
+ * agent to become ready.
+ */
+export const AGENT_START_TIMEOUT_MS = 40000;
+/** How long any other herdr command run to start an agent gets. */
+const COMMAND_TIMEOUT_MS = 10000;
+
+/**
+ * herdr `agent start` errors that still leave the agent running: it is
+ * waiting on a prompt at startup (a folder trust dialog, say), or is slow to
+ * become ready. The tree shows it either way.
+ */
+const LAUNCHED_ERRORS: ReadonlySet<string> = new Set([
+  'agent_not_ready',
+  'timeout',
+]);
+
+/**
+ * Start a `kind` agent (e.g. "claude") in a new tab of herdr's active
+ * workspace, creating a workspace when there is none, and focus it.
+ */
+export async function startAgent(
+  run: HerdrRunner,
+  cwd: string | undefined,
+  kind: string
+): Promise<StartResult> {
+  const where = cwd ? ['--cwd', cwd] : [];
+  let created = await run(['tab', 'create', ...where, '--focus']);
+  if (
+    created?.exitCode !== 0 &&
+    herdrError(created?.stdout ?? '')?.code === 'workspace_not_found'
+  ) {
+    created = await run(['workspace', 'create', ...where, '--focus']);
+  }
+  if (!created) {
+    return { error: 'herdr could not be run' };
+  }
+  if (created.exitCode !== 0) {
+    return { error: failure(created) };
+  }
+  const pane = parseCreatedPane(created.stdout);
+  if (!pane) {
+    return { error: 'herdr did not report the new pane' };
+  }
+  const started = await run(
+    ['agent', 'start', kind, '--kind', kind, '--pane', pane.paneId],
+    AGENT_START_TIMEOUT_MS
+  );
+  if (!started) {
+    return { error: 'herdr could not be run' };
+  }
+  if (
+    started.exitCode !== 0 &&
+    !LAUNCHED_ERRORS.has(herdrError(started.stdout)?.code ?? '')
+  ) {
+    return { error: failure(started) };
+  }
+  return { pane };
+}
+
+/** The root pane in herdr's `tab create` or `workspace create` response. */
+export function parseCreatedPane(
+  output: string
+): Pick<AgentInfo, 'paneId' | 'tabId'> | undefined {
+  try {
+    const pane = JSON.parse(output)?.result?.root_pane;
+    if (!isObject(pane) || typeof pane.pane_id !== 'string') {
+      return undefined;
+    }
+    return {
+      paneId: pane.pane_id,
+      tabId: typeof pane.tab_id === 'string' ? pane.tab_id : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The error in a herdr `{"error":{"code","message"}}` response. */
+export function herdrError(
+  output: string
+): { code?: string; message?: string } | undefined {
+  try {
+    const error = JSON.parse(output)?.error;
+    if (!isObject(error)) {
+      return undefined;
+    }
+    return {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function failure(res: {
+  exitCode: number;
+  stdout: string;
+  stderr?: string;
+}): string {
+  return (
+    herdrError(res.stdout)?.message ??
+    (res.stderr?.trim() || `herdr exited with ${res.exitCode}`)
+  );
+}
+
+/** Start an agent in a container's herdr, as startAgent does. */
+export function startContainerAgent(
+  containerId: string,
+  user: string | undefined,
+  cwd: string | undefined,
+  kind: string,
+  dockerCommand: string
+): Promise<StartResult> {
+  return startAgent(
+    async (args, timeoutMs) => {
+      try {
+        const res = await execDocker(
+          [
+            'exec',
+            ...userArgs(user),
+            containerId,
+            'sh',
+            '-c',
+            'PATH="$HOME/.local/bin:$PATH" exec herdr "$@"',
+            'sh',
+            ...args,
+          ],
+          undefined,
+          dockerCommand,
+          timeoutMs ?? COMMAND_TIMEOUT_MS
+        );
+        return {
+          exitCode: res.exitCode,
+          stdout: res.stdout.toString('utf8'),
+          stderr: res.stderr.toString('utf8'),
+        };
+      } catch {
+        return undefined;
+      }
+    },
+    cwd,
+    kind
+  );
+}

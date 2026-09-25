@@ -3,7 +3,13 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AgentInfo, isErrorResponse, parseSnapshot } from './herdr';
+import {
+  AgentInfo,
+  StartResult,
+  isErrorResponse,
+  parseSnapshot,
+  startAgent,
+} from './herdr';
 import { Classification, parseExplain } from './terminalAgents';
 
 /**
@@ -63,24 +69,25 @@ export function herdrEnv(
  */
 function runHerdr(
   args: string[],
-  socketPath?: string
-): Promise<{ exitCode: number; stdout: string } | undefined> {
+  socketPath?: string,
+  timeoutMs = COMMAND_TIMEOUT_MS
+): Promise<{ exitCode: number; stdout: string; stderr: string } | undefined> {
   return new Promise(resolve => {
     cp.execFile(
       'herdr',
       args,
       {
         env: herdrEnv(socketPath),
-        timeout: COMMAND_TIMEOUT_MS,
+        timeout: timeoutMs,
         maxBuffer: 16 * 1024 * 1024,
       },
-      (err, stdout) => {
+      (err, stdout, stderr) => {
         if (err && typeof err.code !== 'number') {
           // Not an exit status: spawn failure or the timeout's kill.
           resolve(undefined);
           return;
         }
-        resolve({ exitCode: err ? Number(err.code) : 0, stdout });
+        resolve({ exitCode: err ? Number(err.code) : 0, stdout, stderr });
       }
     );
   });
@@ -211,6 +218,19 @@ export async function closeHostHerdrPane(
 ): Promise<boolean> {
   const res = await runHerdr(['pane', 'close', paneId], session.socketPath);
   return res?.exitCode === 0;
+}
+
+/** Start an agent in a host session, as startAgent does. */
+export function startHostAgent(
+  session: HostSession,
+  cwd: string | undefined,
+  kind: string
+): Promise<StartResult> {
+  return startAgent(
+    (args, timeoutMs) => runHerdr(args, session.socketPath, timeoutMs),
+    cwd,
+    kind
+  );
 }
 
 /**

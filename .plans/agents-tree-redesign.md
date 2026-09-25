@@ -9,15 +9,16 @@ decisions made reviewing it.
 
 ## Checklist
 
-- [ ] Spike: confirm `herdr tab create` output shape and `herdr agent start` in host and container herdr (see Launching)
-- [ ] Tree: two root nodes, environment nodes, flat agent rows (see Tree shape)
-- [ ] Tree: environment visibility rules (running only)
-- [ ] Registry: environment-shaped published groups, `SNAPSHOT_VERSION` bump
-- [ ] Menus: `+` on the Workspace root and this workspace's environment nodes; existing lifecycle actions re-pointed to environment nodes
-- [ ] Launch flow: agent picker → environment picker (skipped when only one) → start agent
-- [ ] Setting: `devc-vscode.agentKinds`
-- [ ] Remove the old node kinds, placeholders and the view's welcome text
-- [ ] Tests (see Validation)
+- [x] Spike: confirm `herdr tab create` output shape and `herdr agent start` in host and container herdr (see Launching)
+- [ ] Manual check in a live window (see Validation)
+- [x] Tree: two root nodes, environment nodes, flat agent rows (see Tree shape)
+- [x] Tree: environment visibility rules (running only)
+- [x] Registry: environment-shaped published groups, `SNAPSHOT_VERSION` bump
+- [x] Menus: `+` on the Workspace root and this workspace's environment nodes; existing lifecycle actions re-pointed to environment nodes
+- [x] Launch flow: agent picker → environment picker (skipped when only one) → start agent
+- [x] Setting: `devc-vscode.agentKinds`
+- [x] Remove the old node kinds, placeholders and the view's welcome text
+- [x] Tests (see Validation)
 
 ## Decisions
 
@@ -165,7 +166,16 @@ export async function startHostAgent(session: HostSession, cwd: string, kind: st
 export async function startContainerAgent(containerId: string, user: string | undefined, cwd: string, kind: string, dockerCommand: string): Promise<string | undefined>;
 ```
 
-**Spike first:**
+**Spike findings** (host herdr 0.8.2, container herdr 0.9.1, both have `agent start`):
+- `tab create` and `workspace create` both answer
+  `{"result":{"root_pane":{"pane_id":"w1:p2","tab_id":"w1:t2",…}}}`.
+- A session with no herdr workspace yet fails `tab create` with
+  `workspace_not_found`. Fall back to `workspace create`.
+- `agent start` answers `agent_not_ready` when the agent is blocked on a startup
+  prompt, and `timeout` when it's slow. Either way it has launched. `agent_pane_busy`
+  and an unsupported kind are real failures. Names needn't be unique.
+
+**Spike first (done):**
 - Check what `herdr tab create` prints and where the new pane id is. It likely prints
   JSON, but that's unconfirmed. Parse it strictly.
 - `herdr agent start` requires "an existing pane at an interactive shell prompt", and
