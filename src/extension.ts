@@ -900,8 +900,8 @@ type LaunchTarget =
     };
 
 /**
- * Start an agent: pick which, then where — unless `node` is the environment
- * to start it in, or there is only one.
+ * Start an agent: pick where — unless `node` is the environment to start it
+ * in, or there is only one — then which.
  */
 async function addAgent(node?: AgentNode): Promise<void> {
   let target: LaunchTarget | undefined;
@@ -912,12 +912,12 @@ async function addAgent(node?: AgentNode): Promise<void> {
   } else if (node && node.kind !== 'workspace') {
     return;
   }
-  const kind = await pickAgentKind();
-  if (!kind) {
-    return;
-  }
   target ??= await pickLaunchTarget();
   if (!target) {
+    return;
+  }
+  const kind = await pickAgentKind();
+  if (!kind) {
     return;
   }
   const chosen = target;
@@ -950,27 +950,32 @@ async function pickAgentKind(): Promise<string | undefined> {
 }
 
 async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
-  const items: (vscode.QuickPickItem & { target: LaunchTarget })[] = [
-    ...(workspaceSessionName() !== undefined
-      ? [
-          {
-            label: `$(device-desktop) ${hostName()}`,
-            description: 'host',
-            target: { kind: 'host' } as LaunchTarget,
-          },
-        ]
-      : []),
-    ...getHostFolders().map(folder => ({
+  const items: (vscode.QuickPickItem & { target?: LaunchTarget })[] = [];
+  if (workspaceSessionName() !== undefined) {
+    items.push({
+      label: `$(device-desktop) ${hostName()}`,
+      target: { kind: 'host' },
+    });
+  }
+  const folders = getHostFolders();
+  if (folders.length) {
+    items.push({
+      label: 'Dev Containers',
+      kind: vscode.QuickPickItemKind.Separator,
+    });
+  }
+  for (const folder of folders) {
+    items.push({
       label: `$(vm-running) ${path.basename(folder)}`,
-      description: 'container',
-      target: { kind: 'container', folder } as LaunchTarget,
-    })),
-  ];
-  if (items.length <= 1) {
-    if (!items.length) {
+      target: { kind: 'container', folder },
+    });
+  }
+  const targets = items.filter(item => item.target);
+  if (targets.length <= 1) {
+    if (!targets.length) {
       vscode.window.showErrorMessage('There is nowhere to start an agent.');
     }
-    return items[0]?.target;
+    return targets[0]?.target;
   }
   const picked = await vscode.window.showQuickPick(items, {
     placeHolder: 'Where to start it',
