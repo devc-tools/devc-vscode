@@ -63,7 +63,9 @@ import {
   ReviewRequest,
   SyncDeps,
   SyncError,
+  SyncTarget,
   fetchFromSshHost,
+  findSyncTargets,
   gitEnv,
   makeGit,
   sendToSshHost,
@@ -154,7 +156,8 @@ export function activate(context: vscode.ExtensionContext) {
     new DockerContainerSource(getDockerCommand, getHostFolders),
     new WorkspaceFileOps(),
     undefined,
-    { list: getSshHosts, root: sshRoot }
+    { list: getSshHosts, root: sshRoot },
+    { targets: syncTargetsFor }
   );
   treeView = vscode.window.createTreeView(VIEW_ID, {
     treeDataProvider: treeProvider,
@@ -224,6 +227,8 @@ export function activate(context: vscode.ExtensionContext) {
       syncAgents();
       syncSessions();
       syncSsh();
+      syncTargetCache.clear();
+      treeProvider.refresh();
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('devc-vscode.herdrSession')) {
@@ -235,6 +240,7 @@ export function activate(context: vscode.ExtensionContext) {
         e.affectsConfiguration('devc-vscode.sshPath')
       ) {
         sshHomes.clear();
+        syncTargetCache.clear();
         treeProvider.refresh();
         syncSsh();
         syncAttached();
@@ -324,7 +330,10 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(id, handler as never)
     );
 
-  register('devc-vscode.refresh', () => treeProvider.refresh());
+  register('devc-vscode.refresh', () => {
+    syncTargetCache.clear();
+    treeProvider.refresh();
+  });
   register('devc-vscode.expandAllAgents', () =>
     agentTree.setExpansion('expanded')
   );
@@ -370,6 +379,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
   register('devc-vscode.fetchFromSshHost', (uri?: vscode.Uri) =>
     syncWithSshHost(uri, 'fetch')
+  );
+  register('devc-vscode.sendFromTree', (node?: ContainerNode) =>
+    syncFromTree(node, 'send')
+  );
+  register('devc-vscode.fetchFromTree', (node?: ContainerNode) =>
+    syncFromTree(node, 'fetch')
   );
 
   context.subscriptions.push(
@@ -637,7 +652,7 @@ async function revealInTree(uri: vscode.Uri): Promise<void> {
     const root = await treeProvider.resolveSshRoot(uri.authority);
     if (root === undefined || !isPathWithin(root, uri.path)) {
       vscode.window.showInformationMessage(
-        `${uri.path} is outside ${uri.authority}'s root in the Dev Containers view.`
+        `${uri.path} is outside ${uri.authority}'s root in the Sandboxes view.`
       );
       return;
     }
@@ -700,23 +715,75 @@ async function syncWithSshHost(
   if (!host) {
     return;
   }
+  await runSync(folder, host.host, direction);
+  // Send may have made the folder a sync target in the tree.
+  treeProvider.refreshSshRoot(host.host);
+}
+
+/** Send or Fetch from the Sandboxes view: the folder comes from the node. */
+async function syncFromTree(
+  node: ContainerNode | undefined,
+  direction: 'send' | 'fetch'
+): Promise<void> {
+  const sync = node?.kind === 'directory' ? node.sync : undefined;
+  if (!node || !sync) {
+    vscode.window.showErrorMessage(
+      `${node?.uri.path ?? 'This folder'} is no longer a worktree of a local repo — refresh the Sandboxes view.`
+    );
+    return;
+  }
+  await runSync(sync.localPath, node.uri.authority, direction);
+  // Send may have added a worktree or switched a branch.
+  treeProvider.refresh(await treeProvider.getParent(node));
+}
+
+/** The Send / Fetch flow once folder and host are chosen. Never rejects. */
+async function runSync(
+  folder: string,
+  host: string,
+  direction: 'send' | 'fetch'
+): Promise<void> {
   const verb = direction === 'send' ? 'Sending' : 'Fetching';
   try {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: `${verb} ${path.basename(folder)} — ${sshLabel(host.host)}`,
+        title: `${verb} ${path.basename(folder)} — ${sshLabel(host)}`,
       },
       () =>
         (direction === 'send' ? sendToSshHost : fetchFromSshHost)(
           folder,
-          host.host,
+          host,
           syncDeps()
         )
     );
   } catch (err) {
     showSyncError(err);
+  } finally {
+    syncTargetCache.delete(host);
   }
+}
+
+/**
+ * Each SSH host's sync targets for the tree, filled on first use. Cleared
+ * when folders, hosts or a host's repos may have changed; a failed fill is
+ * not kept.
+ */
+const syncTargetCache = new Map<string, Promise<Map<string, SyncTarget>>>();
+
+function syncTargetsFor(host: string): Promise<Map<string, SyncTarget>> {
+  let targets = syncTargetCache.get(host);
+  if (!targets) {
+    const filling = findSyncTargets(getHostFolders(), host, syncDeps());
+    filling.catch(() => {
+      if (syncTargetCache.get(host) === filling) {
+        syncTargetCache.delete(host);
+      }
+    });
+    syncTargetCache.set(host, filling);
+    targets = filling;
+  }
+  return targets;
 }
 
 async function pickLocalFolder(): Promise<string | undefined> {
@@ -2371,7 +2438,7 @@ function guardWorkspaceFolders(): boolean {
   if (folders.length === 1) {
     sshAllowed = false;
     vscode.window.showErrorMessage(
-      'This window has an SSH folder as its workspace. Close it and browse the host from the Dev Containers view.',
+      'This window has an SSH folder as its workspace. Close it and browse the host from the Sandboxes view.',
       { modal: true }
     );
     return false;
@@ -2383,7 +2450,7 @@ function guardWorkspaceFolders(): boolean {
   const last = ssh.reduce((a, b) => (b.index > a.index ? b : a));
   vscode.workspace.updateWorkspaceFolders(last.index, 1);
   vscode.window.showWarningMessage(
-    'SSH folders cannot be workspace folders — use the Dev Containers view instead.'
+    'SSH folders cannot be workspace folders — use the Sandboxes view instead.'
   );
   return sshAllowed;
 }

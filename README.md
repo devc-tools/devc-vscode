@@ -4,7 +4,7 @@ Browse and edit files inside a running dev container from VS Code on the host �
 
 ## How it works
 
-Registers a `devc-vscode://<container-id>/<path>` filesystem provider backed by `docker exec` (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`), and contributes a **Dev Containers** tree view into the Explorer panel.
+Registers a `devc-vscode://<container-id>/<path>` filesystem provider backed by `docker exec` (`stat`, `find`, `cat`, `mkdir`, `rm`, `mv`), and contributes a **Sandboxes** tree view into the Explorer panel.
 
 The tree is scoped to the window's workspace by a single rule: a running dev container gets a root when its project folder — the devcontainer CLI's `devcontainer.local_folder` label — is an open host folder **or sits under one**. So a container started for a subfolder gets its own root alongside the workspace folder's, and no unrelated dev container on the machine can appear. Roots are labelled with the **host folder's basename**, or `basename/path/to/subfolder` for a container serving a subfolder; docker's generated container name is the subtitle.
 
@@ -38,9 +38,9 @@ Files are written to a temp name and renamed, so a reader never sees a partial f
 
 ## SSH hosts
 
-An SSH host — typically an agent sandbox VM — can be an environment too, working like a dev container with plain `ssh` in place of `docker exec`: a root in the **Dev Containers** view, terminals, terminal links, and an entry in the Agents view with its herdr and terminal-detected agents. It is for browsing a sandbox **without Remote-SSH**: VS Code's remote server relays the host's git credentials to anything running on the remote, and plain `ssh` carries none of that. Nothing is installed on the remote, and it is never opened as a workspace folder, so a `.vscode/settings.json`, `tasks.json` or `launch.json` an agent writes there is never applied — it is just text.
+An SSH host — typically an agent sandbox VM — can be an environment too, working like a dev container with plain `ssh` in place of `docker exec`: a root in the **Sandboxes** view, terminals, terminal links, and an entry in the Agents view with its herdr and terminal-detected agents. It is for browsing a sandbox **without Remote-SSH**: VS Code's remote server relays the host's git credentials to anything running on the remote, and plain `ssh` carries none of that. Nothing is installed on the remote, and it is never opened as a workspace folder, so a `.vscode/settings.json`, `tasks.json` or `launch.json` an agent writes there is never applied — it is just text.
 
-Hosts come only from **user** settings (`devc-vscode.sshHosts` is application-scoped; a workspace cannot add one). **Add SSH Host…** (the `+` in the Dev Containers view's title bar, the Add Agent picker, or the command palette) lists the concrete aliases in `~/.ssh/config` and the files it includes, asks for a start directory, and adds the entry for you:
+Hosts come only from **user** settings (`devc-vscode.sshHosts` is application-scoped; a workspace cannot add one). **Add SSH Host…** (the `+` in the Sandboxes view's title bar, the Add Agent picker, or the command palette) lists the concrete aliases in `~/.ssh/config` and the files it includes, asks for a start directory, and adds the entry for you:
 
 ```jsonc
 "devc-vscode.sshHosts": [
@@ -65,6 +65,8 @@ The folder must be the root of a Git repository or worktree under your home fold
 **Send** pushes the folder's current branch. The first send creates the host repo, set to update its checkout when pushed to (`receive.denyCurrentBranch updateInstead`) and marked with the local path it came from (`git config devc.hostPath`); a repo at that path that wasn't created from this one is refused. Pushing to a branch that is already checked out on the host asks first, because a clean checkout there is updated in place; a checkout with uncommitted changes refuses the push. Nothing is force-pushed.
 
 **Fetch** downloads the host's branches into `<host>/<branch>` and opens a multi-file diff of the changed branch against where it split from yours. It **never merges or checks out anything**: your folder is unchanged until you merge yourself (for example from Source Control). Merging agent commits into an open, trusted folder applies them there at once, so files that can run code without you running them — `.vscode/`, `.devcontainer/`, `.github/`, `.husky/`, `.gitmodules`, `.gitattributes`, `.envrc`, and any `package.json`, `.npmrc`, `Makefile`, `*.code-workspace` or `.pre-commit-config.yaml` — are listed first in the diff and named in a warning. Fetch also warns when the host has uncommitted changes, which it can't bring back.
+
+**From the SSH host's tree.** In the Sandboxes view, folders on an SSH host that are worktrees of a local repo carry inline **Send from Local** (cloud-upload) and **Fetch to Local** (cloud-download) buttons, with the host's checked-out branch beside the name. They run the same Send and Fetch with the local worktree that mirrors the folder, so there is nothing to pick. A folder is marked when the host's `git worktree list` for the mirrored repo includes it; the local repos looked at are the ones each workspace folder is in, plus repos directly inside a workspace folder (so opening `~/code` works). A worktree that exists only on the host — one the agent created — shows `<branch> (not local)` with **Fetch to Local** only, which fetches into the local main worktree. A repo that was never sent has no folder on the host, so the first Send is still from the Explorer. The marks are computed on first expand and recomputed after each Send or Fetch, when workspace folders change, and on **Refresh**; worktrees added by other means show up after a Refresh.
 
 git's own ssh gets the same forced options as every other ssh here (`GIT_SSH_COMMAND`, overriding `core.sshCommand`), plus `BatchMode=yes`. The host needs Git 2.36 or newer. The review diff uses the built-in Git extension.
 
@@ -91,6 +93,8 @@ Deletes are permanent: neither a container nor an SSH host has a trash, so the c
 | `Dev Container FS: Add SSH Host…` | Pick an alias from `~/.ssh/config` and add it to `devc-vscode.sshHosts` |
 | `Dev Container FS: Send to SSH Host…` | Context menu on a local repo or worktree root — push its current branch to the same path under home on a configured SSH host ([details](#syncing-a-workspace-with-an-ssh-host)) |
 | `Dev Container FS: Fetch from SSH Host…` | Context menu on a local repo or worktree root — fetch the host's branches and open a review diff; never merges |
+| `Dev Container FS: Send from Local` | Inline on an SSH folder that mirrors a local worktree — Send that worktree to the host ([details](#syncing-a-workspace-with-an-ssh-host)) |
+| `Dev Container FS: Fetch to Local` | Inline on an SSH folder that is a worktree of a local repo — Fetch into the local worktree (or main worktree) and open the review diff |
 
 `New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection. `Focus Agent` is run by clicking an agent in the Agents view and is hidden from the palette.
 

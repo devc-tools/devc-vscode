@@ -6,6 +6,7 @@ import {
   ContainerSource,
   ContainerTreeDataProvider,
   FileOps,
+  SyncTargetSource,
   containerUri,
   isPathWithin,
   parseUriList,
@@ -485,12 +486,15 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
 suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
   const ROOT = '/home/ubuntu/work';
 
-  function sshFixture(reachable = true) {
+  function sshFixture(reachable = true, syncTargets?: SyncTargetSource) {
     const files = new FakeFileOps();
     files
       .dir('agent-vm', '/home/ubuntu')
       .dir('agent-vm', ROOT)
       .dir('agent-vm', `${ROOT}/src`)
+      .dir('agent-vm', `${ROOT}/repo`)
+      .dir('agent-vm', `${ROOT}/repo.worktrees`)
+      .dir('agent-vm', `${ROOT}/repo.worktrees/agent`)
       .file('agent-vm', `${ROOT}/src/a.ts`, 'a')
       .file('agent-vm', `${ROOT}/README.md`, 'readme')
       .dir('c1', '/')
@@ -517,7 +521,8 @@ suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
           }
           return ROOT;
         },
-      }
+      },
+      syncTargets
     );
     return { files, provider };
   }
@@ -550,16 +555,19 @@ suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
     assert.deepStrictEqual(
       children.map(c => [c.kind, c.uri.toString()]),
       [
+        ['directory', `devc-ssh://agent-vm${ROOT}/repo`],
+        ['directory', `devc-ssh://agent-vm${ROOT}/repo.worktrees`],
         ['directory', `devc-ssh://agent-vm${ROOT}/src`],
         ['file', `devc-ssh://agent-vm${ROOT}/README.md`],
       ]
     );
     assert.strictEqual(provider.getTreeItem(root).description, ROOT);
     // getParent walks back up to the root and stops there.
-    const [file] = await provider.getChildren(children[0]);
+    const src = children[2];
+    const [file] = await provider.getChildren(src);
     const parent = await provider.getParent(file);
-    assert.strictEqual(parent?.uri.toString(), children[0].uri.toString());
-    assert.strictEqual(await provider.getParent(children[0]), root);
+    assert.strictEqual(parent?.uri.toString(), src.uri.toString());
+    assert.strictEqual(await provider.getParent(src), root);
     assert.strictEqual(await provider.resolveSshRoot('agent-vm'), ROOT);
   });
 
@@ -585,7 +593,9 @@ suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
   test('drops move within a host and copy across', async () => {
     const { files, provider } = sshFixture();
     const root = (await provider.getChildren())[1];
-    const [src] = await provider.getChildren(root);
+    const src = (await provider.getChildren(root)).find(c =>
+      c.uri.path.endsWith('/src')
+    )!;
     const transfer = new vscode.DataTransfer();
     transfer.set(
       'text/uri-list',
@@ -605,5 +615,89 @@ suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
     await provider.handleDrop(srv, copy);
     assert.strictEqual(files.text('c1', '/srv/a.ts'), 'a');
     assert.ok(files.has('agent-vm', `${ROOT}/src/a.ts`));
+  });
+
+  const TARGETS: SyncTargetSource = {
+    targets: async host =>
+      new Map(
+        host === 'agent-vm'
+          ? [
+              [
+                `${ROOT}/repo`,
+                {
+                  kind: 'sync' as const,
+                  remotePath: `${ROOT}/repo`,
+                  localPath: '/Users/me/work/repo',
+                  mainWorktree: '/Users/me/work/repo',
+                  remoteBranch: 'main',
+                  localBranch: 'feature',
+                },
+              ],
+              [
+                `${ROOT}/repo.worktrees/agent`,
+                {
+                  kind: 'fetch' as const,
+                  remotePath: `${ROOT}/repo.worktrees/agent`,
+                  localPath: '/Users/me/work/repo',
+                  mainWorktree: '/Users/me/work/repo',
+                  remoteBranch: 'agent',
+                },
+              ],
+              // A container path with the same shape is never marked.
+              [
+                '/srv',
+                {
+                  kind: 'sync' as const,
+                  remotePath: '/srv',
+                  localPath: '/x',
+                  mainWorktree: '/x',
+                },
+              ],
+            ]
+          : []
+      ),
+  };
+
+  test('SSH worktrees of local repos are marked sync or fetch-only', async () => {
+    const { provider } = sshFixture(true, TARGETS);
+    const root = (await provider.getChildren())[1];
+    const [repo, worktrees, src] = await provider.getChildren(root);
+
+    const repoItem = provider.getTreeItem(repo);
+    assert.strictEqual(repoItem.contextValue, 'directory.sync');
+    assert.strictEqual(repoItem.description, 'main');
+    assert.strictEqual(
+      repoItem.tooltip,
+      'Worktree of /Users/me/work/repo — agent-vm has main, local has feature'
+    );
+
+    assert.strictEqual(provider.getTreeItem(worktrees).contextValue, 'directory');
+    const [agent] = await provider.getChildren(worktrees);
+    const agentItem = provider.getTreeItem(agent);
+    assert.strictEqual(agentItem.contextValue, 'directory.fetch');
+    assert.strictEqual(agentItem.description, 'agent (not local)');
+
+    const srcItem = provider.getTreeItem(src);
+    assert.strictEqual(srcItem.contextValue, 'directory');
+    assert.strictEqual(srcItem.description, undefined);
+
+    const container = (await provider.getChildren())[0];
+    const [srv] = await provider.getChildren(container);
+    assert.strictEqual(provider.getTreeItem(srv).contextValue, 'directory');
+    assert.strictEqual(provider.getTreeItem(srv).description, undefined);
+  });
+
+  test('a failing target source still lists children, unmarked', async () => {
+    const { provider } = sshFixture(true, {
+      targets: async () => {
+        throw new Error('ssh: connect to host agent-vm port 22: Connection refused');
+      },
+    });
+    const root = (await provider.getChildren())[1];
+    const children = await provider.getChildren(root);
+    assert.strictEqual(children.length, 4);
+    assert.ok(
+      children.every(c => !provider.getTreeItem(c).contextValue?.includes('.'))
+    );
   });
 });

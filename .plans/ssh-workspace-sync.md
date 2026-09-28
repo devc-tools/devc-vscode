@@ -130,6 +130,15 @@ For folder `F` and host `H`, in order. Any failure stops the flow and shows
    `refs/heads/B` already exists on the remote (the same listing's `refs` section), show:
    `showWarningMessage('<B> is checked out on <H> at <path>. Pushing updates the files there if that checkout is clean. Continue?', { modal: true }, 'Push')`.
    Anything but **Push** aborts. The first push into a fresh repo (unborn `B`) doesn't prompt.
+6b. **Seed the remote main worktree.** When `T !== P` and the remote main worktree (the first
+   record of step 5's listing) is on a branch `M` that isn't in `refs` (unborn), first run
+   `git -C T push H refs/heads/M:refs/heads/M`. If there's no local `refs/heads/M`, fail with
+   `<H>:<RP> is on <M>, which has no commits there and no local branch to send — send <P> first.`
+   **Gotcha:** receive-pack checks an `updateInstead` push into a linked worktree against the
+   *main* worktree's HEAD. While that HEAD is unborn, it diffs the linked worktree's index
+   against the empty tree and refuses with `Working directory has staged changes`, even when the
+   linked worktree is clean. This is reproduced on git 2.52. A first Send from a linked worktree
+   otherwise leaves exactly that state.
 7. `git -C T push H refs/heads/B:refs/heads/B`, with no `--force`. On failure, show git's last
    stderr line. That covers non-fast-forward and "updateInstead" refusals caused by a dirty
    remote checkout.

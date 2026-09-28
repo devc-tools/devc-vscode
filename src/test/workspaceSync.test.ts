@@ -10,6 +10,7 @@ import {
   SyncError,
   SyncUi,
   fetchFromSshHost,
+  findSyncTargets,
   gitSshCommand,
   isSensitivePath,
   makeGit,
@@ -322,6 +323,23 @@ suite('workspace sync end to end', function () {
     assert.strictEqual(git(remoteRepo(), 'symbolic-ref', '--short', 'HEAD'), 'main');
   });
 
+  test('a second send from a linked worktree updates the remote worktree', async () => {
+    const wt = path.join(localHome, 'code', 'r.worktrees', 'f');
+    git(repo, 'worktree', 'add', '-q', '-b', 'f', wt);
+    await sendToSshHost(wt, HOST, deps().deps);
+    // The remote main worktree got its branch, so it isn't unborn.
+    assert.strictEqual(git(remoteRepo(), 'rev-parse', 'main'), git(repo, 'rev-parse', 'main'));
+
+    write(path.join(wt, 'more.txt'), 'more\n');
+    git(wt, 'add', '.');
+    git(wt, 'commit', '-q', '-m', 'more');
+    await sendToSshHost(wt, HOST, deps('Push').deps);
+
+    const rt = path.join(remoteHome, 'code', 'r.worktrees', 'f');
+    assert.strictEqual(fs.readFileSync(path.join(rt, 'more.txt'), 'utf8'), 'more\n');
+    assert.strictEqual(git(rt, 'status', '--porcelain'), '');
+  });
+
   test("git's own ssh gets the forwarding options", async () => {
     const log = path.join(tmp, 'ssh.log');
     savedEnv.FAKE_SSH_LOG = process.env.FAKE_SSH_LOG;
@@ -471,5 +489,85 @@ suite('workspace sync end to end', function () {
       fetchFromSshHost(repo, HOST, deps().deps),
       "r hasn't been sent to vm yet — use Send to SSH Host first."
     );
+  });
+
+  // ── Sync targets for the SSH tree ─────────────────────────────────────────
+
+  test('a main and a linked worktree, both sent, are sync targets', async () => {
+    const wt = path.join(localHome, 'code', 'r.worktrees', 'f');
+    git(repo, 'worktree', 'add', '-q', '-b', 'f', wt);
+    await sendToSshHost(repo, HOST, deps().deps);
+    await sendToSshHost(wt, HOST, deps().deps);
+
+    const targets = await findSyncTargets([repo], HOST, deps().deps);
+    const rt = path.join(remoteHome, 'code', 'r.worktrees', 'f');
+    assert.deepStrictEqual(
+      [...targets.values()].sort((a, b) => a.remotePath.localeCompare(b.remotePath)),
+      [
+        {
+          kind: 'sync',
+          remotePath: remoteRepo(),
+          localPath: repo,
+          mainWorktree: repo,
+          remoteBranch: 'main',
+          localBranch: 'main',
+        },
+        {
+          kind: 'sync',
+          remotePath: rt,
+          localPath: wt,
+          mainWorktree: repo,
+          remoteBranch: 'f',
+          localBranch: 'f',
+        },
+      ]
+    );
+  });
+
+  test('child repos of a folder count only once sent', async () => {
+    const other = path.join(localHome, 'code', 'b');
+    fs.mkdirSync(other);
+    git(other, 'init', '-q', '-b', 'main');
+    await sendToSshHost(repo, HOST, deps().deps);
+
+    const targets = await findSyncTargets(
+      [path.join(localHome, 'code')],
+      HOST,
+      deps().deps
+    );
+    assert.deepStrictEqual([...targets.keys()], [remoteRepo()]);
+  });
+
+  test('a worktree only on the host is fetch-only, into the main worktree', async () => {
+    await sendToSshHost(repo, HOST, deps().deps);
+    const rt = path.join(remoteHome, 'code', 'r.worktrees', 'agent');
+    git(remoteRepo(), 'worktree', 'add', '-q', '-b', 'agent', rt);
+    const detached = path.join(remoteHome, 'code', 'r.worktrees', 'd');
+    git(remoteRepo(), 'worktree', 'add', '-q', '--detach', detached);
+
+    const targets = await findSyncTargets([repo], HOST, deps().deps);
+    assert.deepStrictEqual(targets.get(rt), {
+      kind: 'fetch',
+      remotePath: rt,
+      localPath: repo,
+      mainWorktree: repo,
+      remoteBranch: 'agent',
+    });
+    assert.strictEqual(targets.get(detached)?.kind, 'fetch');
+    assert.strictEqual(targets.get(detached)?.remoteBranch, undefined);
+  });
+
+  test('folders outside home and bare child repos give no targets', async () => {
+    const outside = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(outside);
+    git(outside, 'init', '-q', '-b', 'main');
+    const logged: string[] = [];
+    const d = { ...deps().deps, log: (line: string) => logged.push(line) };
+    assert.strictEqual((await findSyncTargets([outside], HOST, d)).size, 0);
+    assert.strictEqual(logged.length, 1);
+
+    const parent = path.join(localHome, 'code');
+    git(parent, 'init', '-q', '--bare', 'bare.git');
+    assert.strictEqual((await findSyncTargets([parent], HOST, deps().deps)).size, 0);
   });
 });

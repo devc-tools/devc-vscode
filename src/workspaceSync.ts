@@ -310,6 +310,9 @@ export interface SyncDeps {
   ui: SyncUi;
 }
 
+/** What running remote scripts needs. */
+type RemoteDeps = Pick<SyncDeps, 'shell' | 'log' | 'checkedHosts'>;
+
 interface RemoteResult {
   code: number;
   stdout: string;
@@ -317,7 +320,7 @@ interface RemoteResult {
 }
 
 async function remote(
-  deps: SyncDeps,
+  deps: RemoteDeps,
   host: string,
   script: string,
   args: string[]
@@ -342,7 +345,7 @@ function remoteError(host: string, res: RemoteResult): SyncError {
   );
 }
 
-async function checkRemoteGit(deps: SyncDeps, host: string): Promise<void> {
+async function checkRemoteGit(deps: RemoteDeps, host: string): Promise<void> {
   if (deps.checkedHosts.has(host)) {
     return;
   }
@@ -503,6 +506,35 @@ export async function sendToSshHost(
     );
     if (choice !== 'Push') {
       return;
+    }
+  }
+
+  // git checks a push into a linked worktree against the *main* worktree's
+  // HEAD: while that branch has no commits, every file in the linked
+  // worktree reads as staged and the push is refused. Give it its commits.
+  const mainBranch = before.worktrees[0]?.branch;
+  if (T !== P && mainBranch !== undefined && !before.refs.has(mainBranch)) {
+    const hasLocal =
+      (
+        await deps.git(T, [
+          'show-ref',
+          '--verify',
+          '--quiet',
+          `refs/heads/${mainBranch}`,
+        ])
+      ).code === 0;
+    if (!hasLocal) {
+      throw new SyncError(
+        `${host}:${RP} is on ${mainBranch}, which has no commits there and no local branch to send — send ${P} first.`
+      );
+    }
+    const seeded = await deps.git(
+      T,
+      ['push', host, `refs/heads/${mainBranch}:refs/heads/${mainBranch}`],
+      GIT_NETWORK_TIMEOUT_MS
+    );
+    if (seeded.code !== 0) {
+      throw new SyncError(gitFailureLine(seeded.stderr), true);
     }
   }
 
@@ -676,4 +708,165 @@ export async function fetchFromSshHost(
     ref,
     files,
   });
+}
+
+// ── Sync targets for the SSH tree ───────────────────────────────────────────
+
+/** An SSH folder that is a Git worktree of a local repo. */
+export interface SyncTarget {
+  /** `sync`: a local worktree mirrors it. `fetch`: it exists only remotely. */
+  kind: 'sync' | 'fetch';
+  remotePath: string;
+  /** The folder Send / Fetch run on: the local worktree, else `mainWorktree`. */
+  localPath: string;
+  /** The local repo's main worktree. */
+  mainWorktree: string;
+  /** Undefined for a detached or unborn HEAD. */
+  remoteBranch?: string;
+  localBranch?: string;
+}
+
+/** Local worktrees mirror rejected, already logged once. */
+const reportedUnsendable = new Set<string>();
+
+function realpathOrUndefined(p: string): string | undefined {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The main worktree of the non-bare repo `dir` is in, if any. */
+async function mainWorktreeOf(git: Git, dir: string): Promise<string | undefined> {
+  const res = await git(dir, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]);
+  const common = res.code === 0 ? realpathOrUndefined(res.stdout.trim()) : undefined;
+  return common && path.basename(common) === '.git'
+    ? path.dirname(common)
+    : undefined;
+}
+
+/**
+ * Main worktrees of the local repos behind `folders`: the repo each folder
+ * is in, and each immediate child folder with a `.git` entry. Bare repos are
+ * skipped.
+ */
+export async function findLocalRepos(folders: string[], git: Git): Promise<string[]> {
+  const dirs: string[] = [];
+  for (const folder of folders) {
+    const W = realpathOrUndefined(folder);
+    if (!W) {
+      continue;
+    }
+    dirs.push(W);
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(W, { withFileTypes: true });
+    } catch {
+      // Unreadable: only its own repo counts.
+    }
+    for (const entry of entries) {
+      const child = path.join(W, entry.name);
+      if (entry.isDirectory() && fs.existsSync(path.join(child, '.git'))) {
+        dirs.push(child);
+      }
+    }
+  }
+  const mains = await Promise.all(dirs.map(dir => mainWorktreeOf(git, dir)));
+  return [...new Set(mains.filter((p): p is string => p !== undefined))];
+}
+
+/** A local repo's worktrees that still exist, realpath'd. */
+export async function localWorktrees(git: Git, main: string): Promise<RemoteWorktree[]> {
+  const res = await git(main, ['worktree', 'list', '--porcelain', '-z']);
+  if (res.code !== 0) {
+    return [];
+  }
+  return parseWorktrees(res.stdout).worktrees.flatMap(w => {
+    const real = realpathOrUndefined(w.path);
+    return real ? [{ ...w, path: real }] : [];
+  });
+}
+
+/**
+ * The SSH folders on `host` that are worktrees of the local repos behind
+ * `folders`, by remote path. A repo not sent to `host` contributes nothing;
+ * an unreachable host rejects.
+ */
+export async function findSyncTargets(
+  folders: string[],
+  host: string,
+  deps: Pick<
+    SyncDeps,
+    'shell' | 'sshHome' | 'git' | 'localHome' | 'checkedHosts' | 'log'
+  >
+): Promise<Map<string, SyncTarget>> {
+  const repos = await findLocalRepos(folders, deps.git);
+  const targets = new Map<string, SyncTarget>();
+  if (!repos.length) {
+    return targets;
+  }
+  await checkRemoteGit(deps, host);
+  const remoteHome = await deps.sshHome(host);
+
+  const tryMirror = (local: string): string | undefined => {
+    try {
+      return mirror(local, deps.localHome, remoteHome);
+    } catch (err) {
+      if (!reportedUnsendable.has(local)) {
+        reportedUnsendable.add(local);
+        deps.log(`sync targets: skipping ${local}: ${(err as Error).message}`);
+      }
+      return undefined;
+    }
+  };
+
+  await Promise.all(
+    repos.map(async P => {
+      const RP = tryMirror(P);
+      if (RP === undefined) {
+        return;
+      }
+      const res = await remote(deps, host, WORKTREES_SCRIPT, [RP]);
+      const remoteList = res.code === 0 ? parseWorktrees(res.stdout).worktrees : [];
+      // A folder inside some other repo lists that repo's worktrees.
+      if (remoteList[0]?.path !== RP) {
+        return;
+      }
+      const locals = new Map<string, RemoteWorktree>();
+      for (const w of await localWorktrees(deps.git, P)) {
+        const mirrored = tryMirror(w.path);
+        if (mirrored !== undefined) {
+          locals.set(mirrored, w);
+        }
+      }
+      for (const r of remoteList) {
+        const local = locals.get(r.path);
+        targets.set(
+          r.path,
+          local
+            ? {
+                kind: 'sync',
+                remotePath: r.path,
+                localPath: local.path,
+                mainWorktree: P,
+                remoteBranch: r.branch,
+                localBranch: local.branch,
+              }
+            : {
+                kind: 'fetch',
+                remotePath: r.path,
+                localPath: P,
+                mainWorktree: P,
+                remoteBranch: r.branch,
+              }
+        );
+      }
+    })
+  );
+  return targets;
 }

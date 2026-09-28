@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The Explorer tree view is renamed from **Dev Containers** to **Sandboxes**, since it holds SSH hosts as well as dev containers. Its view id (`devc-vscode.containers`) is unchanged.
+
 - Window snapshots shared between windows are now version 5 (they carry SSH hosts); windows running an older build of the extension ignore them until updated.
 
 - Container files are now shown in a **Dev Containers** tree view in the Explorer panel instead of being added as workspace folders. No window reload, no multi-root conversion, and no stale container roots restored after a reload.
@@ -12,6 +14,7 @@
 
 ### Added
 
+- **Send from Local / Fetch to Local** inline on SSH folders in the Sandboxes view that are Git worktrees of a local repo (the local repos behind the workspace folders, matched at the mirrored path against the host's worktree list). The host's branch shows beside the folder. Worktrees that exist only on the host are marked `(not local)` and offer Fetch into the local main worktree.
 - **Send to SSH Host… / Fetch from SSH Host…** on local folders in the Explorer: push a repo's current branch to a configured SSH host at the same home-relative path (worktrees become worktrees there), and fetch the host's branches back into a review diff that lists files that can run code first. Fetch never merges or checks out. git's ssh gets the same forced-off forwarding as the extension's own.
 - **SSH hosts as environments.** Hosts from the new user-only `devc-vscode.sshHosts` setting get a root in the Dev Containers view (`devc-ssh://<host>/<path>`, read and written with coreutils over plain `ssh`), terminals attached to this window's herdr session on the host, terminal links, and an Agents view entry with its herdr and terminal-detected agents, Add Agent, and Stop / Delete herdr Session. Every ssh forces agent, X11 and port forwarding off. No VS Code server is installed on the host and it is never a workspace folder; one added by hand is removed. **Add SSH Host…** adds an alias from `~/.ssh/config`. New settings: `devc-vscode.sshHosts`, `devc-vscode.sshPath`.
 

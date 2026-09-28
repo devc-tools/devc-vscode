@@ -8,6 +8,8 @@
 
 - [SSH Workspace Sync](ssh-workspace-sync.md) — Send / Fetch a workspace folder's Git repo to an SSH host at the mirrored home-relative path (worktrees mirrored as worktrees), fetch opens a review diff and never merges, with sensitive paths flagged.
 
+- [SSH Tree Sync Actions](ssh-tree-sync-actions.md) — inline Send / Fetch on SSH tree folders that are worktrees of a local repo (matched against the remote worktree listing at the mirrored path), plus fetch-only for worktrees that exist only on the host.
+
 ### Completed
 
 - [Container File Tree as a Contributed Explorer View](implemented/explorer-tree-view.md) — replace workspace-folder grafting with a `TreeView` in the Explorer panel, backed by the existing filesystem provider. ✅ Done (host-only validation not run)
@@ -25,3 +27,4 @@
 | 4 | [agents-tree-redesign.md](implemented/agents-tree-redesign.md) | Workspace / Other Workspaces roots, environment nodes, Add Agent launch flow | ✅ Done |
 | 5 | [ssh-environments.md](ssh-environments.md) | SSH hosts as environments over a shared docker/ssh runner seam; host allowlist in application-scoped settings, Add SSH Host from `~/.ssh/config` | in progress |
 | 6 | [ssh-workspace-sync.md](ssh-workspace-sync.md) | Git-based Send / Fetch to SSH hosts at mirrored paths, review diff on fetch (depends on phase 5) | in progress |
+| 7 | [ssh-tree-sync-actions.md](ssh-tree-sync-actions.md) | Send / Fetch actions on synced folders in the Sandboxes view's SSH tree (depends on phase 6) | in progress |

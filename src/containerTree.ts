@@ -2,6 +2,7 @@ import * as posix from 'path/posix';
 import * as vscode from 'vscode';
 import { execDocker } from './docker';
 import { SSH_SCHEME, SshHostInfo, sshUri } from './sshFs';
+import type { SyncTarget } from './workspaceSync';
 
 export const SCHEME = 'devc-vscode';
 
@@ -56,6 +57,14 @@ export interface SshHostSource {
   root(host: string): Promise<string>;
 }
 
+/**
+ * Which SSH folders are worktrees of a local repo, by remote path. Injected
+ * so the tree can be exercised without git or ssh.
+ */
+export interface SyncTargetSource {
+  targets(host: string): Promise<Map<string, SyncTarget>>;
+}
+
 export type ContainerNode =
   | {
       kind: 'container';
@@ -89,6 +98,8 @@ export type ContainerNode =
       /** The URI's authority: a container id, or an SSH host. */
       containerId: string;
       uri: vscode.Uri;
+      /** For an SSH directory: the local repo it syncs with. */
+      sync?: SyncTarget;
     };
 
 /** The key SSH roots use in `roots` and in the attached set. */
@@ -175,7 +186,8 @@ export class ContainerTreeDataProvider
     private readonly source: ContainerSource,
     private readonly files: FileOps,
     private readonly confirmOverwrite: ConfirmOverwrite = defaultConfirmOverwrite,
-    private readonly ssh?: SshHostSource
+    private readonly ssh?: SshHostSource,
+    private readonly syncTargets?: SyncTargetSource
   ) {}
 
   refresh(node?: ContainerNode): void {
@@ -243,11 +255,33 @@ export class ContainerTreeDataProvider
       // better than an error toast on every refresh.
       return [];
     }
-    return sortEntries(entries).map(([name, type]) => ({
-      kind: type === vscode.FileType.Directory ? 'directory' : 'file',
-      containerId: dir.authority,
-      uri: dir.with({ path: posix.join(dir.path, name) }),
-    }));
+    const targets = await this.targetsFor(dir);
+    return sortEntries(entries).map(([name, type]) => {
+      const uri = dir.with({ path: posix.join(dir.path, name) });
+      return type === vscode.FileType.Directory
+        ? {
+            kind: 'directory',
+            containerId: dir.authority,
+            uri,
+            sync: targets?.get(normalizePath(uri.path)),
+          }
+        : { kind: 'file', containerId: dir.authority, uri };
+    });
+  }
+
+  /** An SSH URI's host's sync targets; undefined when none can be known. */
+  private async targetsFor(
+    uri: vscode.Uri
+  ): Promise<Map<string, SyncTarget> | undefined> {
+    if (uri.scheme !== SSH_SCHEME || !this.syncTargets) {
+      return undefined;
+    }
+    try {
+      return await this.syncTargets.targets(uri.authority);
+    } catch {
+      // Unmarked beats unlisted.
+      return undefined;
+    }
   }
 
   /**
@@ -324,6 +358,19 @@ export class ContainerTreeDataProvider
     );
     item.id = node.uri.toString();
     item.contextValue = node.kind;
+    if (node.kind === 'directory' && node.sync) {
+      const { sync } = node;
+      const host = node.uri.authority;
+      const remoteBranch = sync.remoteBranch ?? 'detached';
+      item.contextValue = `directory.${sync.kind}`;
+      if (sync.kind === 'sync') {
+        item.description = remoteBranch;
+        item.tooltip = `Worktree of ${sync.localPath} — ${host} has ${remoteBranch}, local has ${sync.localBranch ?? 'detached'}`;
+      } else {
+        item.description = `${remoteBranch} (not local)`;
+        item.tooltip = `Worktree on ${host} only — Fetch brings it into ${sync.mainWorktree}`;
+      }
+    }
     if (!isDir) {
       item.command = {
         command: 'vscode.open',
@@ -398,10 +445,14 @@ export class ContainerTreeDataProvider
     } catch {
       // Fall through as a directory; reveal fails cleanly if it isn't there.
     }
+    if (type !== vscode.FileType.Directory) {
+      return { kind: 'file', containerId: uri.authority, uri };
+    }
     return {
-      kind: type === vscode.FileType.Directory ? 'directory' : 'file',
+      kind: 'directory',
       containerId: uri.authority,
       uri,
+      sync: (await this.targetsFor(uri))?.get(normalizePath(uri.path)),
     };
   }
 

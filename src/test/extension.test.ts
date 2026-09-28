@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DevContainerFileSystemProvider } from '../devcontainerFs';
@@ -260,5 +261,58 @@ suite('DevContainerFileSystemProvider (live container)', function () {
     );
     const content = await vscode.workspace.fs.readFile(u(`${root}/hello.txt`));
     assert.ok(content.length > 0);
+  });
+});
+
+suite('Sandboxes view menus', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8')
+  ) as {
+    contributes: { menus: Record<string, { command: string; when: string }[]> };
+  };
+
+  /** Whether a `when` clause's viewItem test accepts `value`. */
+  function matchesViewItem(when: string, value: string): boolean {
+    const regex = /viewItem =~ \/(.*?)\/(?:\s|$)/.exec(when);
+    if (regex) {
+      return new RegExp(regex[1]).test(value);
+    }
+    const equals = /viewItem == (\S+)/.exec(when);
+    return equals ? equals[1] === value : true;
+  }
+
+  test('marked folders keep the plain folder actions', () => {
+    const entries = manifest.contributes.menus['view/item/context'].filter(
+      e =>
+        e.when.includes('view == devc-vscode.containers') &&
+        [
+          'devc-vscode.newFile',
+          'devc-vscode.newFolder',
+          'devc-vscode.rename',
+          'devc-vscode.delete',
+        ].includes(e.command)
+    );
+    assert.strictEqual(entries.length, 4);
+    for (const e of entries) {
+      for (const value of ['directory', 'directory.sync', 'directory.fetch']) {
+        assert.ok(matchesViewItem(e.when, value), `${e.command}: ${value}`);
+      }
+    }
+  });
+
+  test('Send is on synced folders only, Fetch on both kinds', () => {
+    const menu = manifest.contributes.menus['view/item/context'];
+    const whens = (command: string) =>
+      menu.filter(e => e.command === command).map(e => e.when);
+    for (const when of whens('devc-vscode.sendFromTree')) {
+      assert.ok(matchesViewItem(when, 'directory.sync'));
+      assert.ok(!matchesViewItem(when, 'directory.fetch'));
+      assert.ok(!matchesViewItem(when, 'directory'));
+    }
+    for (const when of whens('devc-vscode.fetchFromTree')) {
+      assert.ok(matchesViewItem(when, 'directory.sync'));
+      assert.ok(matchesViewItem(when, 'directory.fetch'));
+      assert.ok(!matchesViewItem(when, 'directory'));
+    }
   });
 });
