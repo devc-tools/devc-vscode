@@ -94,10 +94,13 @@ None new. The host list is `devc-vscode.sshHosts`.
 | `devc-vscode.fetchFromSshHost` | `Fetch from SSH Host…` | `Dev Container FS` |
 
 - `explorer/context`, group `devc@1`, for both sync commands:
-  `explorerResourceIsRoot && resourceScheme == file && config.devc-vscode.sshHosts != ''`.
-  **Gotcha:** `config.<array>` in a `when` clause is truthy for a non-empty array. If an empty
-  array still shows the item on the target VS Code version, drop that term and let the handler
-  report `No SSH hosts configured — use Add SSH Host…`.
+  `explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh`.
+  The handler rejects a non-`file:` URI, and a folder that isn't a repo or worktree root fails
+  with decision 2's message. That makes it a repo-root action rather than a workspace-root one.
+  **Gotcha:** Explorer resource context keys are unset on the first right-click, so a positive
+  `resourceScheme == file` (or `explorerResourceIsRoot`) test can hide the item. This is the
+  same reasoning as `openFolderInContainer`'s `when`. With no hosts configured, the handler
+  reports `No SSH hosts configured — use Add SSH Host…`.
 - Invoked from the palette, the sync commands pick the folder: the only `file:` workspace
   folder, else a `showWorkspaceFolderPick`.
 - **Host choice**, for both commands: with one configured host, use it. With several,
@@ -113,7 +116,12 @@ For folder `F` and host `H`, in order. Any failure stops the flow and shows
 1. Resolve `T`, `C`, `P`, `RP` and `RT` (decisions 1–2).
 2. `B` = `git -C T symbolic-ref --quiet --short HEAD`. If it fails, error with
    `<T> is on a detached HEAD — check out a branch to send it.`
-3. Run the remote script `ensure-repo` with args `RP P B` (below). Exit 3 means
+3. Run the remote script `ensure-repo` with args `RP P <initBranch>` (below). `<initBranch>` is
+   `B` when `T === P`, otherwise the local main worktree's branch
+   (`git -C P symbolic-ref --quiet --short HEAD`). A new repo's main worktree must not start on
+   `B` when `B` needs its own worktree, because Git won't check one branch out in two worktrees.
+   If `P` is detached, fail with
+   `<P> (the main worktree) is on a detached HEAD — check out a branch there first.` Exit 3 means
    `<H>:<RP> exists and is not a Git repository.` Exit 4 is the decision 6 message.
 4. Ensure the local remote (decision 3): `git -C T remote add H H:RP` when absent.
 5. Run the remote script `worktrees` with arg `RP`, and parse its output (below) into
@@ -238,29 +246,30 @@ host per session before the first remote script, and fail with
 
 ## Checklist
 
-- [ ] Pure module: `mirror`, path-character check, worktree-listing parser, sensitive-path matcher, `GIT_SSH_COMMAND` builder
-- [ ] Git runner (`execFile`, env from decision 4, timeouts, `Devc` logging)
-- [ ] Remote scripts as constants, run via `SshShell`; remote Git version check
-- [ ] `sendToSshHost` flow (Send steps 1–10)
-- [ ] `fetchFromSshHost` flow (Fetch steps 1–10), review via `vscode.changes` + Git extension `toGitUri`
-- [ ] `package.json`: commands and menus
-- [ ] Tests (see Validation)
-- [ ] README: a new "Syncing a workspace with an SSH host" section (mirroring rule, Send / Fetch behavior, hand-off rule, "fetch never merges" + sensitive paths, only committed work moves), the two commands in the commands table
-- [ ] `ssh-environments.md` "Not in this plan": replace the "Open Folder in SSH Host … host paths don't map" bullet with a pointer to this plan
-- [ ] CHANGELOG entry
+- [x] Pure module: `mirror`, path-character check, worktree-listing parser, sensitive-path matcher, `GIT_SSH_COMMAND` builder
+- [x] Git runner (`execFile`, env from decision 4, timeouts, `Devc` logging)
+- [x] Remote scripts as constants, run via `SshShell`; remote Git version check
+- [x] `sendToSshHost` flow (Send steps 1–10)
+- [x] `fetchFromSshHost` flow (Fetch steps 1–10), review via `vscode.changes` + Git extension `toGitUri`
+- [x] `package.json`: commands and menus
+- [x] Tests (see Validation)
+- [x] README: a new "Syncing a workspace with an SSH host" section (mirroring rule, Send / Fetch behavior, hand-off rule, "fetch never merges" + sensitive paths, only committed work moves), the two commands in the commands table
+- [x] `ssh-environments.md` "Not in this plan": replace the "Open Folder in SSH Host … host paths don't map" bullet with a pointer to this plan
+- [x] CHANGELOG entry
 
 ## Validation
 
 ### Offline (in a dev container: no Docker, no ssh host)
 
-- [ ] `npm run compile` and `npm run lint` exit 0
-- [ ] `xvfb-run -a npm test` exits 0 with the new suites **passing, not skipped**
-- [ ] Unit tests cover:
+- [x] `npm run compile` and `npm run lint` exit 0
+- [ ] `xvfb-run -a npm test` exits 0 with the new suites **passing, not skipped**. Not run yet: the devc-dev container has no Xvfb or `libglib-2.0`, so VS Code's test host can't start there. `src/test/workspaceSync.test.ts` has no `vscode` import, and `npx mocha --ui tdd out/test/workspaceSync.test.js` passes 24/24 there.
+- [x] Unit tests cover:
   - `mirror`: home itself, a nested path, outside home, a sibling prefix (`/Users/bo` vs `/Users/bob`), and rejected characters
   - worktree-listing parsing: main-only, main plus linked, detached, unborn branch, and a path with a space
   - the sensitive-path matcher against every pattern, plus non-matches (`src/package.json.bak`, `docs/.vscode.md`)
   - the `GIT_SSH_COMMAND` string: contains every `SSH_SAFETY_OPTIONS` flag, `BatchMode=yes`, and a quoted `sshPath` with a space
-- [ ] **End-to-end with a fake ssh:** a test script set as `devc-vscode.sshPath` that ignores its options and host, sets `HOME` to a temp "remote home", and runs `sh -c "<last argument>"`. It serves both `SshShell` and git's `GIT_SSH_COMMAND`. Local and remote homes are both temp dirs (make the local home injectable). Cases:
+- [x] **End-to-end with a fake ssh:** a test script set as `devc-vscode.sshPath` that ignores its options and host, sets `HOME` to a temp "remote home", and runs `sh -c "<last argument>"`. It serves both `SshShell` and git's `GIT_SSH_COMMAND`. Local and remote homes are both temp dirs (make the local home injectable). Cases:
+  *(As built, the fake ssh is passed as `sshPath` to `SshShell` and `gitSshCommand` through injected `SyncDeps`, not set in settings. A further case checks that git's own ssh receives every forwarding option.)*
   - First Send from a main worktree creates `RP` with `devc.hostPath`, `receive.denyCurrentBranch=updateInstead`, and `B` checked out with the files present
   - Send from a linked worktree `~/code/r.worktrees/f` creates the remote worktree `~/code/r.worktrees/f` on branch `f`
   - A second Send with new commits updates the remote checkout (clean), and is refused with git's error when the remote checkout is dirty

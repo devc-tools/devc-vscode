@@ -12,6 +12,7 @@
 
 ### Added
 
+- **Send to SSH Host… / Fetch from SSH Host…** on local folders in the Explorer: push a repo's current branch to a configured SSH host at the same home-relative path (worktrees become worktrees there), and fetch the host's branches back into a review diff that lists files that can run code first. Fetch never merges or checks out. git's ssh gets the same forced-off forwarding as the extension's own.
 - **SSH hosts as environments.** Hosts from the new user-only `devc-vscode.sshHosts` setting get a root in the Dev Containers view (`devc-ssh://<host>/<path>`, read and written with coreutils over plain `ssh`), terminals attached to this window's herdr session on the host, terminal links, and an Agents view entry with its herdr and terminal-detected agents, Add Agent, and Stop / Delete herdr Session. Every ssh forces agent, X11 and port forwarding off. No VS Code server is installed on the host and it is never a workspace folder; one added by hand is removed. **Add SSH Host…** adds an alias from `~/.ssh/config`. New settings: `devc-vscode.sshHosts`, `devc-vscode.sshPath`.
 
 - Terminal links resolve `~` (against the container user's `$HOME`) and relative paths (against the bind-mount destination for the terminal's host folder). Paths that cannot be resolved with certainty are left as plain text.

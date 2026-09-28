@@ -56,6 +56,18 @@ Every ssh the extension runs forces `ForwardAgent=no`, `ForwardX11=no`, `ClearAl
 
 The host needs GNU coreutils/findutils and procps, like a container. Keep output out of the remote shell's startup files for non-interactive shells (Ubuntu's `.bashrc` already returns early): anything printed there corrupts file reads. A host without herdr gets no Agents view entry, since that entry is driven by herdr's watcher.
 
+## Syncing a workspace with an SSH host
+
+**Send to SSH Host…** and **Fetch from SSH Host…** (right-click a local folder in the Explorer, or the command palette) move a Git repo's commits to a configured SSH host and back, with plain `git` over plain `ssh`. You always start the transfer; the host never connects back. Only committed work moves, in either direction.
+
+The folder must be the root of a Git repository or worktree under your home folder. It lives at the **same path relative to home** on the host: `~/code/some-repo` goes to `~/code/some-repo` there, and a worktree `~/code/some-repo.worktrees/some-feature` becomes a worktree at `~/code/some-repo.worktrees/some-feature` of the host's `~/code/some-repo`. So paths the agent prints read the same as yours. The local repo gets a Git remote named after the host alias (`agent-vm`), shared by all its worktrees.
+
+**Send** pushes the folder's current branch. The first send creates the host repo, set to update its checkout when pushed to (`receive.denyCurrentBranch updateInstead`) and marked with the local path it came from (`git config devc.hostPath`); a repo at that path that wasn't created from this one is refused. Pushing to a branch that is already checked out on the host asks first, because a clean checkout there is updated in place; a checkout with uncommitted changes refuses the push. Nothing is force-pushed.
+
+**Fetch** downloads the host's branches into `<host>/<branch>` and opens a multi-file diff of the changed branch against where it split from yours. It **never merges or checks out anything**: your folder is unchanged until you merge yourself (for example from Source Control). Merging agent commits into an open, trusted folder applies them there at once, so files that can run code without you running them — `.vscode/`, `.devcontainer/`, `.github/`, `.husky/`, `.gitmodules`, `.gitattributes`, `.envrc`, and any `package.json`, `.npmrc`, `Makefile`, `*.code-workspace` or `.pre-commit-config.yaml` — are listed first in the diff and named in a warning. Fetch also warns when the host has uncommitted changes, which it can't bring back.
+
+git's own ssh gets the same forced options as every other ssh here (`GIT_SSH_COMMAND`, overriding `core.sshCommand`), plus `BatchMode=yes`. The host needs Git 2.36 or newer. The review diff uses the built-in Git extension.
+
 ## Using the tree
 
 | Action | How |
@@ -77,6 +89,8 @@ Deletes are permanent: neither a container nor an SSH host has a trash, so the c
 | `Dev Container FS: Refresh Container Files` | Re-read the tree |
 | `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` (rejected on container folders) |
 | `Dev Container FS: Add SSH Host…` | Pick an alias from `~/.ssh/config` and add it to `devc-vscode.sshHosts` |
+| `Dev Container FS: Send to SSH Host…` | Context menu on a local repo or worktree root — push its current branch to the same path under home on a configured SSH host ([details](#syncing-a-workspace-with-an-ssh-host)) |
+| `Dev Container FS: Fetch from SSH Host…` | Context menu on a local repo or worktree root — fetch the host's branches and open a review diff; never merges |
 
 `New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection. `Focus Agent` is run by clicking an agent in the Agents view and is hidden from the palette.
 

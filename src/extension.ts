@@ -1,4 +1,6 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
@@ -57,6 +59,15 @@ import {
   hostTtySize,
 } from './hostProcesses';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
+import {
+  ReviewRequest,
+  SyncDeps,
+  SyncError,
+  fetchFromSshHost,
+  gitEnv,
+  makeGit,
+  sendToSshHost,
+} from './workspaceSync';
 import {
   DockerShell,
   SshShell,
@@ -354,6 +365,12 @@ export function activate(context: vscode.ExtensionContext) {
     openFolderInContainer(uri)
   );
   register('devc-vscode.addSshHost', () => addSshHost());
+  register('devc-vscode.sendToSshHost', (uri?: vscode.Uri) =>
+    syncWithSshHost(uri, 'send')
+  );
+  register('devc-vscode.fetchFromSshHost', (uri?: vscode.Uri) =>
+    syncWithSshHost(uri, 'fetch')
+  );
 
   context.subscriptions.push(
     vscode.window.registerTerminalLinkProvider({
@@ -652,6 +669,159 @@ async function openFolderInContainer(uri: vscode.Uri): Promise<void> {
     return;
   }
   openContainerTerminal(uri?.fsPath, getOpenFolderCommand());
+}
+
+// ── Workspace sync with SSH hosts ──────────────────────────────────────────
+
+/** Hosts whose remote git version passed this session. */
+const syncCheckedHosts = new Set<string>();
+
+/**
+ * Send to or fetch from an SSH host: the folder the Explorer passed (or one
+ * picked from the workspace), then a host, then the flow in workspaceSync.
+ */
+async function syncWithSshHost(
+  uri: vscode.Uri | undefined,
+  direction: 'send' | 'fetch'
+): Promise<void> {
+  // The menu tests `resourceScheme != …` for the same reason as Open Folder
+  // in Container (see openFolderInContainer), so reject remote folders here.
+  if (uri && uri.scheme !== 'file') {
+    vscode.window.showErrorMessage(
+      'Send and Fetch work on local folders only.'
+    );
+    return;
+  }
+  const folder = uri?.fsPath ?? (await pickLocalFolder());
+  if (!folder) {
+    return;
+  }
+  const host = await pickSyncHost();
+  if (!host) {
+    return;
+  }
+  const verb = direction === 'send' ? 'Sending' : 'Fetching';
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `${verb} ${path.basename(folder)} — ${sshLabel(host.host)}`,
+      },
+      () =>
+        (direction === 'send' ? sendToSshHost : fetchFromSshHost)(
+          folder,
+          host.host,
+          syncDeps()
+        )
+    );
+  } catch (err) {
+    showSyncError(err);
+  }
+}
+
+async function pickLocalFolder(): Promise<string | undefined> {
+  const folders = (vscode.workspace.workspaceFolders ?? []).filter(
+    f => f.uri.scheme === 'file'
+  );
+  if (folders.length <= 1) {
+    if (!folders.length) {
+      vscode.window.showErrorMessage('Open a folder to send or fetch.');
+    }
+    return folders[0]?.uri.fsPath;
+  }
+  return (await vscode.window.showWorkspaceFolderPick())?.uri.fsPath;
+}
+
+async function pickSyncHost(): Promise<SshHostInfo | undefined> {
+  const hosts = getSshHosts();
+  if (hosts.length <= 1) {
+    if (!hosts.length) {
+      vscode.window.showErrorMessage(
+        'No SSH hosts configured — use Add SSH Host…'
+      );
+    }
+    return hosts[0];
+  }
+  const picked = await vscode.window.showQuickPick(
+    hosts.map(h => ({ label: h.label, description: h.host, host: h })),
+    { placeHolder: 'SSH host' }
+  );
+  return picked?.host;
+}
+
+function showSyncError(err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  const offerLog = !(err instanceof SyncError) || err.showLog;
+  if (!(err instanceof SyncError)) {
+    agentLog?.error(`workspace sync: ${message}`);
+  }
+  vscode.window
+    .showErrorMessage(message, ...(offerLog ? ['Show Log'] : []))
+    .then(choice => {
+      if (choice === 'Show Log') {
+        agentLog?.show();
+      }
+    });
+}
+
+function syncDeps(): SyncDeps {
+  const log = (line: string) => agentLog?.info(line);
+  return {
+    shell: sshShell,
+    sshHome,
+    git: makeGit(gitEnv(getSshPath(), getControlDir()), log),
+    localHome: fs.realpathSync(os.homedir()),
+    checkedHosts: syncCheckedHosts,
+    log,
+    ui: {
+      warn: (message, modal, ...buttons) =>
+        vscode.window.showWarningMessage(message, { modal }, ...buttons),
+      info: (message, ...buttons) =>
+        vscode.window.showInformationMessage(message, ...buttons),
+      pick: async (items, placeHolder) =>
+        (await vscode.window.showQuickPick(items, { placeHolder }))?.label,
+      openReview,
+      error: showSyncError,
+    },
+  };
+}
+
+/** The slice of the built-in Git extension's API (git.d.ts) used here. */
+interface GitExtensionApi {
+  toGitUri(uri: vscode.Uri, ref: string): vscode.Uri;
+}
+
+async function openReview(request: ReviewRequest): Promise<void> {
+  const extension = vscode.extensions.getExtension<{
+    getAPI(version: 1): GitExtensionApi;
+  }>('vscode.git');
+  let api: GitExtensionApi | undefined;
+  try {
+    api = (extension?.isActive
+      ? extension.exports
+      : await extension?.activate()
+    )?.getAPI(1);
+  } catch {
+    api = undefined;
+  }
+  if (!api) {
+    throw new SyncError(
+      "The built-in Git extension is disabled — it's needed to show the review diff."
+    );
+  }
+  const resources = request.files.map(file => {
+    const uri = vscode.Uri.file(path.join(request.root, file.path));
+    return [
+      uri,
+      file.status === 'A' ? undefined : api.toGitUri(uri, request.base),
+      file.status === 'D' ? undefined : api.toGitUri(uri, request.ref),
+    ];
+  });
+  await vscode.commands.executeCommand(
+    'vscode.changes',
+    request.title,
+    resources
+  );
 }
 
 /**

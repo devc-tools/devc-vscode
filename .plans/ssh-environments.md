@@ -496,7 +496,7 @@ On activation and on every `workspace.onDidChangeWorkspaceFolders`:
 
 - Starting, stopping, provisioning or deleting the VM itself (no `devc up` / `stop` / `down` equivalent).
 - Renaming the "Dev Containers" view or rebranding environments (e.g. "Sandboxes").
-- An "Open Folder in SSH Host" for host folders: host paths don't map to remote paths.
+- An "Open Folder in SSH Host" for host folders. [ssh-workspace-sync.md](ssh-workspace-sync.md) later mapped host folders to remote paths by mirroring them under home, for Send / Fetch.
 - A per-workspace root on a shared host (one `root` per host).
 - Watching remote file changes (`watch()` stays a no-op; refresh is manual, as for containers).
 - Password or keyboard-interactive auth for FS and herdr calls (`BatchMode=yes`; keys only). Terminals can prompt.

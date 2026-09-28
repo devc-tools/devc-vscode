@@ -124,6 +124,16 @@
         "icon": "$(add)"
       },
       {
+        "command": "devc-vscode.sendToSshHost",
+        "title": "Send to SSH Host…",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.fetchFromSshHost",
+        "title": "Fetch from SSH Host…",
+        "category": "Dev Container FS"
+      },
+      {
         "command": "devc-vscode.newFile",
         "title": "New File",
         "category": "Dev Container FS"
@@ -312,6 +322,16 @@
         {
           "command": "devc-vscode.openFolderInContainer",
           "when": "explorerResourceIsFolder && resourceScheme != devc-vscode"
+        },
+        {
+          "command": "devc-vscode.sendToSshHost",
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh",
+          "group": "devc@1"
+        },
+        {
+          "command": "devc-vscode.fetchFromSshHost",
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh",
+          "group": "devc@1"
         }
       ],
       "commandPalette": [
