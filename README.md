@@ -36,19 +36,39 @@ Clicking an agent owned by another window drops a focus request for that window,
 
 Files are written to a temp name and renamed, so a reader never sees a partial file. A window removes its file when it closes; a file left by a crashed window is dropped once its extension host process is gone. A re-read every 10 s covers any missed file-watch event.
 
+## SSH hosts
+
+An SSH host — typically an agent sandbox VM — can be an environment too, working like a dev container with plain `ssh` in place of `docker exec`: a root in the **Dev Containers** view, terminals, terminal links, and an entry in the Agents view with its herdr and terminal-detected agents. It is for browsing a sandbox **without Remote-SSH**: VS Code's remote server relays the host's git credentials to anything running on the remote, and plain `ssh` carries none of that. Nothing is installed on the remote, and it is never opened as a workspace folder, so a `.vscode/settings.json`, `tasks.json` or `launch.json` an agent writes there is never applied — it is just text.
+
+Hosts come only from **user** settings (`devc-vscode.sshHosts` is application-scoped; a workspace cannot add one). **Add SSH Host…** (the `+` in the Dev Containers view's title bar, the Add Agent picker, or the command palette) lists the concrete aliases in `~/.ssh/config` and the files it includes, asks for a start directory, and adds the entry for you:
+
+```jsonc
+"devc-vscode.sshHosts": [
+  { "host": "agent-vm", "root": "/home/ubuntu/work", "label": "Sandbox" }
+]
+```
+
+`host` must be an alias ssh can reach with keys alone — accept its host key once by running `ssh <host>` in a terminal. `root` is where the tree, terminals and agents start (default: the remote home). A `devc-ssh://` URI naming any other host is refused before anything is run, since its host becomes an ssh argument.
+
+A configured host is pinned: every window shows it, and it is simply up or not — the extension never starts, stops or provisions it. In the Agents view it shows while it is reachable. Each window uses its own herdr session there, named as its host workspace session is (`devc-vscode.herdrSession`, else the `herdrs` name for the workspace), because one host serves many projects. **Attach Terminal** opens `ssh -t <host>` attached to that session (a login shell when herdr is not installed); **Add Agent** starts the session when needed and launches the agent in `root`; **Stop / Delete herdr Session** end only that session. Other windows' agents on the host show under Other Workspaces. An unreachable host shows **Cannot reach <host>** in the tree with ssh's error as the tooltip, and is retried every 5 s, backing off to a minute.
+
+Every ssh the extension runs forces `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes` and `PermitLocalCommand=no` on the command line, overriding `~/.ssh/config` — terminals included, so the host's ssh agent never reaches the remote. File and herdr commands also use `BatchMode=yes` (keys only, no prompts) and share one connection per host through a control socket in `/tmp/devc-<uid>` (skipped when that directory is not private to you).
+
+The host needs GNU coreutils/findutils and procps, like a container. Keep output out of the remote shell's startup files for non-interactive shells (Ubuntu's `.bashrc` already returns early): anything printed there corrupts file reads. A host without herdr gets no Agents view entry, since that entry is driven by herdr's watcher.
+
 ## Using the tree
 
 | Action | How |
 | --- | --- |
 | Open a file | Click it |
-| New file / folder | Right-click a container or folder |
+| New file / folder | Right-click a container, SSH host or folder |
 | Rename | <kbd>F2</kbd>, or right-click |
 | Delete | <kbd>Delete</kbd>, or right-click — multi-select is supported |
-| Move | Drag within a container |
-| Copy in | Drag from the host Explorer, or from another container's tree |
+| Move | Drag within a container or SSH host |
+| Copy in | Drag from the host Explorer, or from another container's or SSH host's tree |
 | Copy the container-side path | Right-click → **Copy Container Path** |
 
-Deletes are permanent: a container has no trash, so the confirmation prompt is the only safeguard.
+Deletes are permanent: neither a container nor an SSH host has a trash, so the confirmation prompt is the only safeguard.
 
 ## Commands
 
@@ -56,6 +76,7 @@ Deletes are permanent: a container has no trash, so the confirmation prompt is t
 | --- | --- |
 | `Dev Container FS: Refresh Container Files` | Re-read the tree |
 | `Dev Container FS: Open Folder in Container` | Context menu on a **host** folder in the explorer — opens a terminal running `devc-vscode.openFolderCommand` (rejected on container folders) |
+| `Dev Container FS: Add SSH Host…` | Pick an alias from `~/.ssh/config` and add it to `devc-vscode.sshHosts` |
 
 `New File`, `New Folder`, `Rename`, `Delete` and `Copy Container Path` are also commands; from the palette they act on the current tree selection. `Focus Agent` is run by clicking an agent in the Agents view and is hidden from the palette.
 
@@ -65,6 +86,8 @@ Deletes are permanent: a container has no trash, so the confirmation prompt is t
 | --- | --- | --- |
 | `devc-vscode.dockerPath` | `docker` | Docker CLI command (name on PATH or absolute path) |
 | `devc-vscode.openFolderCommand` | `devc herdr` | Command sent to the terminal by "Open Folder in Container" |
+| `devc-vscode.sshHosts` | `[]` | SSH hosts shown as environments (user settings only) — see [SSH hosts](#ssh-hosts) |
+| `devc-vscode.sshPath` | `ssh` | ssh client (name on PATH or absolute path; user settings only) |
 
 ## Requirements
 

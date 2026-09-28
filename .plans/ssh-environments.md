@@ -177,12 +177,13 @@ it shows one child explaining why.
   the remote). `docker exec` has no such step, which is why the Docker provider never needed
   quoting. The `find -printf '%f\\0%y\\0'` format keeps its literal backslash-zero through
   quoting.
-- `<controlDir>` = `path.join(os.tmpdir(), 'dcs')`, created with mode `0700`. Before use,
+- `<controlDir>` = `/tmp/devc-<uid>`, created with mode `0700`. Before use,
   `fs.lstatSync` must show a directory owned by `process.getuid()` with mode `0700`. Otherwise,
   omit the three `Control*` options (no multiplexing) and log once to the `Devc` output channel.
   **Gotcha:** Unix socket paths are limited to 104 bytes on macOS. `%C` is a 40-char hash, and
-  the short `dcs` directory under `os.tmpdir()` (≈49 chars on macOS) keeps it under the limit.
-  Don't put the socket under `context.globalStorageUri`, which is far too long.
+  while starting a master ssh first binds `<ControlPath>.` plus 16 random chars, so the directory
+  must be at most 45 chars. `os.tmpdir()` on macOS (`/var/folders/…/T`, ≈49 chars) is too long,
+  as is `context.globalStorageUri`.
 - The remote user is whatever `~/.ssh/config` says. There is no `-u` equivalent and no
   `getRemoteUser`.
 - Timeout: 30 s per FS operation, and the same timeouts as the Docker path for herdr and probe
@@ -216,8 +217,9 @@ detection reads the command's output through shell integration
   <sshPath> -t -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no -o ControlMaster=auto -o ControlPath=<controlDir>/%C -o ControlPersist=60 -- <host> 'cd <root> && PATH="$HOME/.local/bin:$PATH" && if command -v herdr >/dev/null 2>&1; then exec herdr --session <session>; else exec "${SHELL:-sh}" -l; fi'
   ```
 
-  Omit the `Control*` options when the control directory check fails. With no herdr on the
-  remote, the user gets a login shell in `root`.
+  Omit the `Control*` options when the control directory check fails, and the `cd <root> && `
+  prefix when no `root` is configured (ssh already starts in the remote home). With no herdr on
+  the remote, the user gets a login shell in `root`.
 - **Gotcha: SSH terminals aren't host terminals.** Every place that treats
   `!isContainerTerminal(t)` as "a host terminal" (host foreground polling in the session
   source, `findHostClient`, `shutDownSession`, host terminal agent detection) must also exclude
@@ -399,45 +401,45 @@ On activation and on every `workspace.onDidChangeWorkspaceFolders`:
 
 ## Checklist
 
-- [ ] Runner seam: Docker implementation; `devcontainerFs.ts`, `herdr.ts`, `terminalAgents.ts` moved onto it with Docker argv unchanged
-- [ ] SSH runner: argv builder, quoting, host allowlist before spawn, control-directory check, timeouts, exit-255 mapping, long-lived stdin-held spawn
-- [ ] `devc-ssh` provider over the shared coreutils logic
-- [ ] `devc-vscode.sshHosts` / `devc-vscode.sshPath` settings with runtime validation and remote-home resolution
-- [ ] `~/.ssh/config` alias parser and `devc-vscode.addSshHost`
-- [ ] File tree: SSH roots, error child, config-change refresh
-- [ ] Commands, menus and drag and drop accept SSH nodes
-- [ ] SSH terminals: command, marker, Attach Terminal, excluded from host-terminal logic
-- [ ] Terminal links in SSH terminals
-- [ ] Terminal agent detection in SSH terminals
-- [ ] SSH watchers with reconnect backoff
-- [ ] Agents view: SSH env nodes, visibility rule, contextValues, menus, attach/stop/delete session, focus/close
-- [ ] Add Agent: SSH Hosts group, Add SSH Host… item, SSH launch
-- [ ] Window registry `ssh` groups, `SNAPSHOT_VERSION` 5
-- [ ] Terminal restore for SSH terminals
-- [ ] `onFileSystem:devc-ssh` activation
-- [ ] Workspace-folder guard
-- [ ] Tests (see Validation)
-- [ ] README (SSH section, settings and commands tables); CHANGELOG entry
+- [x] Runner seam: Docker implementation; `devcontainerFs.ts`, `herdr.ts`, `terminalAgents.ts` moved onto it with Docker argv unchanged
+- [x] SSH runner: argv builder, quoting, host allowlist before spawn, control-directory check, timeouts, exit-255 mapping, long-lived stdin-held spawn
+- [x] `devc-ssh` provider over the shared coreutils logic
+- [x] `devc-vscode.sshHosts` / `devc-vscode.sshPath` settings with runtime validation and remote-home resolution
+- [x] `~/.ssh/config` alias parser and `devc-vscode.addSshHost`
+- [x] File tree: SSH roots, error child, config-change refresh
+- [x] Commands, menus and drag and drop accept SSH nodes
+- [x] SSH terminals: command, marker, Attach Terminal, excluded from host-terminal logic
+- [x] Terminal links in SSH terminals
+- [x] Terminal agent detection in SSH terminals
+- [x] SSH watchers with reconnect backoff
+- [x] Agents view: SSH env nodes, visibility rule, contextValues, menus, attach/stop/delete session, focus/close
+- [x] Add Agent: SSH Hosts group, Add SSH Host… item, SSH launch
+- [x] Window registry `ssh` groups, `SNAPSHOT_VERSION` 5
+- [x] Terminal restore for SSH terminals
+- [x] `onFileSystem:devc-ssh` activation
+- [x] Workspace-folder guard
+- [x] Tests (see Validation)
+- [x] README (SSH section, settings and commands tables); CHANGELOG entry
 
 ## Validation
 
 ### In a dev container (no Docker, no ssh host required)
 
-- [ ] `npm run compile` and `npm run lint` exit 0
-- [ ] `xvfb-run -a npm test` exits 0. The offline SSH tests are **passed, not skipped**, and the live SSH suite reports skipped. The existing suites pass with no Docker-path expectations changed.
-- [ ] Offline tests cover:
-  - [ ] quoting round-trip: each of `a b`, `it's`, `$(touch /tmp/x)`, `` `id` ``, `a\nb`, `back\\slash`, `-rf`, `%f\\0%y\\0`, quoted and passed to a local `sh -c 'printf %s …'`, prints the original exactly
-  - [ ] allowlist: a configured host passes; an unconfigured host, an empty authority and `-oProxyCommand=x` all throw `NoPermissions` **without spawning** (inject the spawner and assert it was not called)
-  - [ ] the exact non-interactive argv for a sample host, with and without a usable control directory
-  - [ ] the exact SSH terminal command string, with a root and session needing quoting
-  - [ ] the Docker runner builds the same argv as before the refactor, for watch, focus, close, start, probe and classify
-  - [ ] exit 255 → `Unavailable`; host-key stderr → the exact message
-  - [ ] settings parsing drops invalid and duplicate entries
-  - [ ] ssh config parsing: `Host a b`, `Host=c`, quoted tokens, wildcard and negated tokens dropped, `Match` ignored, `Include` relative and `~/`, a `*` glob in the last segment, an include cycle stops at depth 8, a missing file yields nothing
-  - [ ] Agents tree: an SSH env shows once its watcher has reported a snapshot, including a `server_not_running` one; it's absent before the first snapshot and after the watcher exits; it orders after containers; contextValues `agentSsh.running.attached` / `agentSshRemote`
-  - [ ] registry: `snapshotGroups` emits `ssh` groups and `findLocal` resolves SSH agent keys
-- [ ] `grep -n "updateWorkspaceFolders" src/*.ts` shows calls only inside the guard (removal), never an addition
-- [ ] `node -e 'const p=require("./package.json").contributes.configuration.properties; for (const k of ["devc-vscode.sshHosts","devc-vscode.sshPath"]) if (p[k].scope!=="application") process.exit(1)'` exits 0
+- [x] `npm run compile` and `npm run lint` exit 0
+- [x] `xvfb-run -a npm test` exits 0. The offline SSH tests are **passed, not skipped**, and the live SSH suite reports skipped. The existing suites pass with no Docker-path expectations changed.
+- [x] Offline tests cover:
+  - [x] quoting round-trip: each of `a b`, `it's`, `$(touch /tmp/x)`, `` `id` ``, `a\nb`, `back\\slash`, `-rf`, `%f\\0%y\\0`, quoted and passed to a local `sh -c 'printf %s …'`, prints the original exactly
+  - [x] allowlist: a configured host passes; an unconfigured host, an empty authority and `-oProxyCommand=x` all throw `NoPermissions` **without spawning** (inject the spawner and assert it was not called)
+  - [x] the exact non-interactive argv for a sample host, with and without a usable control directory
+  - [x] the exact SSH terminal command string, with a root and session needing quoting
+  - [x] the Docker runner builds the same argv as before the refactor, for watch, focus, close, start, probe and classify
+  - [x] exit 255 → `Unavailable`; host-key stderr → the exact message
+  - [x] settings parsing drops invalid and duplicate entries
+  - [x] ssh config parsing: `Host a b`, `Host=c`, quoted tokens, wildcard and negated tokens dropped, `Match` ignored, `Include` relative and `~/`, a `*` glob in the last segment, an include cycle stops at depth 8, a missing file yields nothing
+  - [x] Agents tree: an SSH env shows once its watcher has reported a snapshot, including a `server_not_running` one; it's absent before the first snapshot and after the watcher exits; it orders after containers; contextValues `agentSsh.running.attached` / `agentSshRemote`
+  - [x] registry: `snapshotGroups` emits `ssh` groups and `findLocal` resolves SSH agent keys
+- [x] `grep -n "updateWorkspaceFolders" src/*.ts` shows calls only inside the guard (removal), never an addition
+- [x] `node -e 'const p=require("./package.json").contributes.configuration.properties; for (const k of ["devc-vscode.sshHosts","devc-vscode.sshPath"]) if (p[k].scope!=="application") process.exit(1)'` exits 0
 
 ### Host only (needs the agent sandbox VM, `Host agent-vm` in `~/.ssh/config`, host key accepted, herdr installed on the VM)
 

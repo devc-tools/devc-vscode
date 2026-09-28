@@ -4,11 +4,15 @@
 
 ### Changed
 
+- Window snapshots shared between windows are now version 5 (they carry SSH hosts); windows running an older build of the extension ignore them until updated.
+
 - Container files are now shown in a **Dev Containers** tree view in the Explorer panel instead of being added as workspace folders. No window reload, no multi-root conversion, and no stale container roots restored after a reload.
 - Tree roots are scoped by one rule: a running dev container is shown when its `devcontainer.local_folder` is an open workspace folder or sits under one. A container started for a subfolder now gets its own root, which it previously did not. Roots are labelled with the host folder's basename, or `basename/path/to/subfolder` for a subfolder container, with docker's container name as the subtitle. Each root is the container's `/`, so the whole container filesystem stays browsable.
 - The tree supports New File, New Folder, Rename, Delete (multi-select), Copy Container Path, and drag-and-drop — moves within a container, copies across containers and from the host Explorer.
 
 ### Added
+
+- **SSH hosts as environments.** Hosts from the new user-only `devc-vscode.sshHosts` setting get a root in the Dev Containers view (`devc-ssh://<host>/<path>`, read and written with coreutils over plain `ssh`), terminals attached to this window's herdr session on the host, terminal links, and an Agents view entry with its herdr and terminal-detected agents, Add Agent, and Stop / Delete herdr Session. Every ssh forces agent, X11 and port forwarding off. No VS Code server is installed on the host and it is never a workspace folder; one added by hand is removed. **Add SSH Host…** adds an alias from `~/.ssh/config`. New settings: `devc-vscode.sshHosts`, `devc-vscode.sshPath`.
 
 - Terminal links resolve `~` (against the container user's `$HOME`) and relative paths (against the bind-mount destination for the terminal's host folder). Paths that cannot be resolved with certainty are left as plain text.
 - Clicking a terminal link with a `:line` or `:line:col` suffix opens the file at that position.

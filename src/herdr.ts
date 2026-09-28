@@ -1,5 +1,5 @@
-import * as cp from 'child_process';
 import { execDocker } from './docker';
+import { RemoteShell } from './remoteShell';
 
 /**
  * Agent state as herdr reports it. herdr runs its own detection rules against
@@ -35,13 +35,18 @@ const STATUSES: ReadonlySet<string> = new Set<AgentStatus>([
  * The herdr session in a dev container: the one `devc herdr` starts and
  * attaches to.
  */
-const CONTAINER_SESSION = 'devc';
+export const CONTAINER_SESSION = 'devc';
 
-/** `herdr` aimed at CONTAINER_SESSION, for scripts run in the container. */
-const HERDR = `herdr --session=${CONTAINER_SESSION}`;
+/** `herdr` aimed at a session, for scripts run in an environment. */
+function herdrFor(session: string): string {
+  const quoted = /^[\w.@%+=:,/-]+$/.test(session)
+    ? session
+    : `'${session.replace(/'/g, `'\\''`)}'`;
+  return `herdr --session=${quoted}`;
+}
 
 /**
- * Runs inside the container. Polls herdr's socket API through its own CLI and
+ * Runs inside the environment. Polls herdr's socket API through its own CLI and
  * prints the snapshot only when it changes, so the host sees one line per
  * change rather than one per tick. It needs nothing beyond sh and herdr — no
  * socat or other bridge to the socket.
@@ -51,13 +56,14 @@ const HERDR = `herdr --session=${CONTAINER_SESSION}`;
  * stdin to close. The host holds stdin open for as long as it wants updates;
  * killing the client (or VS Code exiting) closes it and ends the loop.
  */
-export const WATCH_SCRIPT = `
+export function watchScript(session: string): string {
+  return `
 PATH="$HOME/.local/bin:$PATH"
 command -v herdr >/dev/null 2>&1 || exit 127
 (
   prev=
   while :; do
-    cur=$(${HERDR} api snapshot 2>&1 | tr -d '\\n')
+    cur=$(${herdrFor(session)} api snapshot 2>&1 | tr -d '\\n')
     if [ "$cur" != "$prev" ]; then
       printf '%s\\n' "$cur"
       prev=$cur
@@ -69,6 +75,7 @@ loop=$!
 cat >/dev/null
 kill $loop
 `;
+}
 
 /**
  * The agents in one `herdr api snapshot` response. A herdr error — typically
@@ -177,29 +184,27 @@ export async function getRemoteUser(
   return remoteUserFromMetadata(res.stdout.toString('utf8').trim());
 }
 
-function userArgs(user: string | undefined): string[] {
-  return user ? ['-u', user] : [];
-}
-
 /**
- * Stream a container's agents to `onAgents` until disposed or the container
- * goes away. `onAgents` fires once per change in herdr's snapshot; `onExit`
- * fires when the stream ends on its own (container stopped, herdr not
- * installed).
+ * Stream an environment's agents in a herdr session to `onAgents` until
+ * disposed or the environment goes away. `onAgents` fires once per change in
+ * herdr's snapshot; `onExit` fires when the stream ends on its own (container
+ * stopped, host unreachable, herdr not installed).
  */
 export function watchHerdr(
-  containerId: string,
-  user: string | undefined,
-  dockerCommand: string,
+  shell: RemoteShell,
+  session: string,
   onAgents: (agents: AgentInfo[], running: boolean) => void,
   onExit: () => void
 ): { dispose(): void } {
-  const child = cp.spawn(
-    dockerCommand,
-    ['exec', '-i', ...userArgs(user), containerId, 'sh', '-c', WATCH_SCRIPT],
-    // stdin stays open: closing it is what stops the loop in the container.
-    { stdio: ['pipe', 'pipe', 'ignore'] }
-  );
+  let child;
+  try {
+    // stdin stays open: closing it is what stops the loop in the environment.
+    child = shell.spawn(['sh', '-c', watchScript(session)]);
+  } catch (err) {
+    console.error('devc-vscode: herdr watcher error', (err as Error).message);
+    setTimeout(onExit, 0);
+    return { dispose() {} };
+  }
   let disposed = false;
   let buf = '';
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -242,53 +247,75 @@ export function watchHerdr(
  * view. So the tab is focused first, then the agent's pane within it.
  */
 export async function focusHerdrAgent(
-  containerId: string,
-  user: string | undefined,
-  agent: Pick<AgentInfo, 'paneId' | 'tabId'>,
-  dockerCommand: string
+  shell: RemoteShell,
+  session: string,
+  agent: Pick<AgentInfo, 'paneId' | 'tabId'>
 ): Promise<boolean> {
-  const res = await execDocker(
-    [
-      'exec',
-      ...userArgs(user),
-      containerId,
-      'sh',
-      '-c',
-      `PATH="$HOME/.local/bin:$PATH"
-      if [ -n "$2" ]; then ${HERDR} tab focus "$2" >/dev/null || exit; fi
-      exec ${HERDR} agent focus "$1"`,
-      'sh',
-      agent.paneId,
-      agent.tabId ?? '',
-    ],
-    undefined,
-    dockerCommand
-  );
-  return res.exitCode === 0;
+  const herdr = herdrFor(session);
+  const res = await runOrUndefined(shell, [
+    'sh',
+    '-c',
+    `PATH="$HOME/.local/bin:$PATH"
+      if [ -n "$2" ]; then ${herdr} tab focus "$2" >/dev/null || exit; fi
+      exec ${herdr} agent focus "$1"`,
+    'sh',
+    agent.paneId,
+    agent.tabId ?? '',
+  ]);
+  return res?.exitCode === 0;
 }
 
 /** Close an agent's herdr pane, ending the agent and whatever else runs there. */
 export async function closeHerdrPane(
-  containerId: string,
-  user: string | undefined,
-  paneId: string,
-  dockerCommand: string
+  shell: RemoteShell,
+  session: string,
+  paneId: string
 ): Promise<boolean> {
-  const res = await execDocker(
-    [
-      'exec',
-      ...userArgs(user),
-      containerId,
-      'sh',
-      '-c',
-      `PATH="$HOME/.local/bin:$PATH" exec ${HERDR} pane close "$1"`,
-      'sh',
-      paneId,
-    ],
-    undefined,
-    dockerCommand
+  const res = await runOrUndefined(shell, [
+    'sh',
+    '-c',
+    `PATH="$HOME/.local/bin:$PATH" exec ${herdrFor(session)} pane close "$1"`,
+    'sh',
+    paneId,
+  ]);
+  return res?.exitCode === 0;
+}
+
+/**
+ * Stop or delete (`args` is `['session', 'stop' | 'delete', name]`) a herdr
+ * session in an environment. Undefined on success, else why it failed.
+ */
+export async function runSessionCommand(
+  shell: RemoteShell,
+  args: string[]
+): Promise<string | undefined> {
+  const res = await runOrUndefined(
+    shell,
+    ['sh', '-c', `PATH="$HOME/.local/bin:$PATH" exec herdr "$@"`, 'sh', ...args],
+    COMMAND_TIMEOUT_MS
   );
-  return res.exitCode === 0;
+  if (!res) {
+    return 'herdr could not be run';
+  }
+  return res.exitCode === 0
+    ? undefined
+    : failure({
+        exitCode: res.exitCode,
+        stdout: res.stdout.toString('utf8'),
+        stderr: res.stderr.toString('utf8'),
+      });
+}
+
+async function runOrUndefined(
+  shell: RemoteShell,
+  argv: string[],
+  timeoutMs?: number
+) {
+  try {
+    return await shell.run(argv, { timeoutMs });
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -434,31 +461,25 @@ function failure(res: {
   );
 }
 
-/** Start an agent in a container's herdr, as startAgent does. */
-export function startContainerAgent(
-  containerId: string,
-  user: string | undefined,
+/** Start an agent in an environment's herdr session, as startAgent does. */
+export function startShellAgent(
+  shell: RemoteShell,
+  session: string,
   cwd: string | undefined,
-  kind: string,
-  dockerCommand: string
+  kind: string
 ): Promise<StartResult> {
   return startAgent(
     async (args, timeoutMs) => {
       try {
-        const res = await execDocker(
+        const res = await shell.run(
           [
-            'exec',
-            ...userArgs(user),
-            containerId,
             'sh',
             '-c',
-            `PATH="$HOME/.local/bin:$PATH" exec ${HERDR} "$@"`,
+            `PATH="$HOME/.local/bin:$PATH" exec ${herdrFor(session)} "$@"`,
             'sh',
             ...args,
           ],
-          undefined,
-          dockerCommand,
-          timeoutMs ?? COMMAND_TIMEOUT_MS
+          { timeoutMs: timeoutMs ?? COMMAND_TIMEOUT_MS }
         );
         return {
           exitCode: res.exitCode,

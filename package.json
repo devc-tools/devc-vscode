@@ -15,6 +15,7 @@
   ],
   "activationEvents": [
     "onFileSystem:devc-vscode",
+    "onFileSystem:devc-ssh",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -64,6 +65,37 @@
           "type": "string",
           "default": "devc down",
           "description": "Command run from a container's host folder by the Agents view's Down Container action, after its terminals are closed."
+        },
+        "devc-vscode.sshHosts": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "host"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              "root": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          },
+          "markdownDescription": "SSH hosts offered as environments: file tree roots, Add Agent targets and terminals. `host` is an alias from `~/.ssh/config`; `root` is the absolute remote directory files, terminals and agents start in (default: the remote home). User settings only — use **Add SSH Host…** to pick from `~/.ssh/config`."
+        },
+        "devc-vscode.sshPath": {
+          "type": "string",
+          "scope": "application",
+          "default": "ssh",
+          "description": "ssh client used for SSH environments (a name on PATH or an absolute path). User settings only."
         }
       }
     },
@@ -84,6 +116,12 @@
         "title": "Attach Terminal",
         "category": "Dev Container FS",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "devc-vscode.addSshHost",
+        "title": "Add SSH Host…",
+        "category": "Dev Container FS",
+        "icon": "$(add)"
       },
       {
         "command": "devc-vscode.newFile",
@@ -186,22 +224,27 @@
           "command": "devc-vscode.collapseAllAgents",
           "when": "view == devc-vscode.agents",
           "group": "navigation@2"
+        },
+        {
+          "command": "devc-vscode.addSshHost",
+          "when": "view == devc-vscode.containers",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
         {
           "command": "devc-vscode.attachTerminal",
-          "when": "view == devc-vscode.containers && viewItem == container",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|sshHost)(\\.attached)?$/",
           "group": "inline"
         },
         {
           "command": "devc-vscode.newFile",
-          "when": "view == devc-vscode.containers && viewItem =~ /^(container(\\.attached)?|directory)$/",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|sshHost)(\\.attached)?$|^directory$/",
           "group": "1_new"
         },
         {
           "command": "devc-vscode.newFolder",
-          "when": "view == devc-vscode.containers && viewItem =~ /^(container(\\.attached)?|directory)$/",
+          "when": "view == devc-vscode.containers && viewItem =~ /^(container|sshHost)(\\.attached)?$|^directory$/",
           "group": "1_new@2"
         },
         {
@@ -216,7 +259,7 @@
         },
         {
           "command": "devc-vscode.copyPath",
-          "when": "view == devc-vscode.containers",
+          "when": "view == devc-vscode.containers && viewItem != sshError",
           "group": "3_copy"
         },
         {
@@ -226,12 +269,12 @@
         },
         {
           "command": "devc-vscode.addAgent",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Workspace|Host|Container)(\\..*)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Workspace|Host|Container|Ssh)(\\..*)?$/",
           "group": "inline@9"
         },
         {
           "command": "devc-vscode.attachAgentGroup",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Host|Container)(\\..*)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agent(Host|Container|Ssh)(\\..*)?$/",
           "group": "inline@1"
         },
         {
@@ -252,6 +295,16 @@
         {
           "command": "devc-vscode.deleteSession",
           "when": "view == devc-vscode.agents && viewItem =~ /^agentHost\\.running(\\.attached)?$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "devc-vscode.stopSession",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentSsh\\.running/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devc-vscode.deleteSession",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentSsh\\.running/",
           "group": "inline@3"
         }
       ],

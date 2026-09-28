@@ -1,20 +1,25 @@
 import * as vscode from 'vscode';
-import { execDocker, DockerExecResult } from './docker';
+import { DockerShell, RemoteShell, ShellResult } from './remoteShell';
 
 /**
- * FileSystemProvider that reads/writes files inside a running Docker container
- * (typically one started by the devcontainer CLI) by shelling out to
- * `docker exec <container> <coreutils>`.
+ * A FileSystemProvider over coreutils run in an environment by a
+ * RemoteShell. Subclasses say which shell a URI's authority names and how
+ * that shell's own failures read; the commands are the same everywhere.
  *
- * URI shape: devc-vscode://<container-id-or-name>/<absolute path in container>
- *
- * Requires GNU coreutils/findutils in the container (stat, find, cat, mkdir,
- * rm, mv, rmdir) — true for typical dev container images (Debian/Ubuntu
- * based). BusyBox (Alpine) is not supported.
+ * Requires GNU coreutils/findutils in the environment (stat, find, cat,
+ * mkdir, rm, mv, rmdir) — true for Debian/Ubuntu based images and VMs.
+ * BusyBox (Alpine) is not supported.
  */
-export class DevContainerFileSystemProvider
+export abstract class CoreutilsFileSystemProvider
   implements vscode.FileSystemProvider
 {
+  /** The shell the URI's authority names; throws a FileSystemError if none. */
+  protected abstract shellFor(uri: vscode.Uri): RemoteShell;
+  /** What a rename across two authorities is refused with. */
+  protected abstract readonly crossAuthorityMessage: string;
+  /** Shown when a command fails with nothing on stderr. */
+  protected abstract readonly execFailedMessage: string;
+
   // --- file metadata
 
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
@@ -168,9 +173,7 @@ export class DevContainerFileSystemProvider
     options: { overwrite: boolean }
   ): Promise<void> {
     if (oldUri.authority !== newUri.authority) {
-      throw vscode.FileSystemError.NoPermissions(
-        'Cannot rename across containers'
-      );
+      throw vscode.FileSystemError.NoPermissions(this.crossAuthorityMessage);
     }
     if (!(await this.tryStat(oldUri))) {
       throw vscode.FileSystemError.FileNotFound(oldUri);
@@ -201,7 +204,7 @@ export class DevContainerFileSystemProvider
     this._fireSoon({ type: vscode.FileChangeType.Changed, uri });
   }
 
-  // --- docker plumbing
+  // --- shell plumbing
 
   private pathOf(uri: vscode.Uri): string {
     const path = uri.path;
@@ -213,33 +216,22 @@ export class DevContainerFileSystemProvider
     command: string[],
     input?: Uint8Array
   ): Promise<Buffer> {
-    const container = uri.authority;
-    if (!container) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    let result: DockerExecResult;
+    const shell = this.shellFor(uri);
+    let result: ShellResult;
     try {
-      result = await execDocker(
-        ['exec', '-i', container, ...command],
-        input,
-        this.dockerCommand()
-      );
+      result = await shell.run(command, { input, interactive: true });
     } catch (err) {
+      if (err instanceof vscode.FileSystemError) {
+        throw err;
+      }
       throw vscode.FileSystemError.Unavailable(
         `${uri.toString()}: ${(err as Error).message}`
       );
     }
     if (result.exitCode !== 0) {
-      throw this.toFsError(uri, result.stderr.toString('utf8'));
+      throw this.toFsError(uri, result);
     }
     return result.stdout;
-  }
-
-  private dockerCommand(): string {
-    const configured = vscode.workspace
-      .getConfiguration('devc-vscode')
-      .get<string>('dockerPath');
-    return configured && configured.trim() !== '' ? configured : 'docker';
   }
 
   private async tryStat(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {
@@ -256,8 +248,9 @@ export class DevContainerFileSystemProvider
     }
   }
 
-  private toFsError(uri: vscode.Uri, stderr: string): Error {
-    const msg = stderr.trim() || 'docker exec failed';
+  /** Map a failed command's stderr to the FileSystemError it means. */
+  protected toFsError(uri: vscode.Uri, result: ShellResult): Error {
+    const msg = result.stderr.toString('utf8').trim() || this.execFailedMessage;
     if (/no such file or directory/i.test(msg)) {
       return vscode.FileSystemError.FileNotFound(uri);
     }
@@ -301,5 +294,31 @@ export class DevContainerFileSystemProvider
       this._emitter.fire(this._bufferedEvents);
       this._bufferedEvents.length = 0;
     }, 5);
+  }
+}
+
+/**
+ * Files inside a running Docker container (typically one started by the
+ * devcontainer CLI), through `docker exec <container> <coreutils>`.
+ *
+ * URI shape: devc-vscode://<container-id-or-name>/<absolute path in container>
+ */
+export class DevContainerFileSystemProvider extends CoreutilsFileSystemProvider {
+  protected readonly crossAuthorityMessage = 'Cannot rename across containers';
+  protected readonly execFailedMessage = 'docker exec failed';
+
+  protected shellFor(uri: vscode.Uri): RemoteShell {
+    const container = uri.authority;
+    if (!container) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    return new DockerShell(container, undefined, this.dockerCommand());
+  }
+
+  private dockerCommand(): string {
+    const configured = vscode.workspace
+      .getConfiguration('devc-vscode')
+      .get<string>('dockerPath');
+    return configured && configured.trim() !== '' ? configured : 'docker';
   }
 }

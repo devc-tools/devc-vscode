@@ -481,3 +481,129 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
     });
   });
 });
+
+suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
+  const ROOT = '/home/ubuntu/work';
+
+  function sshFixture(reachable = true) {
+    const files = new FakeFileOps();
+    files
+      .dir('agent-vm', '/home/ubuntu')
+      .dir('agent-vm', ROOT)
+      .dir('agent-vm', `${ROOT}/src`)
+      .file('agent-vm', `${ROOT}/src/a.ts`, 'a')
+      .file('agent-vm', `${ROOT}/README.md`, 'readme')
+      .dir('c1', '/')
+      .dir('c1', '/srv');
+    const c1: ContainerInfo = {
+      id: 'c1',
+      name: 'app',
+      containerName: 'app-container',
+      localFolder: '/work/app',
+    };
+    const provider = new ContainerTreeDataProvider(
+      new FakeContainerSource([c1]),
+      files,
+      async () => true,
+      {
+        list: () => [
+          { host: 'agent-vm', label: 'Sandbox' },
+          { host: 'down', label: 'down' },
+          { host: 'fixed', label: 'fixed', root: '/srv' },
+        ],
+        root: async host => {
+          if (host === 'down' || !reachable) {
+            throw new Error('ssh: connect to host down port 22: Connection refused');
+          }
+          return ROOT;
+        },
+      }
+    );
+    return { files, provider };
+  }
+
+  test('lists SSH roots after containers, in settings order', async () => {
+    const { provider } = sshFixture();
+    const roots = await provider.getChildren();
+    assert.deepStrictEqual(
+      roots.map(r => r.kind),
+      ['container', 'sshHost', 'sshHost', 'sshHost']
+    );
+    const item = provider.getTreeItem(roots[1]);
+    assert.strictEqual(item.label, 'Sandbox');
+    assert.strictEqual(item.id, 'sshHost:agent-vm');
+    assert.strictEqual(item.description, '~');
+    assert.strictEqual(item.contextValue, 'sshHost');
+    assert.strictEqual(item.resourceUri, undefined);
+    assert.strictEqual(provider.getTreeItem(roots[3]).description, '/srv');
+    provider.setAttached(['ssh:agent-vm']);
+    assert.strictEqual(
+      provider.getTreeItem(roots[1]).contextValue,
+      'sshHost.attached'
+    );
+  });
+
+  test('a root expands at its resolved root, directories first', async () => {
+    const { provider } = sshFixture();
+    const root = (await provider.getChildren())[1];
+    const children = await provider.getChildren(root);
+    assert.deepStrictEqual(
+      children.map(c => [c.kind, c.uri.toString()]),
+      [
+        ['directory', `devc-ssh://agent-vm${ROOT}/src`],
+        ['file', `devc-ssh://agent-vm${ROOT}/README.md`],
+      ]
+    );
+    assert.strictEqual(provider.getTreeItem(root).description, ROOT);
+    // getParent walks back up to the root and stops there.
+    const [file] = await provider.getChildren(children[0]);
+    const parent = await provider.getParent(file);
+    assert.strictEqual(parent?.uri.toString(), children[0].uri.toString());
+    assert.strictEqual(await provider.getParent(children[0]), root);
+    assert.strictEqual(await provider.resolveSshRoot('agent-vm'), ROOT);
+  });
+
+  test('an unreachable root shows why as its only child', async () => {
+    const { provider } = sshFixture();
+    const down = (await provider.getChildren())[2];
+    const [error] = await provider.getChildren(down);
+    assert.strictEqual(error.kind, 'sshError');
+    const item = provider.getTreeItem(error);
+    assert.strictEqual(item.label, 'Cannot reach down');
+    assert.strictEqual(item.contextValue, 'sshError');
+    assert.strictEqual(
+      item.tooltip,
+      'ssh: connect to host down port 22: Connection refused'
+    );
+    assert.strictEqual(
+      item.collapsibleState,
+      vscode.TreeItemCollapsibleState.None
+    );
+    assert.strictEqual(provider.dropDirectory(error), undefined);
+  });
+
+  test('drops move within a host and copy across', async () => {
+    const { files, provider } = sshFixture();
+    const root = (await provider.getChildren())[1];
+    const [src] = await provider.getChildren(root);
+    const transfer = new vscode.DataTransfer();
+    transfer.set(
+      'text/uri-list',
+      new vscode.DataTransferItem(`devc-ssh://agent-vm${ROOT}/README.md`)
+    );
+    await provider.handleDrop(src, transfer);
+    assert.ok(files.has('agent-vm', `${ROOT}/src/README.md`));
+    assert.ok(!files.has('agent-vm', `${ROOT}/README.md`));
+
+    const copy = new vscode.DataTransfer();
+    copy.set(
+      'text/uri-list',
+      new vscode.DataTransferItem(`devc-ssh://agent-vm${ROOT}/src/a.ts`)
+    );
+    const containerRoot = (await provider.getChildren())[0];
+    const [srv] = await provider.getChildren(containerRoot);
+    await provider.handleDrop(srv, copy);
+    assert.strictEqual(files.text('c1', '/srv/a.ts'), 'a');
+    assert.ok(files.has('agent-vm', `${ROOT}/src/a.ts`));
+  });
+});

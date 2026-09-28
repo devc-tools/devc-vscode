@@ -123,6 +123,7 @@ async function observe(label: string, name: string | undefined, cmd: string) {
     test('fake claude in a container terminal is classified live', async () => {
       const { TerminalAgentTracker, probeContainer, classifyScreen } =
         await import('../terminalAgents.js');
+      const { DockerShell } = await import('../remoteShell.js');
       const container = CONTAINER!;
       // A decoy: another claude already running on its own pty at another
       // size, as in a container with several agent terminals open.
@@ -148,11 +149,13 @@ async function observe(label: string, name: string | undefined, cmd: string) {
       const t0 = Date.now();
       const seen: string[] = [];
       const tracker = new TerminalAgentTracker({
-        isContainerTerminal: t => t.name === 'spike-agent',
-        resolveContainer: async () => ({ id: container, user: 'vscode' }),
-        probe: (id, user) => probeContainer(id, user, 'docker'),
-        classify: (id, user, agent, screen) =>
-          classifyScreen(id, user, agent, screen, 'docker'),
+        isRemoteTerminal: t => t.name === 'spike-agent',
+        resolveContainer: async () => ({
+          id: container,
+          shell: new DockerShell(container, 'vscode', 'docker'),
+        }),
+        probe: shell => probeContainer(shell),
+        classify: (shell, agent, screen) => classifyScreen(shell, agent, screen),
         log: message => console.log(`[e2e log] ${message}`),
         report: (_t, _id, agent) => {
           const entry = `${Date.now() - t0}ms ${agent ? `${agent.agent}:${agent.status}` : 'none'}`;

@@ -1,8 +1,8 @@
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
-import { execDocker } from './docker';
 import { AgentInfo, AgentStatus } from './herdr';
 import type { HostForeground } from './hostProcesses';
+import type { RemoteShell } from './remoteShell';
 import { TerminalScreen } from './terminalScreen';
 
 /**
@@ -233,49 +233,28 @@ export function parseExplain(line: string): Classification | undefined {
   }
 }
 
-function userArgs(user: string | undefined): string[] {
-  return user ? ['-u', user] : [];
-}
-
+/** Probe an environment's ptys (a container, or an SSH host). */
 export async function probeContainer(
-  containerId: string,
-  user: string | undefined,
-  dockerCommand: string
+  shell: RemoteShell
 ): Promise<ContainerProbe | undefined> {
-  const res = await execDocker(
-    ['exec', ...userArgs(user), containerId, 'sh', '-c', PROBE_SCRIPT],
-    undefined,
-    dockerCommand,
-    EXEC_TIMEOUT_MS
-  );
+  const res = await shell.run(['sh', '-c', PROBE_SCRIPT], {
+    timeoutMs: EXEC_TIMEOUT_MS,
+  });
   return res.exitCode === 0
     ? parseProbe(res.stdout.toString('utf8'))
     : undefined;
 }
 
+/** Classify an agent's screen with the environment's herdr. */
 export async function classifyScreen(
-  containerId: string,
-  user: string | undefined,
+  shell: RemoteShell,
   agent: string,
-  screen: string,
-  dockerCommand: string
+  screen: string
 ): Promise<Classification | undefined> {
-  const res = await execDocker(
-    [
-      'exec',
-      '-i',
-      ...userArgs(user),
-      containerId,
-      'sh',
-      '-c',
-      EXPLAIN_SCRIPT,
-      'sh',
-      agent,
-    ],
-    Buffer.from(screen, 'utf8'),
-    dockerCommand,
-    EXEC_TIMEOUT_MS
-  );
+  const res = await shell.run(['sh', '-c', EXPLAIN_SCRIPT, 'sh', agent], {
+    input: Buffer.from(screen, 'utf8'),
+    timeoutMs: EXEC_TIMEOUT_MS,
+  });
   return parseExplain(res.stdout.toString('utf8').split('\n')[0] ?? '');
 }
 
@@ -291,26 +270,32 @@ export interface HostTerminalDeps {
   report(terminal: vscode.Terminal, agent?: AgentInfo): void;
 }
 
+/** The environment a remote terminal runs in, as its deps resolve it. */
+export interface RemoteEnvironment {
+  /** Identifies the environment: a container id, or `ssh:<host>`. */
+  id: string;
+  shell: RemoteShell;
+}
+
 export interface TerminalAgentDeps {
-  /** Terminals this returns true for are read as container terminals. */
-  isContainerTerminal(terminal: vscode.Terminal): boolean;
+  /**
+   * Terminals this returns true for are read as remote terminals: their
+   * command's pty is in a container or on an SSH host.
+   */
+  isRemoteTerminal(terminal: vscode.Terminal): boolean;
   resolveContainer(
     terminal: vscode.Terminal
-  ): Promise<{ id: string; user: string | undefined } | undefined>;
-  probe(
-    containerId: string,
-    user: string | undefined
-  ): Promise<ContainerProbe | undefined>;
+  ): Promise<RemoteEnvironment | undefined>;
+  probe(shell: RemoteShell): Promise<ContainerProbe | undefined>;
   classify(
-    containerId: string,
-    user: string | undefined,
+    shell: RemoteShell,
     agent: string,
     screen: string
   ): Promise<Classification | undefined>;
   /** Called with the terminal's current agent, or undefined when it has none. */
   report(
     terminal: vscode.Terminal,
-    containerId: string,
+    environmentId: string,
     agent?: AgentInfo
   ): void;
   /** Every other terminal is read as a host terminal, when given. */
@@ -360,7 +345,7 @@ export interface TerminalTarget {
  */
 class ContainerTarget implements TerminalTarget {
   private readonly startedAt = Date.now();
-  private container: { id: string; user: string | undefined } | undefined;
+  private container: RemoteEnvironment | undefined;
   private tty: string | undefined;
 
   constructor(
@@ -384,8 +369,8 @@ class ContainerTarget implements TerminalTarget {
     if (!this.container) {
       return undefined;
     }
-    const { id, user } = this.container;
-    const probe = await this.deps.probe(id, user);
+    const { id, shell } = this.container;
+    const probe = await this.deps.probe(shell);
     if (!probe) {
       return undefined;
     }
@@ -417,7 +402,7 @@ class ContainerTarget implements TerminalTarget {
   classify(agent: string, screen: string) {
     const container = this.container;
     return container
-      ? this.deps.classify(container.id, container.user, agent, screen)
+      ? this.deps.classify(container.shell, agent, screen)
       : Promise.resolve(undefined);
   }
 
@@ -665,7 +650,7 @@ export class TerminalAgentTracker implements vscode.Disposable {
       vscode.window.onDidCloseTerminal(t => {
         this.tracked.get(t)?.dispose();
         this.tracked.delete(t);
-        if (!deps.isContainerTerminal(t)) {
+        if (!deps.isRemoteTerminal(t)) {
           deps.host?.report(t, undefined);
         }
       }),
@@ -677,7 +662,7 @@ export class TerminalAgentTracker implements vscode.Disposable {
   }
 
   private targetFor(terminal: vscode.Terminal): TerminalTarget | undefined {
-    if (this.deps.isContainerTerminal(terminal)) {
+    if (this.deps.isRemoteTerminal(terminal)) {
       return new ContainerTarget(terminal, this.deps, this.claims);
     }
     return this.deps.host && new HostTarget(terminal, this.deps.host);
@@ -692,7 +677,7 @@ export class TerminalAgentTracker implements vscode.Disposable {
     for (const terminal of vscode.window.terminals) {
       if (
         this.tracked.has(terminal) ||
-        this.deps.isContainerTerminal(terminal)
+        this.deps.isRemoteTerminal(terminal)
       ) {
         continue;
       }

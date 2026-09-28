@@ -1,6 +1,7 @@
 import * as posix from 'path/posix';
 import * as vscode from 'vscode';
 import { execDocker } from './docker';
+import { SSH_SCHEME, SshHostInfo, sshUri } from './sshFs';
 
 export const SCHEME = 'devc-vscode';
 
@@ -41,6 +42,20 @@ export interface FileOps {
   ): Promise<void>;
 }
 
+/**
+ * Where the tree gets its SSH roots. Injected so the provider can be
+ * exercised without ssh.
+ */
+export interface SshHostSource {
+  /** Configured hosts, in settings order. */
+  list(): SshHostInfo[];
+  /**
+   * A host's effective root: its configured root, else the remote home.
+   * Rejects when the host cannot be reached.
+   */
+  root(host: string): Promise<string>;
+}
+
 export type ContainerNode =
   | {
       kind: 'container';
@@ -52,10 +67,34 @@ export type ContainerNode =
       uri: vscode.Uri;
     }
   | {
+      kind: 'sshHost';
+      containerId?: undefined;
+      host: string;
+      label: string;
+      /** The effective root, once known. */
+      root?: string;
+      /** At the root once it is known, else at '/'. */
+      uri: vscode.Uri;
+    }
+  | {
+      /** Why an SSH root cannot be listed: its only child. */
+      kind: 'sshError';
+      containerId?: undefined;
+      host: string;
+      message: string;
+      uri: vscode.Uri;
+    }
+  | {
       kind: 'directory' | 'file';
+      /** The URI's authority: a container id, or an SSH host. */
       containerId: string;
       uri: vscode.Uri;
     };
+
+/** The key SSH roots use in `roots` and in the attached set. */
+export function sshRootKey(host: string): string {
+  return `ssh:${host}`;
+}
 
 /** Asked before a drop overwrites an existing entry. Injected for testability. */
 export type ConfirmOverwrite = (name: string) => Promise<boolean>;
@@ -119,15 +158,24 @@ export class ContainerTreeDataProvider
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  /** Container roots, cached so getParent can terminate without a docker call. */
+  /**
+   * Roots, cached so getParent can terminate without a docker call: by
+   * container id, and by sshRootKey for SSH hosts.
+   */
   private readonly roots = new Map<string, ContainerNode>();
-  /** Containers with a terminal open on them in this window. */
+  /** SSH hosts' effective roots, once resolved. */
+  private readonly sshRoots = new Map<string, string>();
+  /**
+   * Roots with a terminal open on them in this window: container ids and
+   * sshRootKeys.
+   */
   private attached = new Set<string>();
 
   constructor(
     private readonly source: ContainerSource,
     private readonly files: FileOps,
-    private readonly confirmOverwrite: ConfirmOverwrite = defaultConfirmOverwrite
+    private readonly confirmOverwrite: ConfirmOverwrite = defaultConfirmOverwrite,
+    private readonly ssh?: SshHostSource
   ) {}
 
   refresh(node?: ContainerNode): void {
@@ -137,9 +185,17 @@ export class ContainerTreeDataProvider
     this._onDidChangeTreeData.fire(node);
   }
 
+  /** Re-read an SSH host's root, e.g. once it is reachable again. */
+  refreshSshRoot(host: string): void {
+    const root = this.roots.get(sshRootKey(host));
+    if (root) {
+      this._onDidChangeTreeData.fire(root);
+    }
+  }
+
   /**
-   * Record which containers have a terminal open on them, refreshing the
-   * roots whose state changed.
+   * Record which roots (container ids, sshRootKeys) have a terminal open on
+   * them, refreshing the roots whose state changed.
    */
   setAttached(containerIds: Iterable<string>): void {
     const next = new Set(containerIds);
@@ -161,25 +217,56 @@ export class ContainerTreeDataProvider
     if (!element) {
       return this.listRoots();
     }
-    if (element.kind === 'file') {
+    if (element.kind === 'file' || element.kind === 'sshError') {
       return [];
     }
+    let dir = element.uri;
     let entries: [string, vscode.FileType][];
     try {
-      entries = await this.files.readDirectory(element.uri);
-    } catch {
+      if (element.kind === 'sshHost') {
+        dir = await this.baseUri(element);
+      }
+      entries = await this.files.readDirectory(dir);
+    } catch (err) {
+      if (element.kind === 'sshHost') {
+        // Unreachable, or its root is gone: say why in the tree.
+        return [
+          {
+            kind: 'sshError',
+            host: element.host,
+            message: (err as Error).message,
+            uri: sshUri(element.host, '/'),
+          },
+        ];
+      }
       // Container stopped mid-expand, or the path went away. An empty node is
       // better than an error toast on every refresh.
       return [];
     }
     return sortEntries(entries).map(([name, type]) => ({
       kind: type === vscode.FileType.Directory ? 'directory' : 'file',
-      containerId: element.containerId,
-      uri: containerUri(
-        element.containerId,
-        posix.join(element.uri.path, name)
-      ),
+      containerId: dir.authority,
+      uri: dir.with({ path: posix.join(dir.path, name) }),
     }));
+  }
+
+  /**
+   * The directory a root or directory node stands for. An SSH root's is its
+   * effective root, resolved (and remembered) on first use.
+   */
+  async baseUri(node: ContainerNode): Promise<vscode.Uri> {
+    if (node.kind !== 'sshHost') {
+      return node.uri;
+    }
+    if (node.root === undefined) {
+      const root = await this.ssh!.root(node.host);
+      this.sshRoots.set(node.host, root);
+      node.root = root;
+      node.uri = sshUri(node.host, root);
+      // The description shows the root now it is known.
+      this._onDidChangeTreeData.fire(node);
+    }
+    return node.uri;
   }
 
   getTreeItem(node: ContainerNode): vscode.TreeItem {
@@ -199,6 +286,32 @@ export class ContainerTreeDataProvider
         ? 'container.attached'
         : 'container';
       item.tooltip = node.containerName || node.name;
+      return item;
+    }
+    if (node.kind === 'sshHost') {
+      const item = new vscode.TreeItem(
+        node.label,
+        vscode.TreeItemCollapsibleState.Collapsed
+      );
+      item.id = `sshHost:${node.host}`;
+      item.description = node.root ?? '~';
+      // No resourceUri, as for container roots.
+      item.iconPath = new vscode.ThemeIcon('remote');
+      item.contextValue = this.attached.has(sshRootKey(node.host))
+        ? 'sshHost.attached'
+        : 'sshHost';
+      item.tooltip = `SSH host ${node.host}`;
+      return item;
+    }
+    if (node.kind === 'sshError') {
+      const item = new vscode.TreeItem(
+        `Cannot reach ${node.host}`,
+        vscode.TreeItemCollapsibleState.None
+      );
+      item.id = `sshError:${node.host}`;
+      item.iconPath = new vscode.ThemeIcon('error');
+      item.contextValue = 'sshError';
+      item.tooltip = node.message;
       return item;
     }
 
@@ -226,8 +339,31 @@ export class ContainerTreeDataProvider
    * Walks one path segment up, terminating at the container's '/' root.
    */
   async getParent(node: ContainerNode): Promise<ContainerNode | undefined> {
-    if (node.kind === 'container') {
+    if (node.kind === 'container' || node.kind === 'sshHost') {
       return undefined;
+    }
+    if (node.kind === 'sshError') {
+      return this.ensureRoot(sshRootKey(node.host));
+    }
+    if (node.uri.scheme === SSH_SCHEME) {
+      // Terminates at the host's root: anything at or above it has the root
+      // node as its parent.
+      const key = sshRootKey(node.uri.authority);
+      const root = await this.ensureRoot(key);
+      const base = root?.kind === 'sshHost' ? root.root : undefined;
+      const parent = normalizePath(posix.dirname(normalizePath(node.uri.path)));
+      if (
+        base === undefined ||
+        !isPathWithin(base, parent) ||
+        normalizePath(base) === parent
+      ) {
+        return root;
+      }
+      return {
+        kind: 'directory',
+        containerId: node.containerId,
+        uri: node.uri.with({ path: parent }),
+      };
     }
     const current = normalizePath(node.uri.path);
     if (current === '/') {
@@ -251,17 +387,38 @@ export class ContainerTreeDataProvider
    * terminates at the container's root, which listRoots supplies on demand.
    */
   async nodeFor(containerId: string, path: string): Promise<ContainerNode> {
+    return this.nodeForUri(containerUri(containerId, path));
+  }
+
+  /** nodeFor, for a container or SSH URI. */
+  async nodeForUri(uri: vscode.Uri): Promise<ContainerNode> {
     let type = vscode.FileType.Directory;
     try {
-      type = (await this.files.stat(containerUri(containerId, path))).type;
+      type = (await this.files.stat(uri)).type;
     } catch {
       // Fall through as a directory; reveal fails cleanly if it isn't there.
     }
     return {
       kind: type === vscode.FileType.Directory ? 'directory' : 'file',
-      containerId,
-      uri: containerUri(containerId, path),
+      containerId: uri.authority,
+      uri,
     };
+  }
+
+  /**
+   * An SSH host's effective root, resolving it on its tree root when needed;
+   * undefined when the host is not a root or cannot be reached.
+   */
+  async resolveSshRoot(host: string): Promise<string | undefined> {
+    const root = await this.ensureRoot(sshRootKey(host));
+    if (root?.kind !== 'sshHost') {
+      return undefined;
+    }
+    try {
+      return (await this.baseUri(root)).path;
+    } catch {
+      return undefined;
+    }
   }
 
   private async listRoots(): Promise<ContainerNode[]> {
@@ -280,18 +437,28 @@ export class ContainerTreeDataProvider
       this.roots.set(c.id, node);
       nodes.push(node);
     }
+    for (const info of this.ssh?.list() ?? []) {
+      const root = info.root ?? this.sshRoots.get(info.host);
+      const node: ContainerNode = {
+        kind: 'sshHost',
+        host: info.host,
+        label: info.label,
+        root,
+        uri: sshUri(info.host, root ?? '/'),
+      };
+      this.roots.set(sshRootKey(info.host), node);
+      nodes.push(node);
+    }
     return nodes;
   }
 
-  private async ensureRoot(
-    containerId: string
-  ): Promise<ContainerNode | undefined> {
-    const cached = this.roots.get(containerId);
+  private async ensureRoot(key: string): Promise<ContainerNode | undefined> {
+    const cached = this.roots.get(key);
     if (cached) {
       return cached;
     }
     await this.listRoots();
-    return this.roots.get(containerId);
+    return this.roots.get(key);
   }
 
   // --- drag and drop
@@ -311,14 +478,13 @@ export class ContainerTreeDataProvider
 
   /** The directory a drop on `target` lands in. */
   dropDirectory(target: ContainerNode | undefined): vscode.Uri | undefined {
-    if (!target) {
+    if (!target || target.kind === 'sshError') {
       return undefined;
     }
     if (target.kind === 'file') {
-      return containerUri(
-        target.containerId,
-        normalizePath(posix.dirname(target.uri.path))
-      );
+      return target.uri.with({
+        path: normalizePath(posix.dirname(target.uri.path)),
+      });
     }
     return target.uri;
   }
@@ -327,7 +493,10 @@ export class ContainerTreeDataProvider
     target: ContainerNode | undefined,
     dataTransfer: vscode.DataTransfer
   ): Promise<void> {
-    const destDir = this.dropDirectory(target);
+    const destDir =
+      target?.kind === 'sshHost'
+        ? await this.baseUri(target)
+        : this.dropDirectory(target);
     if (!destDir) {
       return;
     }
@@ -345,18 +514,18 @@ export class ContainerTreeDataProvider
       if (source.toString() === dest.toString()) {
         continue;
       }
-      if (
-        source.scheme === SCHEME &&
-        isPathWithin(source.path, destDir.path) &&
-        source.authority === destDir.authority
-      ) {
+      const sameRoot =
+        (source.scheme === SCHEME || source.scheme === SSH_SCHEME) &&
+        source.scheme === destDir.scheme &&
+        source.authority === destDir.authority;
+      if (sameRoot && isPathWithin(source.path, destDir.path)) {
         // Refuse to move a directory into itself or its own subtree.
         continue;
       }
       if (!(await this.clearDestination(dest, name))) {
         continue;
       }
-      if (source.scheme === SCHEME && source.authority === destDir.authority) {
+      if (sameRoot) {
         await this.files.rename(source, dest, { overwrite: true });
       } else {
         await this.copyInto(source, dest);

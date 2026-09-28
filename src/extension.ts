@@ -7,6 +7,7 @@ import {
   AgentTreeDataProvider,
   CONTAINER_ICON,
   SESSION_ICON,
+  SSH_ICON,
   folderOf,
 } from './agentTree';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
@@ -20,13 +21,17 @@ import {
   findContainerForHostFolder,
   findMatchingBindMount,
   getContainerHome,
+  isPathWithin,
+  sshRootKey,
 } from './containerTree';
 import {
   AgentInfo,
+  CONTAINER_SESSION,
   closeHerdrPane,
   focusHerdrAgent,
   getRemoteUser,
-  startContainerAgent,
+  runSessionCommand,
+  startShellAgent,
   watchHerdr,
 } from './herdr';
 import {
@@ -53,6 +58,19 @@ import {
 } from './hostProcesses';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
+  DockerShell,
+  SshShell,
+  ensureControlDir,
+  sshTerminalCommand,
+} from './remoteShell';
+import {
+  SSH_SCHEME,
+  SshFileSystemProvider,
+  SshHostInfo,
+  parseSshHosts,
+} from './sshFs';
+import { sshConfigAliases } from './sshConfig';
+import {
   TerminalAgentTracker,
   classifyScreen,
   probeContainer,
@@ -71,15 +89,19 @@ interface TerminalContext extends PathContext {
   containerId: string;
 }
 
+/** A path's URI in a remote terminal's environment. */
+interface LinkContext extends PathContext {
+  uriFor(path: string): vscode.Uri;
+}
+
 class DevContainerTerminalLink extends vscode.TerminalLink {
   constructor(
     startIndex: number,
     length: number,
     tooltip: string,
-    /** `path` is already absolute inside the container. */
+    /** Absolute, in the terminal's container or SSH host. */
     public readonly data: {
-      path: string;
-      containerId: string;
+      uri: vscode.Uri;
       line?: number;
       column?: number;
     }
@@ -89,6 +111,8 @@ class DevContainerTerminalLink extends vscode.TerminalLink {
 }
 
 let provider: DevContainerFileSystemProvider;
+let sshProvider: SshFileSystemProvider;
+let agentLog: vscode.LogOutputChannel;
 let treeProvider: ContainerTreeDataProvider;
 let treeView: vscode.TreeView<ContainerNode>;
 let agentTree: AgentTreeDataProvider;
@@ -108,9 +132,18 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  sshProvider = new SshFileSystemProvider(sshShell, isConfiguredHost);
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider(SSH_SCHEME, sshProvider, {
+      isCaseSensitive: true,
+    })
+  );
+
   treeProvider = new ContainerTreeDataProvider(
     new DockerContainerSource(getDockerCommand, getHostFolders),
-    new WorkspaceFileOps()
+    new WorkspaceFileOps(),
+    undefined,
+    { list: getSshHosts, root: sshRoot }
   );
   treeView = vscode.window.createTreeView(VIEW_ID, {
     treeDataProvider: treeProvider,
@@ -120,7 +153,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
-  const agentLog = vscode.window.createOutputChannel('Devc', {
+  agentLog = vscode.window.createOutputChannel('Devc', {
     log: true,
   });
   context.subscriptions.push(agentLog);
@@ -141,7 +174,7 @@ export function activate(context: vscode.ExtensionContext) {
       async foregrounds() {
         const found = await Promise.all(
           vscode.window.terminals
-            .filter(t => !isContainerTerminal(t))
+            .filter(t => !isRemoteTerminal(t))
             .map(t => hostForegrounds.get(t))
         );
         return found.flatMap(fg => (fg ? [fg.args] : []));
@@ -150,6 +183,13 @@ export function activate(context: vscode.ExtensionContext) {
       workspaceSession: workspaceSessionName,
       read: readHostSession,
       watch: watchHostSession,
+    },
+    {
+      list: getSshHosts,
+      session: remoteSessionName,
+      watch: (host, session, onAgents, onExit) =>
+        watchHerdr(sshShell(host), session, onAgents, onExit),
+      connected: host => treeProvider.refreshSshRoot(host),
     }
   );
   const agentView = vscode.window.createTreeView(AGENTS_VIEW_ID, {
@@ -172,10 +212,21 @@ export function activate(context: vscode.ExtensionContext) {
       agentTree.setHostName(hostName());
       syncAgents();
       syncSessions();
+      syncSsh();
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('devc-vscode.herdrSession')) {
         syncSessions();
+        syncSsh();
+      }
+      if (
+        e.affectsConfiguration('devc-vscode.sshHosts') ||
+        e.affectsConfiguration('devc-vscode.sshPath')
+      ) {
+        sshHomes.clear();
+        treeProvider.refresh();
+        syncSsh();
+        syncAttached();
       }
     }),
     // Which host sessions this window owns follows its terminals: re-check
@@ -192,22 +243,22 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.onDidStartTerminalShellExecution(() => scheduleSessionSync()),
     vscode.window.onDidEndTerminalShellExecution(() => scheduleSessionSync()),
     (terminalAgents = new TerminalAgentTracker({
-      isContainerTerminal,
+      isRemoteTerminal,
       async resolveContainer(terminal) {
+        const host = sshTerminalHost(terminal);
+        if (host !== undefined) {
+          return { id: sshRootKey(host), shell: sshShell(host) };
+        }
         const context = await resolveTerminalContext(terminal);
         return context
           ? {
               id: context.containerId,
-              user: await getRemoteUser(
-                context.containerId,
-                getDockerCommand()
-              ),
+              shell: await containerShell(context.containerId),
             }
           : undefined;
       },
-      probe: (id, user) => probeContainer(id, user, getDockerCommand()),
-      classify: (id, user, agent, screen) =>
-        classifyScreen(id, user, agent, screen, getDockerCommand()),
+      probe: shell => probeContainer(shell),
+      classify: (shell, agent, screen) => classifyScreen(shell, agent, screen),
       report: (terminal, id, agent) =>
         agentTree.setTerminalAgent(id, terminal, agent),
       host: {
@@ -224,6 +275,12 @@ export function activate(context: vscode.ExtensionContext) {
   agentTree.setHostName(hostName());
   syncAgents();
   syncSessions();
+  if (guardWorkspaceFolders()) {
+    syncSsh();
+  }
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => guardWorkspaceFolders())
+  );
   // Also catches foreground changes no terminal event reports, and sessions
   // that start doing work in this window's folders.
   const sessionPoll = setInterval(syncSessions, SESSION_POLL_MS);
@@ -296,26 +353,23 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.openFolderInContainer', (uri: vscode.Uri) =>
     openFolderInContainer(uri)
   );
+  register('devc-vscode.addSshHost', () => addSshHost());
 
   context.subscriptions.push(
     vscode.window.registerTerminalLinkProvider({
       async provideTerminalLinks(context) {
-        // Only activate for terminals created by "Open Folder in Container".
-        if (!isContainerTerminal(context.terminal)) {
-          return [];
-        }
-        const terminalContext = await resolveTerminalContext(context.terminal);
+        // Only activate for container terminals and SSH terminals.
+        const terminalContext = await linkContext(context.terminal);
         if (!terminalContext) {
           return [];
         }
         // Relative paths resolve against the shell's real working directory
         // once the tracker has found the terminal's pty, and against the
-        // project mount until then.
+        // project mount (or SSH root) until then.
         const liveCwd = terminalAgents.cwdFor(context.terminal);
         const pathContext = liveCwd
           ? { ...terminalContext, cwd: liveCwd }
           : terminalContext;
-        const { containerId } = terminalContext;
         const links: DevContainerTerminalLink[] = [];
         for (const candidate of findPathCandidates(context.line)) {
           const resolved = resolveCandidatePath(candidate.raw, pathContext);
@@ -323,10 +377,11 @@ export function activate(context: vscode.ExtensionContext) {
             // A ~ with no known home, or a relative path with no known base.
             continue;
           }
+          const uri = terminalContext.uriFor(resolved);
           try {
-            await provider.stat(containerUri(containerId, resolved));
+            await vscode.workspace.fs.stat(uri);
           } catch {
-            // Not a path in this container — leave it as plain text.
+            // Not a path in this environment — leave it as plain text.
             continue;
           }
           const suffix =
@@ -338,30 +393,19 @@ export function activate(context: vscode.ExtensionContext) {
             new DevContainerTerminalLink(
               candidate.startIndex,
               candidate.length,
-              containerUri(containerId, resolved).toString(true) + suffix,
-              {
-                path: resolved,
-                containerId,
-                line: candidate.line,
-                column: candidate.column,
-              }
+              uri.toString(true) + suffix,
+              { uri, line: candidate.line, column: candidate.column }
             )
           );
         }
         return links;
       },
       async handleTerminalLink(link) {
-        const {
-          path: filePath,
-          containerId,
-          line,
-          column,
-        } = (link as DevContainerTerminalLink).data;
-        const uri = containerUri(containerId, filePath);
+        const { uri, line, column } = (link as DevContainerTerminalLink).data;
         try {
-          const stat = await provider.stat(uri);
+          const stat = await vscode.workspace.fs.stat(uri);
           if (stat.type === vscode.FileType.Directory) {
-            await revealInTree(containerId, filePath);
+            await revealInTree(uri);
             return;
           }
         } catch {
@@ -407,11 +451,16 @@ function targetNode(node?: ContainerNode): ContainerNode | undefined {
 }
 
 /** The directory a new entry created against `node` belongs in. */
-function directoryOf(node: ContainerNode): vscode.Uri {
+async function directoryOf(node: ContainerNode): Promise<vscode.Uri> {
   if (node.kind === 'file') {
-    return containerUri(node.containerId, posix.dirname(node.uri.path));
+    return node.uri.with({ path: posix.dirname(node.uri.path) });
   }
-  return node.uri;
+  return treeProvider.baseUri(node);
+}
+
+/** A tree node that is a file or directory, not a root or an error. */
+function isEntry(node: ContainerNode): boolean {
+  return node.kind === 'file' || node.kind === 'directory';
 }
 
 async function createEntry(
@@ -419,10 +468,16 @@ async function createEntry(
   kind: 'file' | 'folder'
 ): Promise<void> {
   const target = targetNode(node);
-  if (!target) {
+  if (!target || target.kind === 'sshError') {
     return;
   }
-  const parent = directoryOf(target);
+  let parent: vscode.Uri;
+  try {
+    parent = await directoryOf(target);
+  } catch (err) {
+    vscode.window.showErrorMessage((err as Error).message);
+    return;
+  }
   const name = await vscode.window.showInputBox({
     prompt: `New ${kind} in ${parent.path}`,
     validateInput: validateName,
@@ -455,7 +510,7 @@ async function createEntry(
 
 async function renameEntry(node?: ContainerNode): Promise<void> {
   const target = targetNode(node);
-  if (!target || target.kind === 'container') {
+  if (!target || !isEntry(target)) {
     return;
   }
   const current = posix.basename(target.uri.path);
@@ -489,12 +544,12 @@ async function renameEntry(node?: ContainerNode): Promise<void> {
 
 async function deleteEntries(node?: ContainerNode): Promise<void> {
   const target = targetNode(node);
-  if (!target || target.kind === 'container') {
+  if (!target || !isEntry(target)) {
     return;
   }
   // Multi-select only applies when the invoked node is part of the selection —
   // a context menu on an unselected node acts on that node alone.
-  const selection = treeView.selection.filter(n => n.kind !== 'container');
+  const selection = treeView.selection.filter(isEntry);
   const nodes = selection.some(n => n.uri.toString() === target.uri.toString())
     ? selection
     : [target];
@@ -504,7 +559,7 @@ async function deleteEntries(node?: ContainerNode): Promise<void> {
       ? `'${posix.basename(nodes[0].uri.path)}'`
       : `${nodes.length} items`;
   const answer = await vscode.window.showWarningMessage(
-    `Delete ${label}? This cannot be undone — the container has no trash.`,
+    `Delete ${label}? This cannot be undone — there is no trash.`,
     { modal: true },
     'Delete'
   );
@@ -526,10 +581,15 @@ async function deleteEntries(node?: ContainerNode): Promise<void> {
 
 async function copyPath(node?: ContainerNode): Promise<void> {
   const target = targetNode(node);
-  if (!target) {
+  if (!target || target.kind === 'sshError') {
     return;
   }
-  await vscode.env.clipboard.writeText(target.uri.path);
+  try {
+    const uri = await treeProvider.baseUri(target);
+    await vscode.env.clipboard.writeText(uri.path);
+  } catch (err) {
+    vscode.window.showErrorMessage((err as Error).message);
+  }
 }
 
 async function parentNodeOf(
@@ -553,20 +613,27 @@ function validateName(value: string): string | undefined {
 
 // ── Reveal ──────────────────────────────────────────────────────────────────
 
-/** Focus the container tree and select `targetPath` in it. */
-async function revealInTree(
-  containerId: string,
-  targetPath: string
-): Promise<void> {
+/** Focus the container tree and select a container or SSH path in it. */
+async function revealInTree(uri: vscode.Uri): Promise<void> {
+  if (uri.scheme === SSH_SCHEME) {
+    // The SSH tree starts at the host's root; nothing above it is shown.
+    const root = await treeProvider.resolveSshRoot(uri.authority);
+    if (root === undefined || !isPathWithin(root, uri.path)) {
+      vscode.window.showInformationMessage(
+        `${uri.path} is outside ${uri.authority}'s root in the Dev Containers view.`
+      );
+      return;
+    }
+  }
   // reveal needs the view resolved first; `<viewId>.focus` is generated by
   // VS Code from the view contribution and is not declared in package.json.
   await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
-  const node = await treeProvider.nodeFor(containerId, targetPath);
+  const node = await treeProvider.nodeForUri(uri);
   try {
     await treeView.reveal(node, { select: true, focus: true, expand: true });
   } catch (err) {
     vscode.window.showErrorMessage(
-      `Could not show ${targetPath}: ${(err as Error).message}`
+      `Could not show ${uri.path}: ${(err as Error).message}`
     );
   }
 }
@@ -616,11 +683,15 @@ function openContainerTerminal(
 }
 
 /**
- * Show a container's terminal, opening one from its host folder when there
- * is none.
+ * Show a container's or SSH host's terminal, opening one (from the
+ * container's host folder) when there is none.
  */
 async function attachTerminal(node?: ContainerNode): Promise<void> {
   const target = node ?? treeView.selection[0];
+  if (target?.kind === 'sshHost') {
+    showSshTerminal(target.host);
+    return;
+  }
   if (target?.kind !== 'container') {
     return;
   }
@@ -651,13 +722,19 @@ async function containerTerminals(
 
 let attachedSync = 0;
 
-/** Tell the container tree which containers have a terminal open on them. */
+/**
+ * Tell the trees which containers and SSH hosts have a terminal open on
+ * them.
+ */
 function syncAttached(): void {
   const run = ++attachedSync;
   (async () => {
     const ids = new Set<string>();
     for (const terminal of vscode.window.terminals) {
-      if (isContainerTerminal(terminal) && !terminal.exitStatus) {
+      const host = sshTerminalHost(terminal);
+      if (host !== undefined && !terminal.exitStatus) {
+        ids.add(sshRootKey(host));
+      } else if (isContainerTerminal(terminal) && !terminal.exitStatus) {
         const id = (await resolveTerminalContext(terminal))?.containerId;
         if (id) {
           ids.add(id);
@@ -708,15 +785,14 @@ function scheduleSessionSync(): void {
  */
 function watchContainerAgents(
   containerId: string,
-  onAgents: Parameters<typeof watchHerdr>[3],
+  onAgents: Parameters<typeof watchHerdr>[2],
   onExit: () => void
 ): { dispose(): void } {
-  const docker = getDockerCommand();
   let watcher: { dispose(): void } | undefined;
   let disposed = false;
-  getRemoteUser(containerId, docker).then(user => {
+  containerShell(containerId).then(shell => {
     if (!disposed) {
-      watcher = watchHerdr(containerId, user, docker, onAgents, onExit);
+      watcher = watchHerdr(shell, CONTAINER_SESSION, onAgents, onExit);
     }
   }, onExit);
   return {
@@ -791,6 +867,10 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     node.terminal.show();
     return;
   }
+  if (node.ssh) {
+    await focusSshAgent(node.ssh.host, node.agent);
+    return;
+  }
   // Reveal the terminal attached to herdr in that container: the one whose
   // pty has herdr in the foreground. Before the tracker has found a
   // terminal's pty (or for terminals opened before the extension loaded), its
@@ -821,12 +901,32 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     );
     await waitForForeground(terminal, 'herdr', HERDR_ATTACH_TIMEOUT_MS);
   }
-  const docker = getDockerCommand();
-  const user = await getRemoteUser(containerId, docker);
-  if (!(await focusHerdrAgent(containerId, user, node.agent, docker))) {
+  const shell = await containerShell(containerId);
+  if (!(await focusHerdrAgent(shell, CONTAINER_SESSION, node.agent))) {
     vscode.window.showErrorMessage(
       `Could not focus ${node.agent.agent} in herdr.`
     );
+  }
+}
+
+/**
+ * Bring an SSH host's herdr agent into view: reveal the SSH terminal showing
+ * herdr, or open one that attaches to it, then have herdr switch to the
+ * agent's pane — as for a container.
+ */
+async function focusSshAgent(host: string, agent: AgentInfo): Promise<void> {
+  const candidates = sshTerminals(host);
+  const herdrTerminal =
+    candidates.find(t => terminalAgents.foregroundFor(t) === 'herdr') ??
+    candidates.find(t => terminalAgents.foregroundFor(t) === undefined);
+  if (herdrTerminal) {
+    herdrTerminal.show();
+  } else {
+    const terminal = openSshTerminal(host);
+    await waitForForeground(terminal, 'herdr', HERDR_ATTACH_TIMEOUT_MS);
+  }
+  if (!(await focusHerdrAgent(sshShell(host), remoteSessionName(), agent))) {
+    vscode.window.showErrorMessage(`Could not focus ${agent.agent} in herdr.`);
   }
 }
 
@@ -870,6 +970,8 @@ async function focusHostAgent(
 async function attachAgentGroup(node?: AgentNode): Promise<void> {
   if (node?.kind === 'host' && !node.remote) {
     await attachWorkspaceSession();
+  } else if (node?.kind === 'ssh' && !node.remote) {
+    showSshTerminal(node.host);
   } else if (node?.kind === 'container' && !node.remote) {
     const existing = await containerTerminals(node.container.id);
     if (existing.length) {
@@ -911,7 +1013,8 @@ type LaunchTarget =
   | {
       kind: 'container';
       /** The workspace folder it serves. */ folder: string;
-    };
+    }
+  | { kind: 'ssh'; host: string };
 
 /**
  * Start an agent: pick where — unless `node` is the environment to start it
@@ -923,6 +1026,8 @@ async function addAgent(node?: AgentNode): Promise<void> {
     target = { kind: 'host' };
   } else if (node?.kind === 'container' && !node.remote) {
     target = { kind: 'container', folder: node.container.localFolder };
+  } else if (node?.kind === 'ssh' && !node.remote) {
+    target = { kind: 'ssh', host: node.host };
   } else if (node && node.kind !== 'workspace') {
     return;
   }
@@ -938,7 +1043,9 @@ async function addAgent(node?: AgentNode): Promise<void> {
   const where =
     chosen.kind === 'host'
       ? `${hostName()} on the host`
-      : `the ${path.basename(chosen.folder)} dev container`;
+      : chosen.kind === 'container'
+        ? `the ${path.basename(chosen.folder)} dev container`
+        : `${sshLabel(chosen.host)} over SSH`;
   const error = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -948,7 +1055,9 @@ async function addAgent(node?: AgentNode): Promise<void> {
     (_progress, token) =>
       chosen.kind === 'host'
         ? launchOnHost(kind)
-        : launchInContainer(chosen.folder, kind, token)
+        : chosen.kind === 'container'
+          ? launchInContainer(chosen.folder, kind, token)
+          : launchOnSsh(chosen.host, kind, token)
   );
   if (error) {
     vscode.window.showErrorMessage(`Could not start ${kind}: ${error}`);
@@ -964,7 +1073,10 @@ async function pickAgentKind(): Promise<string | undefined> {
 }
 
 async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
-  const items: (vscode.QuickPickItem & { target?: LaunchTarget })[] = [];
+  const items: (vscode.QuickPickItem & {
+    target?: LaunchTarget;
+    addSshHost?: true;
+  })[] = [];
   if (workspaceSessionName() !== undefined) {
     items.push({
       label: `$(device-desktop) ${hostName()}`,
@@ -984,6 +1096,13 @@ async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
       target: { kind: 'container', folder },
     });
   }
+  const sshHosts = getSshHosts();
+  if (sshHosts.length) {
+    items.push({ label: 'SSH Hosts', kind: vscode.QuickPickItemKind.Separator });
+  }
+  for (const { host, label } of sshHosts) {
+    items.push({ label: `$(remote) ${label}`, target: { kind: 'ssh', host } });
+  }
   const targets = items.filter(item => item.target);
   if (targets.length <= 1) {
     if (!targets.length) {
@@ -991,9 +1110,18 @@ async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
     }
     return targets[0]?.target;
   }
+  items.push(
+    { label: '', kind: vscode.QuickPickItemKind.Separator },
+    { label: '$(add) Add SSH Host…', addSshHost: true }
+  );
   const picked = await vscode.window.showQuickPick(items, {
     placeHolder: 'Where to start it',
   });
+  if (picked?.addSshHost) {
+    // Adding a host ends this Add Agent; it starts nothing.
+    await addSshHost();
+    return undefined;
+  }
   return picked?.target;
 }
 
@@ -1050,9 +1178,13 @@ async function launchInContainer(
       : `herdr did not come up in the ${path.basename(folder)} dev container`;
   }
   const docker = getDockerCommand();
-  const user = await getRemoteUser(found.id, docker);
   const cwd = (await findMatchingBindMount(found.id, folder, docker))?.destPath;
-  const result = await startContainerAgent(found.id, user, cwd, kind, docker);
+  const result = await startShellAgent(
+    await containerShell(found.id),
+    CONTAINER_SESSION,
+    cwd,
+    kind
+  );
   if ('error' in result) {
     return result.error;
   }
@@ -1063,6 +1195,50 @@ async function launchInContainer(
   });
   return undefined;
 }
+
+/**
+ * Start an agent in this window's herdr session on an SSH host, first
+ * opening an SSH terminal to start the session when it is not running, then
+ * show it. Resolves why it failed, if it did.
+ */
+async function launchOnSsh(
+  host: string,
+  kind: string,
+  token: vscode.CancellationToken
+): Promise<string | undefined> {
+  const label = sshLabel(host);
+  if (!agentTree.sshState(host)?.running) {
+    // Starts `herdr --session <session>` on the host. A new terminal, as for
+    // containers: an existing one may be running anything.
+    openSshTerminal(host);
+    const up = await waitFor(
+      () => (agentTree.sshState(host)?.running ? true : undefined),
+      SSH_HERDR_START_TIMEOUT_MS,
+      token
+    );
+    if (!up) {
+      return token.isCancellationRequested
+        ? undefined
+        : `herdr did not come up on ${label}`;
+    }
+  }
+  let root: string;
+  try {
+    root = await sshRoot(host);
+  } catch (err) {
+    return (err as Error).message;
+  }
+  const session = remoteSessionName();
+  const result = await startShellAgent(sshShell(host), session, root, kind);
+  if ('error' in result) {
+    return result.error;
+  }
+  await focusSshAgent(host, { ...result.pane, agent: kind, status: 'unknown' });
+  return undefined;
+}
+
+/** How long an SSH host's herdr session gets to start. */
+const SSH_HERDR_START_TIMEOUT_MS = 60000;
 
 /** How long a dev container gets to be created and bring herdr up. */
 const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000;
@@ -1095,7 +1271,7 @@ async function findHostClient(
 ): Promise<vscode.Terminal | undefined> {
   for (const terminal of vscode.window.terminals) {
     if (
-      !isContainerTerminal(terminal) &&
+      !isRemoteTerminal(terminal) &&
       (await isHostClient(terminal, session))
     ) {
       return terminal;
@@ -1155,7 +1331,8 @@ function openHostHerdrTerminal(
  */
 type SavedTerminal =
   | { kind: 'container'; cwd?: string; command: string }
-  | { kind: 'host'; session: string; cwd?: string };
+  | { kind: 'host'; session: string; cwd?: string }
+  | { kind: 'ssh'; host: string };
 
 const SAVED_TERMINALS_KEY = 'devc-vscode.terminals';
 
@@ -1226,6 +1403,19 @@ async function restoreTerminals(): Promise<void> {
       } else {
         openContainerTerminal(entry.cwd, entry.command);
       }
+    } else if (entry.kind === 'ssh') {
+      if (!isConfiguredHost(entry.host) || !(await sshReachable(entry.host))) {
+        continue;
+      }
+      const existing = sshTerminals(entry.host).find(
+        t => !adopted.has(t) && !savedTerminals.has(t)
+      );
+      if (existing) {
+        adopted.add(existing);
+        rememberTerminal(existing, entry);
+      } else {
+        openSshTerminal(entry.host);
+      }
     } else {
       const session = sessions.find(s => s.name === entry.session);
       if (!session) {
@@ -1295,14 +1485,17 @@ async function closeAgent(node?: AgentNode): Promise<void> {
   if (node.session !== undefined) {
     const session = agentTree.hostSession(node.session);
     closed = !!session && (await closeHostHerdrPane(session, agent.paneId));
-  } else if (node.container) {
-    const docker = getDockerCommand();
-    const user = await getRemoteUser(node.container.id, docker);
+  } else if (node.ssh) {
     closed = await closeHerdrPane(
-      node.container.id,
-      user,
-      agent.paneId,
-      docker
+      sshShell(node.ssh.host),
+      remoteSessionName(),
+      agent.paneId
+    );
+  } else if (node.container) {
+    closed = await closeHerdrPane(
+      await containerShell(node.container.id),
+      CONTAINER_SESSION,
+      agent.paneId
     );
   }
   if (!closed) {
@@ -1362,6 +1555,10 @@ async function shutDownSession(
   node: AgentNode | undefined,
   remove: boolean
 ): Promise<void> {
+  if (node?.kind === 'ssh' && !node.remote) {
+    await shutDownSshSession(node.host, remove);
+    return;
+  }
   const session =
     node?.kind === 'host' && !node.remote
       ? agentTree.workspaceHostSession()
@@ -1384,7 +1581,7 @@ async function shutDownSession(
   }
   for (const terminal of [...vscode.window.terminals]) {
     if (
-      !isContainerTerminal(terminal) &&
+      !isRemoteTerminal(terminal) &&
       (await isHostClient(terminal, session))
     ) {
       terminal.dispose();
@@ -1401,6 +1598,42 @@ async function shutDownSession(
     );
   }
   scheduleSessionSync();
+}
+
+/**
+ * Close this window's SSH terminals to a host, stop this window's herdr
+ * session there, and with `remove`, delete it too. The host itself is left
+ * as it is.
+ */
+async function shutDownSshSession(host: string, remove: boolean): Promise<void> {
+  const name = remoteSessionName();
+  const label = `herdr session "${name}" on ${sshLabel(host)}`;
+  const answer = await vscode.window.showWarningMessage(
+    remove
+      ? `Delete ${label}? Its terminals are closed, every agent in it ends, and its saved state is removed.`
+      : `Stop ${label}? Its terminals are closed and every agent in it ends.`,
+    { modal: true },
+    remove ? 'Delete' : 'Stop'
+  );
+  if (!answer) {
+    return;
+  }
+  for (const terminal of sshTerminals(host)) {
+    terminal.dispose();
+  }
+  const shell = sshShell(host);
+  const stopError = await runSessionCommand(shell, ['session', 'stop', name]);
+  const deleteError =
+    !stopError && remove
+      ? await runSessionCommand(shell, ['session', 'delete', name])
+      : undefined;
+  if (stopError) {
+    vscode.window.showErrorMessage(`Could not stop ${label}: ${stopError}`);
+  } else if (deleteError) {
+    vscode.window.showErrorMessage(
+      `Stopped ${label} but could not delete it: ${deleteError}`
+    );
+  }
 }
 
 /** How long a newly opened terminal gets to bring herdr up. */
@@ -1509,6 +1742,27 @@ async function handleDockerEvent(jsonLine: string): Promise<void> {
 function isContainerTerminal(terminal: vscode.Terminal): boolean {
   const opts = terminal.creationOptions;
   return 'name' in opts && opts.name === 'devcontainer';
+}
+
+/**
+ * Whether a terminal's command runs in a container or on an SSH host,
+ * rather than on the host — its foreground there is not the host's.
+ */
+function isRemoteTerminal(terminal: vscode.Terminal): boolean {
+  return isContainerTerminal(terminal) || isSshTerminal(terminal);
+}
+
+/**
+ * A shell in a container as the user the devcontainer CLI execs as — herdr's
+ * socket lives in their home.
+ */
+async function containerShell(containerId: string): Promise<DockerShell> {
+  const docker = getDockerCommand();
+  return new DockerShell(
+    containerId,
+    await getRemoteUser(containerId, docker),
+    docker
+  );
 }
 
 function getDockerCommand(): string {
@@ -1661,4 +1915,305 @@ function selectionFor(
     Math.max(0, (column ?? 1) - 1)
   );
   return new vscode.Range(position, position);
+}
+
+// ── SSH hosts ───────────────────────────────────────────────────────────────
+
+/** Marks an SSH terminal, naming its host, in its creation options. */
+const SSH_HOST_ENV = 'DEVC_SSH_HOST';
+
+/** Invalid devc-vscode.sshHosts entries already reported this session. */
+const reportedSshEntries = new Set<string>();
+
+/**
+ * The configured SSH hosts. sshHosts is application-scoped, so this is only
+ * ever the user's settings — a workspace cannot add a host.
+ */
+function getSshHosts(): SshHostInfo[] {
+  const { hosts, invalid } = parseSshHosts(
+    vscode.workspace.getConfiguration('devc-vscode').get('sshHosts')
+  );
+  for (const host of invalid) {
+    if (!reportedSshEntries.has(host)) {
+      reportedSshEntries.add(host);
+      vscode.window.showWarningMessage(
+        `devc-vscode.sshHosts: ignoring invalid entry "${host}"`
+      );
+    }
+  }
+  return hosts;
+}
+
+/** A configured host, compared case-insensitively. */
+function sshHostInfo(host: string): SshHostInfo | undefined {
+  const key = host.toLowerCase();
+  return getSshHosts().find(info => info.host.toLowerCase() === key);
+}
+
+function isConfiguredHost(host: string): boolean {
+  return !!host && sshHostInfo(host) !== undefined;
+}
+
+function sshLabel(host: string): string {
+  return sshHostInfo(host)?.label ?? host;
+}
+
+function getSshPath(): string {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>('sshPath');
+  return configured && configured.trim() !== '' ? configured.trim() : 'ssh';
+}
+
+let controlDir: { dir: string | undefined } | undefined;
+
+/** Where ssh multiplexing sockets go; undefined runs without multiplexing. */
+function getControlDir(): string | undefined {
+  if (!controlDir) {
+    controlDir = { dir: ensureControlDir() };
+    if (!controlDir.dir) {
+      agentLog?.warn(
+        'ssh control directory is missing or not private to this user; ssh runs without connection sharing'
+      );
+    }
+  }
+  return controlDir.dir;
+}
+
+/** A shell on a configured SSH host; it refuses any other host. */
+function sshShell(host: string): SshShell {
+  return new SshShell(sshHostInfo(host)?.host ?? host, {
+    sshPath: getSshPath(),
+    controlDir: getControlDir(),
+    allowed: isConfiguredHost,
+  });
+}
+
+/** Remote homes, by host, resolved once per session. */
+const sshHomes = new Map<string, Promise<string>>();
+
+function sshHome(host: string): Promise<string> {
+  let home = sshHomes.get(host);
+  if (!home) {
+    home = (async () => {
+      const res = await sshShell(host).run(['sh', '-c', 'printf %s "$HOME"']);
+      const out = res.stdout.toString('utf8').trim();
+      if (res.exitCode !== 0 || !out.startsWith('/')) {
+        throw new Error(
+          res.stderr.toString('utf8').trim() ||
+            `${host}: could not read the remote home`
+        );
+      }
+      return out;
+    })();
+    sshHomes.set(host, home);
+    // A failure is not remembered: the host may come back.
+    home.catch(() => sshHomes.delete(host));
+  }
+  return home;
+}
+
+/** A host's effective root: its configured root, else the remote home. */
+async function sshRoot(host: string): Promise<string> {
+  const info = sshHostInfo(host);
+  if (!info) {
+    throw new Error(`"${host}" is not a configured SSH host`);
+  }
+  return info.root ?? sshHome(info.host);
+}
+
+async function sshReachable(host: string): Promise<boolean> {
+  try {
+    return (
+      (await sshShell(host).run(['true'], { timeoutMs: 10000 })).exitCode === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The herdr session this window uses on every SSH host: the herdrSession
+ * setting, else the name `herdrs` gives workspaceDir — like the host's
+ * workspace session, since one host serves many windows — else devc.
+ */
+function remoteSessionName(): string {
+  const configured = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<string>('herdrSession')
+    ?.trim();
+  if (configured) {
+    return configured;
+  }
+  const dir = workspaceDir();
+  return (dir && sessionNameForDir(dir)) || CONTAINER_SESSION;
+}
+
+let sshAllowed = true;
+
+function syncSsh(): void {
+  if (sshAllowed) {
+    agentTree.syncSsh();
+  }
+}
+
+/** The configured host an SSH terminal is on, if it is one. */
+function sshTerminalHost(terminal: vscode.Terminal): string | undefined {
+  const opts = terminal.creationOptions;
+  const host = 'env' in opts ? opts.env?.[SSH_HOST_ENV] : undefined;
+  return typeof host === 'string' ? sshHostInfo(host)?.host : undefined;
+}
+
+function isSshTerminal(terminal: vscode.Terminal): boolean {
+  return sshTerminalHost(terminal) !== undefined;
+}
+
+/** This window's open SSH terminals to a host, oldest first. */
+function sshTerminals(host: string): vscode.Terminal[] {
+  const key = host.toLowerCase();
+  return vscode.window.terminals.filter(
+    t => !t.exitStatus && sshTerminalHost(t)?.toLowerCase() === key
+  );
+}
+
+/**
+ * Open an SSH terminal in an editor tab, attached to this window's herdr
+ * session on the host, as container terminals are.
+ */
+function openSshTerminal(host: string): vscode.Terminal {
+  const info = sshHostInfo(host) ?? { host, label: host };
+  const t = vscode.window.createTerminal({
+    name: `ssh ${info.label}`,
+    iconPath: SSH_ICON,
+    location: vscode.TerminalLocation.Editor,
+    isTransient: true,
+    // See openContainerTerminal.
+    hideFromUser: true,
+    env: { [SSH_HOST_ENV]: info.host },
+  });
+  t.show();
+  t.sendText(
+    sshTerminalCommand(
+      getSshPath(),
+      info.host,
+      info.root,
+      remoteSessionName(),
+      getControlDir()
+    )
+  );
+  rememberTerminal(t, { kind: 'ssh', host: info.host });
+  return t;
+}
+
+/** Show this window's oldest SSH terminal to a host, else open one. */
+function showSshTerminal(host: string): void {
+  const existing = sshTerminals(host)[0];
+  if (existing) {
+    existing.show();
+  } else {
+    openSshTerminal(host);
+  }
+}
+
+/** Resolve paths printed in a container or SSH terminal. */
+async function linkContext(
+  terminal: vscode.Terminal
+): Promise<LinkContext | undefined> {
+  const host = sshTerminalHost(terminal);
+  if (host !== undefined) {
+    const [home, cwd] = await Promise.all([
+      sshHome(host).catch(() => undefined),
+      sshRoot(host).catch(() => undefined),
+    ]);
+    return {
+      home,
+      cwd,
+      uriFor: p =>
+        vscode.Uri.from({ scheme: SSH_SCHEME, authority: host, path: p }),
+    };
+  }
+  if (!isContainerTerminal(terminal)) {
+    return undefined;
+  }
+  const context = await resolveTerminalContext(terminal);
+  return (
+    context && {
+      home: context.home,
+      cwd: context.cwd,
+      uriFor: p => containerUri(context.containerId, p),
+    }
+  );
+}
+
+/**
+ * Pick an alias from ~/.ssh/config that is not configured yet and add it to
+ * the user-level devc-vscode.sshHosts.
+ */
+async function addSshHost(): Promise<void> {
+  const configured = new Set(getSshHosts().map(h => h.host.toLowerCase()));
+  const aliases = sshConfigAliases().filter(
+    alias => !configured.has(alias.toLowerCase())
+  );
+  if (!aliases.length) {
+    vscode.window.showInformationMessage(
+      'No other hosts found in ~/.ssh/config.'
+    );
+    return;
+  }
+  const host = await vscode.window.showQuickPick(aliases, {
+    placeHolder: 'SSH host to add',
+  });
+  if (!host) {
+    return;
+  }
+  const root = await vscode.window.showInputBox({
+    prompt: 'Remote directory to start in (blank for the remote home)',
+    validateInput: value =>
+      value.trim() === '' || value.trim().startsWith('/')
+        ? undefined
+        : 'Enter an absolute path, or leave it blank',
+  });
+  if (root === undefined) {
+    return;
+  }
+  const config = vscode.workspace.getConfiguration('devc-vscode');
+  // Not get(): that would fold in the default.
+  const current = config.inspect<unknown[]>('sshHosts')?.globalValue ?? [];
+  await config.update(
+    'sshHosts',
+    [...current, root.trim() ? { host, root: root.trim() } : { host }],
+    vscode.ConfigurationTarget.Global
+  );
+}
+
+/**
+ * Remove devc-ssh workspace folders someone added by hand. This is cleanup,
+ * not prevention: VS Code may already have read the folder's settings.
+ * Resolves whether SSH may be used in this window — not when its only folder
+ * is an SSH folder, which cannot be removed.
+ */
+function guardWorkspaceFolders(): boolean {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const ssh = folders.filter(f => f.uri.scheme === SSH_SCHEME);
+  if (!ssh.length) {
+    return sshAllowed;
+  }
+  if (folders.length === 1) {
+    sshAllowed = false;
+    vscode.window.showErrorMessage(
+      'This window has an SSH folder as its workspace. Close it and browse the host from the Dev Containers view.',
+      { modal: true }
+    );
+    return false;
+  }
+  // One at a time, highest index first: only one folder change can be
+  // pending, and the change event runs this again for the next. Removing
+  // folder 0 restarts the extension host, which runs this again and finds
+  // nothing.
+  const last = ssh.reduce((a, b) => (b.index > a.index ? b : a));
+  vscode.workspace.updateWorkspaceFolders(last.index, 1);
+  vscode.window.showWarningMessage(
+    'SSH folders cannot be workspace folders — use the Dev Containers view instead.'
+  );
+  return sshAllowed;
 }

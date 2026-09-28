@@ -3,11 +3,13 @@ import * as assert from 'assert';
 import {
   AgentTreeDataProvider,
   OTHER_WORKSPACES,
+  SshAgentSource,
   WORKSPACE,
   WatchAgents,
   summarize,
   taskLabel,
 } from '../agentTree';
+import { SshHostInfo } from '../sshFs';
 import { ContainerInfo, ContainerSource } from '../containerTree';
 import { SNAPSHOT_VERSION } from '../windowRegistry';
 import {
@@ -457,5 +459,190 @@ suite('startAgent', () => {
     assert.deepStrictEqual(await startAgent(missing.run, undefined, 'claude'), {
       error: 'herdr could not be run',
     });
+  });
+});
+
+suite('AgentTreeDataProvider with SSH hosts', () => {
+  const noContainers: ContainerSource = { listRunning: async () => [] };
+  const noWatch: WatchAgents = () => ({ dispose() {} });
+
+  function fakeSsh(hosts: SshHostInfo[]) {
+    const watchers = new Map<
+      string,
+      {
+        session: string;
+        push: (agents: AgentInfo[], running: boolean) => void;
+        exit: () => void;
+        disposed: boolean;
+      }
+    >();
+    let session = 'code.app';
+    const source: SshAgentSource = {
+      list: () => hosts,
+      session: () => session,
+      watch(host, s, onAgents, onExit) {
+        const w = { session: s, push: onAgents, exit: onExit, disposed: false };
+        watchers.set(host, w);
+        return {
+          dispose() {
+            w.disposed = true;
+          },
+        };
+      },
+    };
+    return {
+      source,
+      watchers,
+      setSession: (s: string) => (session = s),
+    };
+  }
+
+  const vm: SshHostInfo = { host: 'agent-vm', label: 'Sandbox' };
+  const other: SshHostInfo = { host: 'another', label: 'Another' };
+
+  test('shows a host once its watcher reports, running or not', () => {
+    const ssh = fakeSsh([vm]);
+    const tree = new AgentTreeDataProvider(
+      noContainers,
+      noWatch,
+      undefined,
+      ssh.source
+    );
+    tree.syncSsh();
+    assert.strictEqual(ssh.watchers.get('agent-vm')?.session, 'code.app');
+    // Not reached yet.
+    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
+    // Reachable, herdr session not running: still shown, empty.
+    ssh.watchers.get('agent-vm')!.push([], false);
+    const [env] = tree.getChildren(WORKSPACE);
+    assert.deepStrictEqual(env, {
+      kind: 'ssh',
+      host: 'agent-vm',
+      label: 'Sandbox',
+    });
+    let item = tree.getTreeItem(env);
+    assert.strictEqual(item.label, 'Sandbox');
+    assert.strictEqual(item.id, 'ssh:agent-vm');
+    assert.strictEqual(item.contextValue, 'agentSsh');
+    assert.strictEqual(
+      item.collapsibleState,
+      vscode.TreeItemCollapsibleState.None
+    );
+    assert.ok(String(item.tooltip).includes('"code.app", not running'));
+    // Running, with an agent, and a terminal to it open here.
+    ssh.watchers
+      .get('agent-vm')!
+      .push([{ paneId: 'w1:p1', agent: 'claude', status: 'working' }], true);
+    tree.setAttachedContainers(new Set(['ssh:agent-vm']));
+    item = tree.getTreeItem(env);
+    assert.strictEqual(item.contextValue, 'agentSsh.running.attached');
+    assert.strictEqual(item.description, '1 working');
+    const [agentNode] = tree.getChildren(env);
+    assert.strictEqual(
+      agentNode.kind === 'agent' && agentNode.ssh?.host,
+      'agent-vm'
+    );
+    assert.strictEqual(tree.getTreeItem(agentNode).id, 'ssh-herdr:agent-vm:w1:p1');
+    // The connection drops: gone until it reports again.
+    ssh.watchers.get('agent-vm')!.exit();
+    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
+    tree.dispose();
+  });
+
+  test('orders after containers, by label, with terminal agents', async () => {
+    const ssh = fakeSsh([vm, other]);
+    const source: ContainerSource = {
+      listRunning: async () => [
+        { id: 'c1', name: 'app', containerName: 'devc-app', localFolder: '/w/app' },
+      ],
+    };
+    const tree = new AgentTreeDataProvider(
+      source,
+      noWatch,
+      undefined,
+      ssh.source
+    );
+    await tree.sync();
+    tree.syncSsh();
+    ssh.watchers.get('agent-vm')!.push([], true);
+    ssh.watchers.get('another')!.push([], true);
+    assert.deepStrictEqual(
+      tree
+        .getChildren(WORKSPACE)
+        .map(n => (n.kind === 'ssh' ? n.label : n.kind)),
+      ['container', 'Another', 'Sandbox']
+    );
+    const terminal = { name: 'ssh Sandbox' } as vscode.Terminal;
+    tree.setTerminalAgent('ssh:agent-vm', terminal, {
+      paneId: 'terminal:pts/3',
+      agent: 'claude',
+      status: 'idle',
+    });
+    const sandbox = tree.getChildren(WORKSPACE)[2];
+    const [detected] = tree.getChildren(sandbox);
+    assert.ok(detected.kind === 'agent' && detected.terminal === terminal);
+    // Published for other windows, and found again by key.
+    const group = tree.snapshotGroups().find(g => g.kind === 'ssh' && g.host === 'agent-vm');
+    assert.ok(group && group.kind === 'ssh');
+    assert.strictEqual(group.label, 'Sandbox');
+    assert.strictEqual(group.agents.length, 1);
+    assert.strictEqual(group.agents[0].herdr, false);
+    assert.deepStrictEqual(tree.findLocal(group.agents[0].key), detected);
+    tree.dispose();
+  });
+
+  test('removed hosts and a new session restart watchers', () => {
+    const hosts = [vm];
+    const ssh = fakeSsh(hosts);
+    const tree = new AgentTreeDataProvider(
+      noContainers,
+      noWatch,
+      undefined,
+      ssh.source
+    );
+    tree.syncSsh();
+    const first = ssh.watchers.get('agent-vm')!;
+    ssh.setSession('code.other');
+    tree.syncSsh();
+    assert.ok(first.disposed);
+    const second = ssh.watchers.get('agent-vm')!;
+    assert.strictEqual(second.session, 'code.other');
+    hosts.length = 0;
+    tree.syncSsh();
+    assert.ok(second.disposed);
+    tree.dispose();
+  });
+
+  test("other windows' SSH hosts are read-only", () => {
+    const tree = new AgentTreeDataProvider(noContainers, noWatch);
+    tree.setOtherWindows([
+      {
+        version: SNAPSHOT_VERSION,
+        pid: 7,
+        name: 'beta',
+        groups: [
+          {
+            kind: 'ssh',
+            host: 'agent-vm',
+            label: 'Sandbox',
+            agents: [
+              {
+                key: 'ssh-herdr:agent-vm:w1:p1',
+                agent: { paneId: 'w1:p1', agent: 'claude', status: 'blocked' },
+                herdr: true,
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const [env] = tree.getChildren(OTHER_WORKSPACES);
+    const item = tree.getTreeItem(env);
+    assert.strictEqual(item.id, 'w7:ssh:agent-vm');
+    assert.strictEqual(item.contextValue, 'agentSshRemote');
+    const [remoteAgent] = tree.getChildren(env);
+    assert.strictEqual(tree.getTreeItem(remoteAgent).contextValue, 'agentRemote');
+    assert.strictEqual(tree.attentionCount(), 1);
+    tree.dispose();
   });
 });

@@ -15,7 +15,7 @@ import { AgentInfo } from './herdr';
  * that crashed is recognised by its extension host pid no longer running.
  */
 
-export const SNAPSHOT_VERSION = 4;
+export const SNAPSHOT_VERSION = 5;
 
 export interface PublishedAgent {
   /** Identifies the agent to its own window, for focus requests. */
@@ -27,7 +27,7 @@ export interface PublishedAgent {
 
 /**
  * One of a window's environments: its host (every host herdr session and
- * plain host terminal it owns) or a dev container.
+ * plain host terminal it owns), a dev container, or an SSH host.
  */
 export type PublishedGroup =
   | {
@@ -36,7 +36,14 @@ export type PublishedGroup =
       name: string;
       agents: PublishedAgent[];
     }
-  | { kind: 'container'; container: ContainerInfo; agents: PublishedAgent[] };
+  | { kind: 'container'; container: ContainerInfo; agents: PublishedAgent[] }
+  | {
+      kind: 'ssh';
+      /** The ~/.ssh/config alias. */
+      host: string;
+      label: string;
+      agents: PublishedAgent[];
+    };
 
 export interface WindowSnapshot {
   version: number;

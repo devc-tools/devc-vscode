@@ -1,8 +1,9 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { ContainerInfo, ContainerSource } from './containerTree';
+import { ContainerInfo, ContainerSource, sshRootKey } from './containerTree';
 import { AgentInfo, AgentStatus } from './herdr';
 import { HostSession, sessionFromClientArgs } from './hostHerdr';
+import { SshHostInfo } from './sshFs';
 import {
   PublishedAgent,
   PublishedGroup,
@@ -37,8 +38,28 @@ export type AgentNode =
       container: ContainerInfo;
       remote?: WindowSnapshot;
     }
+  /**
+   * A reachable SSH host, with the agents in this window's herdr session on
+   * it and in this window's SSH terminals to it.
+   */
+  | {
+      kind: 'ssh';
+      host: string;
+      label: string;
+      remote?: WindowSnapshot;
+    }
   | (AgentNodeBase & {
       container: ContainerInfo;
+      ssh?: undefined;
+      session?: undefined;
+      local?: undefined;
+      /** Set when detected from a terminal's output rather than by herdr. */
+      terminal?: vscode.Terminal;
+    })
+  | (AgentNodeBase & {
+      /** The SSH host the agent runs on. */
+      ssh: { host: string; label: string };
+      container?: undefined;
       session?: undefined;
       local?: undefined;
       /** Set when detected from a terminal's output rather than by herdr. */
@@ -48,6 +69,7 @@ export type AgentNode =
       /** The host herdr session the agent runs in. */
       session: string;
       container?: undefined;
+      ssh?: undefined;
       local?: undefined;
       terminal?: undefined;
     })
@@ -59,13 +81,14 @@ export type AgentNode =
        */
       local: true;
       container?: undefined;
+      ssh?: undefined;
       session?: undefined;
       /** Always set for this window's agents. */
       terminal?: vscode.Terminal;
     });
 
-/** A host or container under one of the roots. */
-type EnvNode = Extract<AgentNode, { kind: 'host' | 'container' }>;
+/** A host, container or SSH host under one of the roots. */
+type EnvNode = Extract<AgentNode, { kind: 'host' | 'container' | 'ssh' }>;
 
 export const WORKSPACE: AgentNode = { kind: 'workspace' };
 export const OTHER_WORKSPACES: AgentNode = { kind: 'otherWorkspaces' };
@@ -115,6 +138,44 @@ export interface HostSessionSource {
     onExit: () => void
   ): { dispose(): void };
 }
+
+/**
+ * The configured SSH hosts and their herdr. Injected so the tree can be
+ * exercised without ssh — see watchHerdr for the real thing.
+ */
+export interface SshAgentSource {
+  /** Configured hosts, in settings order. */
+  list(): SshHostInfo[];
+  /** The herdr session this window watches, attaches to and launches into. */
+  session(): string;
+  /** Stream a host's agents in `session`, as WatchAgents does. */
+  watch(
+    host: string,
+    session: string,
+    onAgents: (agents: AgentInfo[], running: boolean) => void,
+    onExit: () => void
+  ): { dispose(): void };
+  /** Called when a host's watcher gets its first snapshot after connecting. */
+  connected?(host: string): void;
+}
+
+interface WatchedHost {
+  info: SshHostInfo;
+  session: string;
+  agents: AgentInfo[];
+  /** herdr's server is up in the session. */
+  running: boolean;
+  /** A snapshot arrived since the watcher last (re)connected. */
+  connected: boolean;
+  watcher: { dispose(): void };
+  /** The wait before the next reconnect. */
+  retryMs: number;
+  retry?: NodeJS.Timeout;
+}
+
+/** The first wait before an SSH watcher reconnects; it doubles from here. */
+export const SSH_RETRY_MIN_MS = 5000;
+const SSH_RETRY_MAX_MS = 60000;
 
 interface WatchedSession {
   session: HostSession;
@@ -178,6 +239,7 @@ export function taskLabel(agent: AgentInfo): string {
  */
 export const CONTAINER_ICON = new vscode.ThemeIcon('vm-running');
 export const HOST_ICON = new vscode.ThemeIcon('device-desktop');
+export const SSH_ICON = new vscode.ThemeIcon('remote');
 /** Host herdr client terminals. */
 export const SESSION_ICON = new vscode.ThemeIcon('terminal-tmux');
 /** For a container with no herdr running to show agents from. */
@@ -252,6 +314,8 @@ export class AgentTreeDataProvider
   implements vscode.TreeDataProvider<AgentNode>, vscode.Disposable
 {
   private readonly watched = new Map<string, Watched>();
+  /** Configured SSH hosts, by host. */
+  private readonly sshHosts = new Map<string, WatchedHost>();
   /** Owned host sessions, by name. */
   private readonly sessions = new Map<string, WatchedSession>();
   private folders: string[] = [];
@@ -259,12 +323,18 @@ export class AgentTreeDataProvider
   private workspaceSession: string | undefined;
   /** The host environment's label: this window's workspace folder name. */
   private hostName = 'Host';
-  /** Containers with a terminal open on them in this window. */
+  /**
+   * Containers (by id) and SSH hosts (by sshRootKey) with a terminal open on
+   * them in this window.
+   */
   private attachedContainers = new Set<string>();
   private sessionSync: Promise<void> | undefined;
   private sessionSyncAgain = false;
   private disposed = false;
-  /** Agents detected from terminal output, by container then terminal. */
+  /**
+   * Agents detected from remote terminals' output, by environment (container
+   * id, or sshRootKey) then terminal.
+   */
   private readonly terminalAgents = new Map<
     string,
     Map<vscode.Terminal, AgentInfo>
@@ -290,8 +360,114 @@ export class AgentTreeDataProvider
   constructor(
     private readonly source: ContainerSource,
     private readonly watch: WatchAgents,
-    private readonly hosts?: HostSessionSource
+    private readonly hosts?: HostSessionSource,
+    private readonly ssh?: SshAgentSource
   ) {}
+
+  /**
+   * Watch every configured SSH host in this window's session: start watchers
+   * for new hosts, stop them for removed ones, and restart them when the
+   * session changes.
+   */
+  syncSsh(): void {
+    const ssh = this.ssh;
+    if (!ssh || this.disposed) {
+      return;
+    }
+    const configured = new Map(ssh.list().map(info => [info.host, info]));
+    const session = ssh.session();
+    let changed = false;
+    for (const [host, entry] of this.sshHosts) {
+      if (!configured.has(host) || entry.session !== session) {
+        this.stopSsh(entry);
+        this.sshHosts.delete(host);
+        changed = true;
+      }
+    }
+    for (const [host, info] of configured) {
+      const existing = this.sshHosts.get(host);
+      if (existing) {
+        changed ||= JSON.stringify(existing.info) !== JSON.stringify(info);
+        existing.info = info;
+        continue;
+      }
+      const entry: WatchedHost = {
+        info,
+        session,
+        agents: [],
+        running: false,
+        connected: false,
+        watcher: { dispose() {} },
+        retryMs: SSH_RETRY_MIN_MS,
+      };
+      this.sshHosts.set(host, entry);
+      this.startSsh(entry);
+    }
+    if (changed) {
+      this._onDidChangeTreeData.fire(undefined);
+    }
+  }
+
+  private startSsh(entry: WatchedHost): void {
+    const host = entry.info.host;
+    entry.connected = false;
+    entry.watcher = this.ssh!.watch(
+      host,
+      entry.session,
+      (agents, running) => {
+        if (this.sshHosts.get(host) !== entry) {
+          return;
+        }
+        const first = !entry.connected;
+        entry.connected = true;
+        entry.retryMs = SSH_RETRY_MIN_MS;
+        if (
+          first ||
+          running !== entry.running ||
+          JSON.stringify(agents) !== JSON.stringify(entry.agents)
+        ) {
+          entry.agents = agents;
+          entry.running = running;
+          this._onDidChangeTreeData.fire(undefined);
+        }
+        if (first) {
+          this.ssh!.connected?.(host);
+        }
+      },
+      () => {
+        if (this.sshHosts.get(host) !== entry || this.disposed) {
+          return;
+        }
+        const wasShown = entry.connected;
+        entry.connected = false;
+        entry.running = false;
+        entry.agents = [];
+        if (wasShown) {
+          this._onDidChangeTreeData.fire(undefined);
+        }
+        // Unreachable, or the connection dropped: try again later.
+        entry.retry = setTimeout(() => {
+          entry.retry = undefined;
+          if (this.sshHosts.get(host) === entry && !this.disposed) {
+            this.startSsh(entry);
+          }
+        }, entry.retryMs);
+        entry.retryMs = Math.min(entry.retryMs * 2, SSH_RETRY_MAX_MS);
+      }
+    );
+  }
+
+  private stopSsh(entry: WatchedHost): void {
+    clearTimeout(entry.retry);
+    entry.retry = undefined;
+    entry.watcher.dispose();
+  }
+
+  /** An SSH host's state, as its watcher last reported it. */
+  sshState(host: string): { connected: boolean; running: boolean } | undefined {
+    const entry = this.sshHosts.get(host);
+    return entry && { connected: entry.connected, running: entry.running };
+  }
 
   /** Start watching new containers and stop watching ones that are gone. */
   async sync(): Promise<void> {
@@ -603,9 +779,14 @@ export class AgentTreeDataProvider
             ]
           : []
       );
-      return env.kind === 'host'
-        ? { kind: 'host', name: env.name, agents }
-        : { kind: 'container', container: env.container, agents };
+      switch (env.kind) {
+        case 'host':
+          return { kind: 'host', name: env.name, agents };
+        case 'container':
+          return { kind: 'container', container: env.container, agents };
+        case 'ssh':
+          return { kind: 'ssh', host: env.host, label: env.label, agents };
+      }
     });
   }
 
@@ -624,6 +805,11 @@ export class AgentTreeDataProvider
       // Pane ids repeat across sessions, so the session is part of the key.
       return `host-herdr:${node.session}:${node.agent.paneId}`;
     }
+    if (node.ssh) {
+      return node.terminal
+        ? `ssh-terminal:${node.ssh.host}:${this.terminalId(node.terminal)}`
+        : `ssh-herdr:${node.ssh.host}:${node.agent.paneId}`;
+    }
     return node.terminal
       ? `terminal:${node.container.id}:${this.terminalId(node.terminal)}`
       : `herdr:${node.container.id}:${node.agent.paneId}`;
@@ -631,16 +817,22 @@ export class AgentTreeDataProvider
 
   /**
    * This window's environments: the host while its workspace session runs or
-   * it has agents, then every running container by label.
+   * it has agents, then every running container by label, then every
+   * reachable SSH host by label.
    */
   private localEnvs(): EnvNode[] {
     const containers = [...this.watched.values()]
       .map(w => w.container)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((container): EnvNode => ({ kind: 'container', container }));
+    const ssh = [...this.sshHosts.values()]
+      .filter(entry => entry.connected)
+      .map(entry => entry.info)
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ host, label }): EnvNode => ({ kind: 'ssh', host, label }));
     return this.workspaceHostSession() || this.hostAgentNodes().length
-      ? [{ kind: 'host', name: this.hostName }, ...containers]
-      : containers;
+      ? [{ kind: 'host', name: this.hostName }, ...containers, ...ssh]
+      : [...containers, ...ssh];
   }
 
   /**
@@ -689,6 +881,17 @@ export class AgentTreeDataProvider
     return [...fromHerdr, ...fromTerminals];
   }
 
+  private nodesForSsh(host: string, label: string): AgentNode[] {
+    const ssh = { host, label };
+    const fromHerdr: AgentNode[] = (this.sshHosts.get(host)?.agents ?? []).map(
+      agent => ({ kind: 'agent', ssh, agent })
+    );
+    const fromTerminals: AgentNode[] = [
+      ...(this.terminalAgents.get(sshRootKey(host)) ?? []),
+    ].map(([terminal, agent]) => ({ kind: 'agent', ssh, agent, terminal }));
+    return [...fromHerdr, ...fromTerminals];
+  }
+
   private terminalId(terminal: vscode.Terminal): number {
     let id = this.terminalIds.get(terminal);
     if (id === undefined) {
@@ -702,6 +905,7 @@ export class AgentTreeDataProvider
   allAgents(): AgentInfo[] {
     return [
       ...[...this.watched.values()].flatMap(w => w.agents),
+      ...[...this.sshHosts.values()].flatMap(h => h.agents),
       ...[...this.terminalAgents.values()].flatMap(m => [...m.values()]),
       ...this.localAgents.values(),
       ...[...this.sessions.values()].flatMap(s =>
@@ -739,6 +943,10 @@ export class AgentTreeDataProvider
         return node.remote
           ? this.remoteAgents(node, node.remote)
           : this.nodesFor(node.container);
+      case 'ssh':
+        return node.remote
+          ? this.remoteAgents(node, node.remote)
+          : this.nodesForSsh(node.host, node.label);
       default:
         return [];
     }
@@ -765,27 +973,47 @@ export class AgentTreeDataProvider
               container,
               remote,
             })),
+          ...groups
+            .flatMap(g => (g.kind === 'ssh' ? [g] : []))
+            .sort((a, b) => a.label.localeCompare(b.label))
+            .map(({ host, label }): EnvNode => ({
+              kind: 'ssh',
+              host,
+              label,
+              remote,
+            })),
         ];
       });
   }
 
   /** Another window's agents in one of its environments. */
   private remoteAgents(env: EnvNode, window: WindowSnapshot): AgentNode[] {
-    const group = window.groups.find(g =>
-      env.kind === 'host'
-        ? g.kind === 'host'
-        : g.kind === 'container' && g.container.id === env.container.id
-    );
+    const group = window.groups.find(g => {
+      switch (env.kind) {
+        case 'host':
+          return g.kind === 'host';
+        case 'container':
+          return g.kind === 'container' && g.container.id === env.container.id;
+        case 'ssh':
+          return g.kind === 'ssh' && g.host === env.host;
+      }
+    });
     return (group?.agents ?? []).map((published): AgentNode => {
       const remote = { window, published };
-      return env.kind === 'host'
-        ? { kind: 'agent', local: true, agent: published.agent, remote }
-        : {
+      const agent = published.agent;
+      switch (env.kind) {
+        case 'host':
+          return { kind: 'agent', local: true, agent, remote };
+        case 'container':
+          return { kind: 'agent', container: env.container, agent, remote };
+        case 'ssh':
+          return {
             kind: 'agent',
-            container: env.container,
-            agent: published.agent,
+            ssh: { host: env.host, label: env.label },
+            agent,
             remote,
           };
+      }
     });
   }
 
@@ -892,6 +1120,35 @@ export class AgentTreeDataProvider
           : 'agentContainer';
       return item;
     }
+    if (node.kind === 'ssh') {
+      const agents = this.agentsUnder(node);
+      const item = new vscode.TreeItem(node.label, groupState(agents));
+      item.id = `${scope}ssh:${node.host}`;
+      item.iconPath = SSH_ICON;
+      item.description = summarize(agents);
+      if (node.remote) {
+        item.tooltip = `SSH host ${node.host}, in window "${node.remote.name}"`;
+        item.contextValue = 'agentSshRemote';
+        return item;
+      }
+      const entry = this.sshHosts.get(node.host);
+      item.tooltip = [
+        `SSH host ${node.host}`,
+        entry &&
+          `herdr session "${entry.session}"${entry.running ? '' : ', not running'}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      // Only a running session can be stopped or deleted.
+      item.contextValue = [
+        'agentSsh',
+        entry?.running && '.running',
+        this.attachedContainers.has(sshRootKey(node.host)) && '.attached',
+      ]
+        .filter(Boolean)
+        .join('');
+      return item;
+    }
     const { agent } = node;
     const herdr = isHerdrAgent(node);
     const item = new vscode.TreeItem(
@@ -933,6 +1190,10 @@ export class AgentTreeDataProvider
       entry.watcher.dispose();
     }
     this.watched.clear();
+    for (const entry of this.sshHosts.values()) {
+      this.stopSsh(entry);
+    }
+    this.sshHosts.clear();
     for (const entry of this.sessions.values()) {
       entry.watcher.dispose();
     }
