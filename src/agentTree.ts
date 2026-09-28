@@ -20,6 +20,8 @@ interface AgentNodeBase {
 export type AgentNode =
   /** Holds this window's environments. */
   | { kind: 'workspace' }
+  /** Holds this window's reachable SSH hosts. */
+  | { kind: 'sshHosts' }
   /** Holds other VS Code windows' environments. */
   | { kind: 'otherWorkspaces' }
   /**
@@ -91,6 +93,7 @@ export type AgentNode =
 type EnvNode = Extract<AgentNode, { kind: 'host' | 'container' | 'ssh' }>;
 
 export const WORKSPACE: AgentNode = { kind: 'workspace' };
+export const SSH_HOSTS: AgentNode = { kind: 'sshHosts' };
 export const OTHER_WORKSPACES: AgentNode = { kind: 'otherWorkspaces' };
 
 /**
@@ -306,9 +309,10 @@ export function summarize(agents: AgentInfo[]): string {
  * agents; a session while it is attached here, is this window's workspace
  * session, or has agents in this window's folders.
  *
- * The tree has two roots, Workspace and Other Workspaces, each holding
- * environments: a host, then the running dev containers. The host holds every
- * host session's agents and the plain host terminals' in one list.
+ * The tree has up to three roots: Workspace, holding a host then the running
+ * dev containers; SSH Hosts, holding the reachable SSH hosts; and Other
+ * Workspaces, holding other windows' environments. The host holds every host
+ * session's agents and the plain host terminals' in one list.
  */
 export class AgentTreeDataProvider
   implements vscode.TreeDataProvider<AgentNode>, vscode.Disposable
@@ -815,24 +819,32 @@ export class AgentTreeDataProvider
       : `herdr:${node.container.id}:${node.agent.paneId}`;
   }
 
-  /**
-   * This window's environments: the host while its workspace session runs or
-   * it has agents, then every running container by label, then every
-   * reachable SSH host by label.
-   */
+  /** This window's environments: the Workspace root's, then SSH Hosts'. */
   private localEnvs(): EnvNode[] {
+    return [...this.workspaceEnvs(), ...this.sshEnvs()];
+  }
+
+  /**
+   * The Workspace root's environments: the host while its workspace session
+   * runs or it has agents, then every running container by label.
+   */
+  private workspaceEnvs(): EnvNode[] {
     const containers = [...this.watched.values()]
       .map(w => w.container)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((container): EnvNode => ({ kind: 'container', container }));
-    const ssh = [...this.sshHosts.values()]
+    return this.workspaceHostSession() || this.hostAgentNodes().length
+      ? [{ kind: 'host', name: this.hostName }, ...containers]
+      : containers;
+  }
+
+  /** The SSH Hosts root's environments: every reachable host by label. */
+  private sshEnvs(): EnvNode[] {
+    return [...this.sshHosts.values()]
       .filter(entry => entry.connected)
       .map(entry => entry.info)
       .sort((a, b) => a.label.localeCompare(b.label))
       .map(({ host, label }): EnvNode => ({ kind: 'ssh', host, label }));
-    return this.workspaceHostSession() || this.hostAgentNodes().length
-      ? [{ kind: 'host', name: this.hostName }, ...containers, ...ssh]
-      : [...containers, ...ssh];
   }
 
   /**
@@ -925,14 +937,19 @@ export class AgentTreeDataProvider
 
   getChildren(node?: AgentNode): AgentNode[] {
     if (!node) {
-      // Other Workspaces shows only while another window has agents.
-      return this.remoteEnvs().length
-        ? [WORKSPACE, OTHER_WORKSPACES]
-        : [WORKSPACE];
+      // SSH Hosts shows only while a host is reachable, Other Workspaces only
+      // while another window has agents.
+      return [
+        WORKSPACE,
+        ...(this.sshEnvs().length ? [SSH_HOSTS] : []),
+        ...(this.remoteEnvs().length ? [OTHER_WORKSPACES] : []),
+      ];
     }
     switch (node.kind) {
       case 'workspace':
-        return this.localEnvs();
+        return this.workspaceEnvs();
+      case 'sshHosts':
+        return this.sshEnvs();
       case 'otherWorkspaces':
         return this.remoteEnvs();
       case 'host':
@@ -1041,6 +1058,17 @@ export class AgentTreeDataProvider
   }
 
   private buildTreeItem(node: AgentNode): vscode.TreeItem {
+    if (node.kind === 'sshHosts') {
+      const item = new vscode.TreeItem(
+        'SSH Hosts',
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = node.kind;
+      item.description = summarize(this.agentsUnder(node));
+      item.tooltip = 'Agents on SSH hosts, in this VS Code window';
+      item.contextValue = 'agentSshHosts';
+      return item;
+    }
     if (node.kind === 'workspace' || node.kind === 'otherWorkspaces') {
       const own = node.kind === 'workspace';
       const item = new vscode.TreeItem(

@@ -3,6 +3,7 @@ import * as assert from 'assert';
 import {
   AgentTreeDataProvider,
   OTHER_WORKSPACES,
+  SSH_HOSTS,
   SshAgentSource,
   WORKSPACE,
   WatchAgents,
@@ -510,11 +511,16 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
     );
     tree.syncSsh();
     assert.strictEqual(ssh.watchers.get('agent-vm')?.session, 'code.app');
-    // Not reached yet.
-    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
+    // Not reached yet: no SSH Hosts root.
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE]);
+    assert.deepStrictEqual(tree.getChildren(SSH_HOSTS), []);
     // Reachable, herdr session not running: still shown, empty.
     ssh.watchers.get('agent-vm')!.push([], false);
-    const [env] = tree.getChildren(WORKSPACE);
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE, SSH_HOSTS]);
+    const root = tree.getTreeItem(SSH_HOSTS);
+    assert.strictEqual(root.label, 'SSH Hosts');
+    assert.strictEqual(root.contextValue, 'agentSshHosts');
+    const [env] = tree.getChildren(SSH_HOSTS);
     assert.deepStrictEqual(env, {
       kind: 'ssh',
       host: 'agent-vm',
@@ -537,6 +543,7 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
     item = tree.getTreeItem(env);
     assert.strictEqual(item.contextValue, 'agentSsh.running.attached');
     assert.strictEqual(item.description, '1 working');
+    assert.strictEqual(tree.getTreeItem(SSH_HOSTS).description, '1 working');
     const [agentNode] = tree.getChildren(env);
     assert.strictEqual(
       agentNode.kind === 'agent' && agentNode.ssh?.host,
@@ -545,11 +552,11 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
     assert.strictEqual(tree.getTreeItem(agentNode).id, 'ssh-herdr:agent-vm:w1:p1');
     // The connection drops: gone until it reports again.
     ssh.watchers.get('agent-vm')!.exit();
-    assert.deepStrictEqual(tree.getChildren(WORKSPACE), []);
+    assert.deepStrictEqual(tree.getChildren(), [WORKSPACE]);
     tree.dispose();
   });
 
-  test('orders after containers, by label, with terminal agents', async () => {
+  test('sit under SSH Hosts by label, apart from containers, with terminal agents', async () => {
     const ssh = fakeSsh([vm, other]);
     const source: ContainerSource = {
       listRunning: async () => [
@@ -567,10 +574,14 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
     ssh.watchers.get('agent-vm')!.push([], true);
     ssh.watchers.get('another')!.push([], true);
     assert.deepStrictEqual(
+      tree.getChildren(WORKSPACE).map(n => n.kind),
+      ['container']
+    );
+    assert.deepStrictEqual(
       tree
-        .getChildren(WORKSPACE)
+        .getChildren(SSH_HOSTS)
         .map(n => (n.kind === 'ssh' ? n.label : n.kind)),
-      ['container', 'Another', 'Sandbox']
+      ['Another', 'Sandbox']
     );
     const terminal = { name: 'ssh Sandbox' } as vscode.Terminal;
     tree.setTerminalAgent('ssh:agent-vm', terminal, {
@@ -578,7 +589,7 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
       agent: 'claude',
       status: 'idle',
     });
-    const sandbox = tree.getChildren(WORKSPACE)[2];
+    const sandbox = tree.getChildren(SSH_HOSTS)[1];
     const [detected] = tree.getChildren(sandbox);
     assert.ok(detected.kind === 'agent' && detected.terminal === terminal);
     // Published for other windows, and found again by key.
