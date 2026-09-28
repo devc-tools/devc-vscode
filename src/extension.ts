@@ -118,7 +118,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(treeView);
 
-  const agentLog = vscode.window.createOutputChannel('Agents', {
+  const agentLog = vscode.window.createOutputChannel('Devc', {
     log: true,
   });
   context.subscriptions.push(agentLog);
@@ -297,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerTerminalLinkProvider({
       async provideTerminalLinks(context) {
-        // Only activate for terminals created by our "Open in Dev Container" command.
+        // Only activate for terminals created by "Open Folder in Container".
         if (!isContainerTerminal(context.terminal)) {
           return [];
         }
@@ -326,11 +326,16 @@ export function activate(context: vscode.ExtensionContext) {
             // Not a path in this container — leave it as plain text.
             continue;
           }
+          const suffix =
+            candidate.line === undefined
+              ? ''
+              : `:${candidate.line}` +
+                (candidate.column === undefined ? '' : `:${candidate.column}`);
           links.push(
             new DevContainerTerminalLink(
               candidate.startIndex,
               candidate.length,
-              'Open in Dev Container',
+              containerUri(containerId, resolved).toString(true) + suffix,
               {
                 path: resolved,
                 containerId,
@@ -359,7 +364,9 @@ export function activate(context: vscode.ExtensionContext) {
         } catch {
           // Fall through and let the editor report the failure.
         }
-        vscode.window.showTextDocument(uri, {
+        // vscode.open picks the editor for the file type, so binary files like
+        // images open in their viewer instead of failing as text.
+        await vscode.commands.executeCommand('vscode.open', uri, {
           selection: selectionFor(line, column),
         });
       },
