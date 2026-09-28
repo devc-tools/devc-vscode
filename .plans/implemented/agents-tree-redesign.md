@@ -4,7 +4,7 @@ Flatten the Agents view to two root nodes, **Workspace** and **Other Workspaces*
 each holding environment nodes (one host, one per dev container) with agents directly
 under them. Add a `+` flow that launches a new agent in a chosen environment.
 
-Source design: [tree-design.md](tree-design.md). This plan records that design plus the
+Source design: [tree-design.md](tree-design.md) (archived alongside this plan). This plan records that design plus the
 decisions made reviewing it.
 
 ## Checklist
@@ -15,7 +15,7 @@ decisions made reviewing it.
 - [x] Tree: environment visibility rules (running only)
 - [x] Registry: environment-shaped published groups, `SNAPSHOT_VERSION` bump
 - [x] Menus: `+` on the Workspace root and this workspace's environment nodes; existing lifecycle actions re-pointed to environment nodes
-- [x] Launch flow: agent picker → environment picker (skipped when only one) → start agent
+- [x] Launch flow: environment picker (skipped when only one) → agent picker → start agent
 - [x] Setting: `devc-vscode.agentKinds`
 - [x] Remove the old node kinds, placeholders and the view's welcome text
 - [x] Tests (see Validation)
@@ -40,8 +40,9 @@ decisions made reviewing it.
 - **Buttons:** environment nodes keep today's inline actions (attach, stop, trash) and add
   `+`. Agents keep inline trash. Whether to move destructive actions to the context menu
   is deferred until the new tree is in use.
-- **Launch order:** agent first, then environment. If there's only one possible
-  environment, skip the environment picker.
+- **Launch order:** environment first, then agent. If there's only one possible
+  environment, skip the environment picker; if only one agent kind is configured, skip
+  the agent picker.
 - **Other Workspaces is read-only.** It has no `+` and no lifecycle actions. Clicking an
   agent switches windows, as today.
 
@@ -127,14 +128,15 @@ New command:
 
 The flow in `addAgent`:
 
-1. **Agent picker:** a `QuickPick` of `devc-vscode.agentKinds`. Items are labelled by
-   kind.
-2. **Environment picker** (skipped when started from an environment node, or when only
-   one environment is possible). Items:
-   - `$(device-desktop) <workspaceDir basename>` with description `host`. Only present when
-     `hostHerdrSupported()`.
-   - `$(vm-running) <folder basename>` with description `container`, one per workspace folder
-     (`getHostFolders()`), whether or not its container is running.
+1. **Environment picker** (placeholder `Where to start it`; skipped when started from an
+   environment node, or when only one environment is possible). Items:
+   - `$(device-desktop) <workspaceDir basename>`. Only present when the window has a
+     workspace session name (`workspaceSessionName() !== undefined`).
+   - A `Dev Containers` separator, then `$(vm-running) <folder basename>`, one per
+     workspace folder (`getHostFolders()`), whether or not its container is running.
+   - With no environments at all, show `There is nowhere to start an agent.`
+2. **Agent picker:** a `QuickPick` of `devc-vscode.agentKinds` (placeholder
+   `Agent to start`), labelled by kind. Skipped when only one kind is configured.
 3. **Start:**
    - **Host:**
      1. Make sure the workspace session is running and attached. Reuse
@@ -150,7 +152,8 @@ The flow in `addAgent`:
         running.
      2. Run the same two herdr commands through `docker exec`, following the pattern of
         `closeHerdrPane` (`PATH="$HOME/.local/bin:$PATH"`, user from `getRemoteUser`).
-        `--cwd` is the container workspace folder.
+        `--cwd` is the container workspace folder. Every container herdr command passes
+        `--session=devc`, the session `devc herdr` starts (not herdr's default).
    - `<name>` is the kind (e.g. `claude`). herdr's agent name is not shown in the tree.
 4. On success, bring the terminal attached to that environment to the front. The new
    agent shows up through the existing watchers; there's no optimistic insert.

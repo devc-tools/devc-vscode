@@ -6,7 +6,7 @@ Browse and edit files on an SSH host (primarily the agent sandbox VM from `devc-
 that shells out to coreutils, surfaced by a contributed Explorer `TreeView` — with `ssh <host>`
 in place of `docker exec <container>`.
 
-**Depends on** [explorer-tree-view.md](explorer-tree-view.md) (phase 1): reuses its tree,
+**Depends on** [explorer-tree-view.md](implemented/explorer-tree-view.md) (phase 1): reuses its tree,
 command, and drag-and-drop patterns. Its code is in; only its host-only validation is open.
 
 ## Why this shape
