@@ -95,10 +95,12 @@ let agentTree: AgentTreeDataProvider;
 let terminalAgents: TerminalAgentTracker;
 let windows: WindowRegistry;
 let dockerEventsProcess: cp.ChildProcess | undefined;
+let workspaceState: vscode.Memento;
 
 // ── Activation ──────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
+  workspaceState = context.workspaceState;
   provider = new DevContainerFileSystemProvider();
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider(SCHEME, provider, {
@@ -182,7 +184,8 @@ export function activate(context: vscode.ExtensionContext) {
       scheduleSessionSync();
       syncAttached();
     }),
-    vscode.window.onDidCloseTerminal(() => {
+    vscode.window.onDidCloseTerminal(terminal => {
+      forgetTerminal(terminal);
       scheduleSessionSync();
       syncAttached();
     }),
@@ -376,6 +379,9 @@ export function activate(context: vscode.ExtensionContext) {
   // Watch for container start/stop events so roots appear and vanish live.
   startDockerEventsWatcher();
   syncAttached();
+  restoreTerminals().catch(err => {
+    console.error('devc-vscode: terminal restore error', err);
+  });
 }
 
 export function deactivate() {
@@ -605,6 +611,7 @@ function openContainerTerminal(
   });
   t.show();
   t.sendText(command);
+  rememberTerminal(t, { kind: 'container', cwd, command });
   return t;
 }
 
@@ -1135,7 +1142,105 @@ function openHostHerdrTerminal(
   });
   t.show();
   t.sendText(attachCommand(session));
+  rememberTerminal(t, { kind: 'host', session: session.name, cwd });
   return t;
+}
+
+// ── Terminal restore ────────────────────────────────────────────────────────
+
+/**
+ * A terminal this extension opened, as needed to open it again. They are
+ * transient, so VS Code drops them on restart while the herdr sessions and
+ * containers they were attached to keep running.
+ */
+type SavedTerminal =
+  | { kind: 'container'; cwd?: string; command: string }
+  | { kind: 'host'; session: string; cwd?: string };
+
+const SAVED_TERMINALS_KEY = 'devc-vscode.terminals';
+
+/** This window's managed terminals, in the order they were opened. */
+const savedTerminals = new Map<vscode.Terminal, SavedTerminal>();
+
+function rememberTerminal(terminal: vscode.Terminal, saved: SavedTerminal) {
+  savedTerminals.set(terminal, saved);
+  persistTerminals();
+}
+
+/**
+ * Drop a closed terminal from what is restored — unless the window closing
+ * is what closed it, which is exactly when it should come back.
+ */
+function forgetTerminal(terminal: vscode.Terminal): void {
+  const reason = terminal.exitStatus?.reason;
+  if (
+    reason === vscode.TerminalExitReason.Shutdown ||
+    reason === vscode.TerminalExitReason.Unknown
+  ) {
+    return;
+  }
+  if (savedTerminals.delete(terminal)) {
+    persistTerminals();
+  }
+}
+
+function persistTerminals(): void {
+  workspaceState
+    .update(SAVED_TERMINALS_KEY, [...savedTerminals.values()])
+    .then(undefined, err => {
+      console.error('devc-vscode: could not save terminals', err);
+    });
+}
+
+/**
+ * Reopen the terminals open when this workspace was last closed, for the
+ * containers and herdr sessions still running. A target that already has a
+ * terminal (the extension host restarted, not the window) keeps that one.
+ * Those not reopened are forgotten.
+ */
+async function restoreTerminals(): Promise<void> {
+  const saved = workspaceState.get<SavedTerminal[]>(SAVED_TERMINALS_KEY, []);
+  if (!saved.length) {
+    return;
+  }
+  const docker = getDockerCommand();
+  const sessions = saved.some(s => s.kind === 'host')
+    ? await listHostSessions()
+    : [];
+  const adopted = new Set<vscode.Terminal>();
+  // Opened one at a time, so they come back in their original order.
+  for (const entry of saved) {
+    if (entry.kind === 'container') {
+      const containerId = entry.cwd
+        ? await findContainerForHostFolder(entry.cwd, docker)
+        : undefined;
+      if (!containerId) {
+        continue;
+      }
+      const existing = (await containerTerminals(containerId)).find(
+        t => !adopted.has(t) && !savedTerminals.has(t)
+      );
+      if (existing) {
+        adopted.add(existing);
+        rememberTerminal(existing, entry);
+      } else {
+        openContainerTerminal(entry.cwd, entry.command);
+      }
+    } else {
+      const session = sessions.find(s => s.name === entry.session);
+      if (!session) {
+        continue;
+      }
+      const existing = await findHostClient(session);
+      if (existing && !savedTerminals.has(existing)) {
+        rememberTerminal(existing, entry);
+      } else {
+        openHostHerdrTerminal(session, entry.cwd);
+      }
+    }
+  }
+  // Nothing reopened still writes the list, so forgotten entries go.
+  persistTerminals();
 }
 
 /**
