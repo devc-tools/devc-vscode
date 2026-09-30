@@ -19,8 +19,7 @@ This extension keeps the remote at arm's length. It installs nothing there, read
 
    ```sh
    npm install
-   npm run compile
-   npm run package:dev   # builds devc-vscode-dev.vsix and installs it with `code`
+   npm run package:dev   # compiles, builds devc-vscode-dev.vsix and installs it with `code`
    ```
 
 2. Install the tools for the features you want. Each one is optional, and the extension offers only what the installed tools support.
