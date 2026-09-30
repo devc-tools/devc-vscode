@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
+out/test/**
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
@@ -11,3 +12,4 @@ vsc-extension-quickstart.md
 **/.vscode-test.*
 .plans/**
 spike/**
+docs/**
