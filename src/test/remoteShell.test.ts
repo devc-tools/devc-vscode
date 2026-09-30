@@ -1,3 +1,4 @@
+import * as cp from 'child_process';
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -8,7 +9,7 @@ import {
   startShellAgent,
   watchHerdr,
 } from '../herdr';
-import { DockerShell } from '../remoteShell';
+import { DockerShell, containerTerminalCommand } from '../remoteShell';
 import { classifyScreen, probeContainer } from '../terminalAgents';
 
 /**
@@ -173,5 +174,36 @@ suite('DockerShell keeps the docker argv', () => {
     ]);
     assert.ok(classify[7].includes('herdr agent explain --file "$f"'));
     assert.deepStrictEqual(classify.slice(8), ['sh', 'claude']);
+  });
+});
+
+suite('containerTerminalCommand', () => {
+  const SCRIPT =
+    'PATH="$HOME/.local/bin:$PATH"; if command -v herdr >/dev/null 2>&1; then exec herdr --session=devc; else s=$(getent passwd "$(id -u)" | cut -d: -f7); exec "${s:-sh}" -l; fi';
+  const quoted = `'${SCRIPT.replace(/'/g, `'\\''`)}'`;
+
+  test('builds the exact command', () => {
+    assert.strictEqual(
+      containerTerminalCommand('docker', 'abc123', 'vscode', '/workspaces/app', 'devc'),
+      `docker exec -it -u vscode -w /workspaces/app abc123 sh -c ${quoted}`
+    );
+  });
+
+  test('omits the user and workdir when unknown, and quotes the docker path', () => {
+    assert.strictEqual(
+      containerTerminalCommand('/opt/my docker', 'abc123', undefined, undefined, 'devc'),
+      `'/opt/my docker' exec -it abc123 sh -c ${quoted}`
+    );
+  });
+
+  test('the host shell hands sh the script intact', () => {
+    const out = cp.execFileSync('sh', [
+      '-c',
+      containerTerminalCommand('printf', 'x', undefined, undefined, 'devc').replace(
+        /^printf exec -it x sh -c /,
+        "printf '%s' "
+      ),
+    ]);
+    assert.strictEqual(out.toString('utf8'), SCRIPT);
   });
 });

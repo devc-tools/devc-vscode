@@ -328,3 +328,39 @@ export function sshTerminalCommand(
     .map(hostShellWord)
     .join(' ');
 }
+
+// ── Container terminals without devc ────────────────────────────────────────
+
+/**
+ * The command a container terminal types into its host shell when there is
+ * no devc to run: an interactive `docker exec` as `user` in `workdir` that
+ * attaches to herdr `session` in the container — or, with no herdr there,
+ * opens the user's login shell. `docker exec` rarely sets $SHELL, so the
+ * login shell comes from passwd.
+ */
+export function containerTerminalCommand(
+  dockerCommand: string,
+  containerId: string,
+  user: string | undefined,
+  workdir: string | undefined,
+  session: string
+): string {
+  const script =
+    'PATH="$HOME/.local/bin:$PATH"; ' +
+    'if command -v herdr >/dev/null 2>&1; then ' +
+    `exec herdr --session=${hostShellWord(session)}; ` +
+    'else s=$(getent passwd "$(id -u)" | cut -d: -f7); exec "${s:-sh}" -l; fi';
+  return [
+    dockerCommand,
+    'exec',
+    '-it',
+    ...(user ? ['-u', user] : []),
+    ...(workdir ? ['-w', workdir] : []),
+    containerId,
+    'sh',
+    '-c',
+    script,
+  ]
+    .map(hostShellWord)
+    .join(' ');
+}

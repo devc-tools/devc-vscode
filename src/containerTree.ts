@@ -859,10 +859,15 @@ export class DockerContainerSource implements ContainerSource {
       return [];
     }
 
+    let labelled: LabelledContainer[];
+    try {
+      labelled = await listLabelledDevContainers(this.dockerCommand());
+    } catch {
+      // Docker cannot be run at all: no containers, and SSH roots still list.
+      return [];
+    }
     const found = new Map<string, ContainerInfo>();
-    for (const container of await listLabelledDevContainers(
-      this.dockerCommand()
-    )) {
+    for (const container of labelled) {
       // The most specific workspace folder wins, so a nested folder labels its
       // containers relative to itself rather than to its parent.
       const owner = hostFolders

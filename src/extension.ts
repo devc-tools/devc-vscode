@@ -14,6 +14,7 @@ import {
 } from './agentTree';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
 import {
+  ContainerInfo,
   ContainerNode,
   ContainerTreeDataProvider,
   DockerContainerSource,
@@ -47,6 +48,7 @@ import {
   readHostSession,
   sessionFromClientArgs,
   sessionNameForDir,
+  hostHerdrInstalled,
   hostHerdrSupported,
   startHostAgent,
   stopHostSession,
@@ -73,9 +75,11 @@ import {
 import {
   DockerShell,
   SshShell,
+  containerTerminalCommand,
   ensureControlDir,
   sshTerminalCommand,
 } from './remoteShell';
+import { commandAvailable, dockerInstalled, findDevc } from './tools';
 import {
   SSH_SCHEME,
   SshFileSystemProvider,
@@ -331,6 +335,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
   register('devc-vscode.refresh', () => {
+    detectTools();
     syncTargetCache.clear();
     treeProvider.refresh();
   });
@@ -451,6 +456,25 @@ export function activate(context: vscode.ExtensionContext) {
       },
     })
   );
+
+  // Tools can be installed or removed while the window is open.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (
+        TOOL_SETTINGS.some(key =>
+          e.affectsConfiguration(`devc-vscode.${key}`)
+        )
+      ) {
+        detectTools();
+      }
+    }),
+    vscode.window.onDidChangeWindowState(state => {
+      if (state.focused && Date.now() - lastToolDetection >= TOOL_RECHECK_MS) {
+        detectTools();
+      }
+    })
+  );
+  detectTools();
 
   // Watch for container start/stop events so roots appear and vanish live.
   startDockerEventsWatcher();
@@ -898,7 +922,8 @@ async function openReview(request: ReviewRequest): Promise<void> {
  */
 function openContainerTerminal(
   cwd: string | undefined,
-  command: string
+  command: string,
+  fallback = false
 ): vscode.Terminal {
   // hideFromUser is the only creationOptions flag the Python extension checks
   // before injecting `source .../activate` into a new terminal (see
@@ -915,8 +940,57 @@ function openContainerTerminal(
   });
   t.show();
   t.sendText(command);
-  rememberTerminal(t, { kind: 'container', cwd, command });
+  // A fallback command names the container, so it is rebuilt on restore
+  // rather than replayed: the container may have been recreated.
+  rememberTerminal(
+    t,
+    fallback ? { kind: 'container', cwd } : { kind: 'container', cwd, command }
+  );
   return t;
+}
+
+/**
+ * Open a container terminal on a running container without devc: a
+ * `docker exec` attached to its herdr, else a login shell, in the folder's
+ * mount. `hostFolder` is the terminal's cwd, which resolves it to the
+ * container.
+ */
+async function openFallbackTerminal(
+  containerId: string,
+  hostFolder: string | undefined
+): Promise<vscode.Terminal> {
+  const docker = getDockerCommand();
+  const [user, mount] = await Promise.all([
+    getRemoteUser(containerId, docker),
+    hostFolder
+      ? findMatchingBindMount(containerId, hostFolder, docker).catch(
+          () => undefined
+        )
+      : undefined,
+  ]);
+  return openContainerTerminal(
+    hostFolder,
+    containerTerminalCommand(
+      docker,
+      containerId,
+      user,
+      mount?.destPath,
+      CONTAINER_SESSION
+    ),
+    true
+  );
+}
+
+/**
+ * Open a terminal attached to a running container's herdr: the
+ * herdrAttachCommand when it can run, else the docker exec fallback.
+ */
+async function openHerdrAttachTerminal(
+  container: ContainerInfo
+): Promise<vscode.Terminal> {
+  return commandSettingAvailable('herdrAttachCommand', await currentTools())
+    ? openContainerTerminal(container.localFolder, getHerdrAttachCommand())
+    : openFallbackTerminal(container.id, container.localFolder);
 }
 
 /**
@@ -937,7 +1011,11 @@ async function attachTerminal(node?: ContainerNode): Promise<void> {
     existing[0].show();
     return;
   }
-  openContainerTerminal(target.localFolder, getOpenFolderCommand());
+  if (commandSettingAvailable('openFolderCommand', await currentTools())) {
+    openContainerTerminal(target.localFolder, getOpenFolderCommand());
+  } else {
+    await openFallbackTerminal(target.containerId, target.localFolder);
+  }
 }
 
 /** This window's open terminals on a container, oldest first. */
@@ -1132,10 +1210,7 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     // Focus once herdr is up, so the pane switch lands in a client that is
     // showing. Without shell integration the tracker never sees the terminal,
     // so after the wait focus is tried regardless.
-    const terminal = openContainerTerminal(
-      node.container.localFolder,
-      getHerdrAttachCommand()
-    );
+    const terminal = await openHerdrAttachTerminal(node.container);
     await waitForForeground(terminal, 'herdr', HERDR_ATTACH_TIMEOUT_MS);
   }
   const shell = await containerShell(containerId);
@@ -1215,7 +1290,7 @@ async function attachAgentGroup(node?: AgentNode): Promise<void> {
       existing[0].show();
       return;
     }
-    openContainerTerminal(node.container.localFolder, getHerdrAttachCommand());
+    await openHerdrAttachTerminal(node.container);
   }
 }
 
@@ -1314,13 +1389,21 @@ async function pickLaunchTarget(): Promise<LaunchTarget | undefined> {
     target?: LaunchTarget;
     addSshHost?: true;
   })[] = [];
-  if (workspaceSessionName() !== undefined) {
+  const tools = await currentTools();
+  if (workspaceSessionName() !== undefined && tools.hostHerdr) {
     items.push({
       label: `$(device-desktop) ${hostName()}`,
       target: { kind: 'host' },
     });
   }
-  const folders = getHostFolders();
+  // Without the herdrAttachCommand, only a running container can have its
+  // herdr brought up (by the docker exec fallback).
+  const canCreate = commandSettingAvailable('herdrAttachCommand', tools);
+  const folders = tools.docker
+    ? getHostFolders().filter(
+        folder => canCreate || agentTree.containerFor(folder)
+      )
+    : [];
   if (folders.length) {
     items.push({
       label: 'Dev Containers',
@@ -1397,9 +1480,17 @@ async function launchInContainer(
   kind: string,
   token: vscode.CancellationToken
 ): Promise<string | undefined> {
-  if (!agentTree.containerFor(folder)?.herdrRunning) {
-    // Brings the container, and herdr in it, up.
-    openContainerTerminal(folder, getHerdrAttachCommand());
+  const entry = agentTree.containerFor(folder);
+  if (!entry?.herdrRunning) {
+    if (commandSettingAvailable('herdrAttachCommand', await currentTools())) {
+      // Brings the container, and herdr in it, up.
+      openContainerTerminal(folder, getHerdrAttachCommand());
+    } else if (entry) {
+      // Brings herdr up in the running container, if it has herdr.
+      await openFallbackTerminal(entry.container.id, folder);
+    } else {
+      return 'devc not found — install devc or set devc-vscode.herdrAttachCommand';
+    }
   }
   const found = await waitFor(
     () => {
@@ -1567,7 +1658,8 @@ function openHostHerdrTerminal(
  * containers they were attached to keep running.
  */
 type SavedTerminal =
-  | { kind: 'container'; cwd?: string; command: string }
+  // No command: the docker exec fallback, rebuilt for the container found.
+  | { kind: 'container'; cwd?: string; command?: string }
   | { kind: 'host'; session: string; cwd?: string }
   | { kind: 'ssh'; host: string };
 
@@ -1626,7 +1718,9 @@ async function restoreTerminals(): Promise<void> {
   for (const entry of saved) {
     if (entry.kind === 'container') {
       const containerId = entry.cwd
-        ? await findContainerForHostFolder(entry.cwd, docker)
+        ? await findContainerForHostFolder(entry.cwd, docker).catch(
+            () => undefined
+          )
         : undefined;
       if (!containerId) {
         continue;
@@ -1637,6 +1731,8 @@ async function restoreTerminals(): Promise<void> {
       if (existing) {
         adopted.add(existing);
         rememberTerminal(existing, entry);
+      } else if (entry.command === undefined) {
+        await openFallbackTerminal(containerId, entry.cwd);
       } else {
         openContainerTerminal(entry.cwd, entry.command);
       }
@@ -1898,6 +1994,95 @@ function waitForForeground(
     };
     check();
   });
+}
+
+// ── Tool detection ──────────────────────────────────────────────────────────
+
+/** Which optional host tools are here, as of the last check. */
+interface ToolState {
+  docker: boolean;
+  hostHerdr: boolean;
+  devc: boolean;
+}
+
+/** Settings holding a command typed into a terminal; each defaults to devc. */
+const COMMAND_SETTINGS = [
+  'openFolderCommand',
+  'herdrAttachCommand',
+  'stopCommand',
+  'downCommand',
+] as const;
+
+/** Settings that change what the checks find or what they mean. */
+const TOOL_SETTINGS = ['dockerPath', 'sshHosts', ...COMMAND_SETTINGS];
+
+/** Regaining focus re-checks the tools at most this often. */
+const TOOL_RECHECK_MS = 30000;
+
+let toolDetection: Promise<ToolState> | undefined;
+let lastToolDetection = 0;
+
+/**
+ * Check which tools are here, then publish the result to menus (context
+ * keys) and the Agents view. A later check's result wins.
+ */
+function detectTools(): Promise<ToolState> {
+  lastToolDetection = Date.now();
+  const run = (async (): Promise<ToolState> => {
+    const [docker, hostHerdr, devcPath] = await Promise.all([
+      dockerInstalled(getDockerCommand()),
+      hostHerdrInstalled(),
+      findDevc(),
+    ]);
+    return { docker, hostHerdr, devc: devcPath !== undefined };
+  })();
+  toolDetection = run;
+  run.then(state => {
+    if (toolDetection === run) {
+      applyTools(state);
+    }
+  });
+  return run;
+}
+
+/** The latest tool check, starting one if none has run. */
+function currentTools(): Promise<ToolState> {
+  return toolDetection ?? detectTools();
+}
+
+function applyTools(state: ToolState): void {
+  const keys: Record<string, boolean> = {
+    'devc-vscode.hasDocker': state.docker,
+    'devc-vscode.hasHostHerdr': state.hostHerdr,
+    'devc-vscode.hasSshHosts': getSshHosts().length > 0,
+    'devc-vscode.canOpenFolder': commandSettingAvailable(
+      'openFolderCommand',
+      state
+    ),
+    'devc-vscode.canStop': commandSettingAvailable('stopCommand', state),
+    'devc-vscode.canDown': commandSettingAvailable('downCommand', state),
+  };
+  for (const [key, value] of Object.entries(keys)) {
+    vscode.commands.executeCommand('setContext', key, value);
+  }
+  agentTree.setMissingTools({
+    hostHerdr: hostHerdrSupported() && !state.hostHerdr,
+    docker: !state.docker,
+  });
+}
+
+/**
+ * Whether a command setting will run: set by the user, or the default with
+ * devc here to run it.
+ */
+function commandSettingAvailable(
+  key: (typeof COMMAND_SETTINGS)[number],
+  state: ToolState
+): boolean {
+  return commandAvailable(
+    vscode.workspace.getConfiguration('devc-vscode').inspect<string>(key),
+    state.devc
+  );
 }
 
 // ── Docker events watcher ───────────────────────────────────────────────────

@@ -10,6 +10,8 @@
 
 - [SSH Tree Sync Actions](ssh-tree-sync-actions.md) — inline Send / Fetch on SSH tree folders that are worktrees of a local repo (matched against the remote worktree listing at the mirrored path), plus fetch-only for worktrees that exist only on the host.
 
+- [Optional Tool Detection](optional-tool-detection.md) — detect Docker, devc and host herdr; gate commands and pickers on what is present, keep SSH roots when Docker is missing, and fall back to a `docker exec` container terminal without devc.
+
 ### Completed
 
 - [Container File Tree as a Contributed Explorer View](implemented/explorer-tree-view.md) — replace workspace-folder grafting with a `TreeView` in the Explorer panel, backed by the existing filesystem provider. ✅ Done (host-only validation not run)
@@ -28,3 +30,4 @@
 | 5 | [ssh-environments.md](ssh-environments.md) | SSH hosts as environments over a shared docker/ssh runner seam; host allowlist in application-scoped settings, Add SSH Host from `~/.ssh/config` | in progress |
 | 6 | [ssh-workspace-sync.md](ssh-workspace-sync.md) | Git-based Send / Fetch to SSH hosts at mirrored paths, review diff on fetch (depends on phase 5) | in progress |
 | 7 | [ssh-tree-sync-actions.md](ssh-tree-sync-actions.md) | Send / Fetch actions on synced folders in the Sandboxes view's SSH tree (depends on phase 6) | in progress |
+| 8 | [optional-tool-detection.md](optional-tool-detection.md) | Detect Docker / devc / host herdr, gate commands and UI, docker exec terminal fallback | in progress |

@@ -5,6 +5,7 @@ import {
   ContainerNode,
   ContainerSource,
   ContainerTreeDataProvider,
+  DockerContainerSource,
   FileOps,
   SyncTargetSource,
   containerUri,
@@ -698,6 +699,32 @@ suite('ContainerTreeDataProvider with SSH hosts (no ssh required)', () => {
     assert.strictEqual(children.length, 4);
     assert.ok(
       children.every(c => !provider.getTreeItem(c).contextValue?.includes('.'))
+    );
+  });
+});
+
+suite('Docker CLI missing', () => {
+  const noDocker = () =>
+    new DockerContainerSource(() => '/nonexistent/docker', () => ['/work/app']);
+
+  test('lists no containers rather than failing', async () => {
+    assert.deepStrictEqual(await noDocker().listRunning(), []);
+  });
+
+  test('SSH roots still list', async () => {
+    const provider = new ContainerTreeDataProvider(
+      noDocker(),
+      new FakeFileOps(),
+      async () => true,
+      {
+        list: () => [{ host: 'agent-vm', label: 'Sandbox' }],
+        root: async () => '/home/ubuntu',
+      }
+    );
+    const roots = await provider.getChildren();
+    assert.deepStrictEqual(
+      roots.map(r => [r.kind, r.kind === 'sshHost' ? r.host : undefined]),
+      [['sshHost', 'agent-vm']]
     );
   });
 });

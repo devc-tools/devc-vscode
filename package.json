@@ -31,12 +31,12 @@
         "devc-vscode.openFolderCommand": {
           "type": "string",
           "default": "devc herdr",
-          "description": "Command sent to the terminal by \"Open Folder in Container\" and by the Sandboxes view's Attach Terminal action."
+          "description": "Command sent to the terminal by \"Open Folder in Container\" and by the Sandboxes view's Attach Terminal action. Without devc on PATH and with this setting unset, Attach Terminal opens a docker exec shell instead, attached to the container's herdr when it has one."
         },
         "devc-vscode.herdrAttachCommand": {
           "type": "string",
           "default": "devc herdr",
-          "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr."
+          "description": "Command that opens a terminal attached to herdr in the dev container. Run in a new terminal when a herdr agent in the Agents view is clicked and no terminal is showing herdr. Without devc on PATH and with this setting unset, a running container gets a docker exec shell attached to its herdr instead."
         },
         "devc-vscode.agentKinds": {
           "type": "array",
@@ -59,12 +59,12 @@
         "devc-vscode.stopCommand": {
           "type": "string",
           "default": "devc stop",
-          "description": "Command run from a container's host folder by the Agents view's Stop Container action, after its terminals are closed."
+          "description": "Command run from a container's host folder by the Agents view's Stop Container action, after its terminals are closed. The action shows when devc is on PATH or this setting is set."
         },
         "devc-vscode.downCommand": {
           "type": "string",
           "default": "devc down",
-          "description": "Command run from a container's host folder by the Agents view's Down Container action, after its terminals are closed."
+          "description": "Command run from a container's host folder by the Agents view's Down Container action, after its terminals are closed. The action shows when devc is on PATH or this setting is set."
         },
         "devc-vscode.sshHosts": {
           "type": "array",
@@ -321,12 +321,12 @@
         },
         {
           "command": "devc-vscode.stopContainer",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/ && devc-vscode.canStop",
           "group": "inline@2"
         },
         {
           "command": "devc-vscode.downContainer",
-          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/",
+          "when": "view == devc-vscode.agents && viewItem =~ /^agentContainer(\\.attached)?$/ && devc-vscode.canDown",
           "group": "inline@3"
         },
         {
@@ -353,16 +353,16 @@
       "explorer/context": [
         {
           "command": "devc-vscode.openFolderInContainer",
-          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode"
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && devc-vscode.canOpenFolder"
         },
         {
           "command": "devc-vscode.sendToSshHost",
-          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh",
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh && devc-vscode.hasSshHosts",
           "group": "devc@1"
         },
         {
           "command": "devc-vscode.fetchFromSshHost",
-          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh",
+          "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && resourceScheme != devc-ssh && devc-vscode.hasSshHosts",
           "group": "devc@1"
         }
       ],
@@ -410,6 +410,18 @@
         {
           "command": "devc-vscode.addAgent",
           "when": "false"
+        },
+        {
+          "command": "devc-vscode.openFolderInContainer",
+          "when": "devc-vscode.canOpenFolder"
+        },
+        {
+          "command": "devc-vscode.sendToSshHost",
+          "when": "devc-vscode.hasSshHosts"
+        },
+        {
+          "command": "devc-vscode.fetchFromSshHost",
+          "when": "devc-vscode.hasSshHosts"
         }
       ]
     },

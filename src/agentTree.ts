@@ -93,6 +93,12 @@ export type AgentNode =
 type EnvNode = Extract<AgentNode, { kind: 'host' | 'container' | 'ssh' }>;
 
 export const WORKSPACE: AgentNode = { kind: 'workspace' };
+
+/** Host tools found missing: host herdr (where supported) and Docker. */
+export interface MissingTools {
+  hostHerdr: boolean;
+  docker: boolean;
+}
 export const SSH_HOSTS: AgentNode = { kind: 'sshHosts' };
 export const OTHER_WORKSPACES: AgentNode = { kind: 'otherWorkspaces' };
 
@@ -327,6 +333,8 @@ export class AgentTreeDataProvider
   private workspaceSession: string | undefined;
   /** The host environment's label: this window's workspace folder name. */
   private hostName = 'Host';
+  /** Host tools found missing, which the Workspace row's tooltip names. */
+  private missingTools: MissingTools = { hostHerdr: false, docker: false };
   /**
    * Containers (by id) and SSH hosts (by sshRootKey) with a terminal open on
    * them in this window.
@@ -675,6 +683,17 @@ export class AgentTreeDataProvider
   setHostName(name: string): void {
     if (name !== this.hostName) {
       this.hostName = name;
+      this._onDidChangeTreeData.fire(undefined);
+    }
+  }
+
+  /** Record which host tools are missing. */
+  setMissingTools(missing: MissingTools): void {
+    if (
+      missing.hostHerdr !== this.missingTools.hostHerdr ||
+      missing.docker !== this.missingTools.docker
+    ) {
+      this.missingTools = { ...missing };
       this._onDidChangeTreeData.fire(undefined);
     }
   }
@@ -1061,7 +1080,8 @@ export class AgentTreeDataProvider
     if (node.kind === 'sshHosts') {
       const item = new vscode.TreeItem(
         'SSH Hosts',
-        vscode.TreeItemCollapsibleState.Expanded
+        // Like Other Workspaces: out of the way until wanted.
+        vscode.TreeItemCollapsibleState.Collapsed
       );
       item.id = node.kind;
       item.description = summarize(this.agentsUnder(node));
@@ -1081,7 +1101,15 @@ export class AgentTreeDataProvider
       item.id = node.kind;
       item.description = summarize(this.agentsUnder(node));
       item.tooltip = own
-        ? 'Agents in this VS Code window'
+        ? [
+            'Agents in this VS Code window',
+            this.missingTools.hostHerdr &&
+              'Install herdr to run agents on this machine.',
+            this.missingTools.docker &&
+              'Install Docker, or set devc-vscode.dockerPath, to use dev containers.',
+          ]
+            .filter(Boolean)
+            .join('\n')
         : 'Agents in other VS Code windows';
       item.contextValue = own ? 'agentWorkspace' : 'agentOtherWorkspaces';
       return item;

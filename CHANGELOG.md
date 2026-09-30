@@ -4,6 +4,8 @@
 
 ### Changed
 
+- A missing Docker CLI no longer empties the Sandboxes view: SSH host roots still list.
+
 - The Explorer tree view is renamed from **Dev Containers** to **Sandboxes**, since it holds SSH hosts as well as dev containers. Its view id (`devc-vscode.containers`) is unchanged.
 
 - Window snapshots shared between windows are now version 5 (they carry SSH hosts); windows running an older build of the extension ignore them until updated.
@@ -13,6 +15,9 @@
 - The tree supports New File, New Folder, Rename, Delete (multi-select), Copy Container Path, and drag-and-drop — moves within a container, copies across containers and from the host Explorer.
 
 ### Added
+
+- **Every host tool is optional.** The extension checks for the Docker CLI, devc and host herdr on startup, on Refresh, when a related setting changes and when the window regains focus, and offers only what they support. Open Folder in Container and Stop / Down Container show when devc is found in `~/.local/bin` or on PATH, or when their command setting is set. Add Agent lists the host only when host herdr runs, and a container folder only when devc can start it or its container is running. Send / Fetch to SSH Host show once an SSH host is configured. The Agents view's Workspace tooltip names a missing herdr or Docker.
+- **Container terminals without devc.** With no devc and the command setting unset, a container's Attach Terminal (and a herdr agent's focus, and Add Agent on a running container) opens `docker exec -it` into the workspace mount, attached to the container's herdr when it has one, else the user's login shell. These terminals are rebuilt for the current container on restore.
 
 - **Send from Local / Fetch to Local** inline on SSH folders in the Sandboxes view that are Git worktrees of a local repo (the local repos behind the workspace folders, matched at the mirrored path against the host's worktree list). The host's branch shows beside the folder. Worktrees that exist only on the host are marked `(not local)` and offer Fetch into the local main worktree.
 - **Send to SSH Host… / Fetch from SSH Host…** on local folders in the Explorer: push a repo's current branch to a configured SSH host at the same home-relative path (worktrees become worktrees there), and fetch the host's branches back into a review diff that lists files that can run code first. Fetch never merges or checks out. git's ssh gets the same forced-off forwarding as the extension's own.

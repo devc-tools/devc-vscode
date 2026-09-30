@@ -520,6 +520,10 @@ suite('AgentTreeDataProvider with SSH hosts', () => {
     const root = tree.getTreeItem(SSH_HOSTS);
     assert.strictEqual(root.label, 'SSH Hosts');
     assert.strictEqual(root.contextValue, 'agentSshHosts');
+    assert.strictEqual(
+      root.collapsibleState,
+      vscode.TreeItemCollapsibleState.Collapsed
+    );
     const [env] = tree.getChildren(SSH_HOSTS);
     assert.deepStrictEqual(env, {
       kind: 'ssh',

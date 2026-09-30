@@ -123,6 +123,15 @@ export function parseSessionList(output: string): HostSession[] {
   return result;
 }
 
+/** Whether herdr runs on the host; false on Windows. */
+export async function hostHerdrInstalled(): Promise<boolean> {
+  if (!hostHerdrSupported()) {
+    return false;
+  }
+  const res = await runHerdr(['--version'], undefined, 5000);
+  return res?.exitCode === 0;
+}
+
 /** Running host sessions; [] when herdr is missing or the host is Windows. */
 export async function listHostSessions(): Promise<HostSession[]> {
   if (!hostHerdrSupported()) {
