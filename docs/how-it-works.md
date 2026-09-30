@@ -2,6 +2,22 @@
 
 Reference for how each part of the extension behaves. For setup and everyday use, see the [README](../README.md).
 
+## Security model
+
+The extension adds no path for your credentials to reach a container or SSH host:
+
+- **Nothing installed remotely.** Files, links and agent status use `docker exec` and `ssh` running coreutils and herdr's CLI. No VS Code server, no extensions run remotely.
+- **No credential forwarding.** `docker exec` passes no host environment or sockets. Every ssh forces `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes` and `PermitLocalCommand=no`, terminals and git included.
+- **One direction.** Send and Fetch run on the host and connect out; the host never connects back. Fetch never merges, and it flags files that could run code when merged ([details](ssh-sync.md#fetch)).
+- **SSH hosts stay text.** An SSH host is never a workspace folder, so a `.vscode/settings.json`, `tasks.json` or `launch.json` an agent writes there is never applied.
+
+What it can't control:
+
+- **The container's own config.** A `devcontainer.json` can mount `~/.ssh`, pass tokens in environment variables, or mount the Docker socket. Check what yours grants. devc's default container has no git credentials; its [bridge](https://github.com/devc-tools/devc-tools/blob/main/docs/bridge-github.md) offers a few named GitHub actions instead.
+- **The bind-mounted project folder.** A dev container's project folder is also the folder open in your VS Code window. Anything an agent writes there, such as `.vscode/tasks.json` or a git hook, lands in your host workspace and can run there. Workspace Trust and devc's [git protection](https://github.com/devc-tools/devc-tools/blob/main/devc/README.md#git-protection-frozen-gitconfig-and-githooks) reduce this; SSH hosts with Send / Fetch avoid it.
+- **Using VS Code's remote extensions on the same container or host.** Opening it with Dev Containers or Remote-SSH brings their credential forwarding back.
+- **Agents on this machine.** Agents started on the host run with your full user account.
+
 ## Which containers show up
 
 A running dev container gets a root in the Sandboxes view when its project folder is an open workspace folder or sits under one. The project folder comes from the container's `devcontainer.local_folder` label, which devc, the devcontainer CLI and VS Code Dev Containers all set. A container started for a subfolder gets its own root beside the workspace folder's.

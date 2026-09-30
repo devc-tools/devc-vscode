@@ -7,6 +7,12 @@ Browse, edit and run agents in your dev containers and SSH sandboxes from VS Cod
 - **Terminals:** file paths printed in container and SSH terminals are clickable.
 - **Send / Fetch:** move a Git repo's commits to an SSH host and review what comes back.
 
+## Why
+
+VS Code's remote extensions (Dev Containers, Remote-SSH) install a VS Code server on the remote and pass your credentials through to it: git credential helpers, your ssh agent, your `.gitconfig`. Anything running there, including a coding agent, can use them.
+
+This extension keeps the remote at arm's length. It installs nothing there, reads and writes files with plain `docker exec` and `ssh`, forces ssh agent and port forwarding off, and never opens an SSH host as a workspace. You get files, terminals and agent status for a sandbox without handing the sandbox your keys. See [Security model](docs/how-it-works.md#security-model) for what that does and doesn't cover.
+
 ## Install
 
 1. Build and install the extension (Node 24, see `.nvmrc`):
