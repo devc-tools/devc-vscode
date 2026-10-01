@@ -317,6 +317,22 @@ suite('AgentTreeDataProvider', () => {
     tree.dispose();
   });
 
+  test('fires when a new container appears', async () => {
+    const source = new FakeSource();
+    const { watch } = fakeWatch();
+    const tree = new AgentTreeDataProvider(source, watch);
+    await tree.sync();
+
+    let fired = 0;
+    tree.onDidChangeTreeData(() => fired++);
+    source.containers = [container('a')];
+    await tree.sync();
+    assert.strictEqual(fired, 1);
+    await tree.sync();
+    assert.strictEqual(fired, 1);
+    tree.dispose();
+  });
+
   test('fires only when agents actually change', async () => {
     const source = new FakeSource();
     source.containers = [container('a')];

@@ -507,6 +507,9 @@ export class AgentTreeDataProvider
         watcher: { dispose() {} },
       };
       this.watched.set(container.id, entry);
+      // Show the container now: a watcher whose first report matches the
+      // empty initial state (no herdr running) never fires on its own.
+      changed = true;
       entry.watcher = this.watch(
         container.id,
         (agents, running = true) => {
