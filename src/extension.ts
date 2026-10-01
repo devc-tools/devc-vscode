@@ -339,6 +339,13 @@ export function activate(context: vscode.ExtensionContext) {
     syncTargetCache.clear();
     treeProvider.refresh();
   });
+  register('devc-vscode.refreshAgents', () => {
+    detectTools();
+    syncAgents();
+    syncSessions();
+    syncSsh();
+    syncAttached();
+  });
   register('devc-vscode.expandAllAgents', () =>
     agentTree.setExpansion('expanded')
   );

@@ -171,6 +171,12 @@
         "category": "Dev Container FS"
       },
       {
+        "command": "devc-vscode.refreshAgents",
+        "title": "Refresh Agents",
+        "category": "Dev Container FS",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "devc-vscode.expandAllAgents",
         "title": "Expand All",
         "category": "Dev Container FS",
@@ -236,6 +242,11 @@
           "command": "devc-vscode.refresh",
           "when": "view == devc-vscode.containers",
           "group": "navigation"
+        },
+        {
+          "command": "devc-vscode.refreshAgents",
+          "when": "view == devc-vscode.agents",
+          "group": "navigation@0"
         },
         {
           "command": "devc-vscode.expandAllAgents",
