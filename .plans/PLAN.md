@@ -12,6 +12,8 @@
 
 - [Optional Tool Detection](optional-tool-detection.md) — detect Docker, devc and host herdr; gate commands and pickers on what is present, keep SSH roots when Docker is missing, and fall back to a `docker exec` container terminal without devc.
 
+- [Agent Review Comments](agent-review-comments.md) — comment threads on host editors and GitHub PR review diffs that submit the question, with the container path and code, to a herdr agent in the dev container (`herdr agent prompt`); the agent's answer comes back as a thread reply through a watched reply file.
+
 ### Completed
 
 - [Container File Tree as a Contributed Explorer View](implemented/explorer-tree-view.md) — replace workspace-folder grafting with a `TreeView` in the Explorer panel, backed by the existing filesystem provider. ✅ Done (host-only validation not run)
@@ -31,3 +33,4 @@
 | 6 | [ssh-workspace-sync.md](ssh-workspace-sync.md) | Git-based Send / Fetch to SSH hosts at mirrored paths, review diff on fetch (depends on phase 5) | in progress |
 | 7 | [ssh-tree-sync-actions.md](ssh-tree-sync-actions.md) | Send / Fetch actions on synced folders in the Sandboxes view's SSH tree (depends on phase 6) | in progress |
 | 8 | [optional-tool-detection.md](optional-tool-detection.md) | Detect Docker / devc / host herdr, gate commands and UI, docker exec terminal fallback | in progress |
+| 9 | [agent-review-comments.md](agent-review-comments.md) | Ask a container agent about code from comment threads, including PR review diffs; replies shown in the thread | |
