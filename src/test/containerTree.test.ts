@@ -10,6 +10,7 @@ import {
   SyncTargetSource,
   containerUri,
   isPathWithin,
+  mapHostPath,
   parseUriList,
   rootLabel,
   sortEntries,
@@ -445,6 +446,60 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
 
     test('parseUriList tolerates bare LF', () => {
       assert.strictEqual(parseUriList('file:///a\nfile:///b').length, 2);
+    });
+
+    test('mapHostPath maps a host path under a bind mount', () => {
+      const mounts = [
+        {
+          containerId: 'c1',
+          localFolder: '/Users/me/code/app',
+          source: '/Users/me/code/app',
+          destination: '/workspaces/app',
+        },
+      ];
+      assert.deepStrictEqual(
+        mapHostPath('/Users/me/code/app/src/a b.ts', mounts),
+        { containerId: 'c1', path: '/workspaces/app/src/a b.ts' }
+      );
+      assert.deepStrictEqual(mapHostPath('/Users/me/code/app/', mounts), {
+        containerId: 'c1',
+        path: '/workspaces/app',
+      });
+      assert.strictEqual(
+        mapHostPath('/Users/me/code/app2/x', mounts),
+        undefined
+      );
+    });
+
+    test('mapHostPath prefers the most specific mount, then the project container', () => {
+      const mounts = [
+        {
+          containerId: 'other',
+          localFolder: '/Users/me/code/other',
+          source: '/Users/me/code',
+          destination: '/code',
+        },
+        {
+          containerId: 'tools',
+          localFolder: '',
+          source: '/Users/me/code/app',
+          destination: '/mnt/app',
+        },
+        {
+          containerId: 'app',
+          localFolder: '/Users/me/code/app',
+          source: '/Users/me/code/app',
+          destination: '/workspaces/app',
+        },
+      ];
+      assert.deepStrictEqual(mapHostPath('/Users/me/code/app/x', mounts), {
+        containerId: 'app',
+        path: '/workspaces/app/x',
+      });
+      assert.deepStrictEqual(mapHostPath('/Users/me/code/lib/y', mounts), {
+        containerId: 'other',
+        path: '/code/lib/y',
+      });
     });
 
     test('rootLabel names a workspace-folder container by its basename', () => {

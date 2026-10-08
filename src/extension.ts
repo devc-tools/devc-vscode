@@ -25,6 +25,8 @@ import {
   findMatchingBindMount,
   getContainerHome,
   isPathWithin,
+  listBindMounts,
+  mapHostPath,
   sshRootKey,
 } from './containerTree';
 import {
@@ -375,6 +377,11 @@ export function activate(context: vscode.ExtensionContext) {
   register('devc-vscode.rename', (node?: ContainerNode) => renameEntry(node));
   register('devc-vscode.delete', (node?: ContainerNode) => deleteEntries(node));
   register('devc-vscode.copyPath', (node?: ContainerNode) => copyPath(node));
+  register(
+    'devc-vscode.copyHostContainerPath',
+    (arg?: unknown, selected?: unknown) =>
+      copyHostContainerPath(arg, selected)
+  );
   register('devc-vscode.attachAgentGroup', (node?: AgentNode) =>
     attachAgentGroup(node)
   );
@@ -653,6 +660,64 @@ async function copyPath(node?: ContainerNode): Promise<void> {
   } catch (err) {
     vscode.window.showErrorMessage((err as Error).message);
   }
+}
+
+/**
+ * Copy the container path each host resource is mounted at. Called with an
+ * Explorer or editor-tab URI, or with a GitHub Pull Requests file node, whose
+ * resourceUri carries the host path in every scheme it uses (file, review, pr).
+ */
+async function copyHostContainerPath(
+  arg?: unknown,
+  selected?: unknown
+): Promise<void> {
+  const items =
+    Array.isArray(selected) && selected.length > 0 ? selected : [arg];
+  const hostUris = items
+    .map(resourceOf)
+    .filter((uri): uri is vscode.Uri => uri !== undefined);
+  if (hostUris.length === 0) {
+    return;
+  }
+  try {
+    const mounts = hostUris.every(uri => uri.scheme === SCHEME)
+      ? []
+      : await listBindMounts(getDockerCommand());
+    const lines: string[] = [];
+    for (const uri of hostUris) {
+      if (uri.scheme === SCHEME) {
+        lines.push(uri.path);
+        continue;
+      }
+      const mapped = mapHostPath(uri.path, mounts);
+      if (!mapped) {
+        vscode.window.showErrorMessage(
+          `No running container mounts ${uri.path}`
+        );
+        return;
+      }
+      lines.push(mapped.path);
+    }
+    await vscode.env.clipboard.writeText(lines.join('\n'));
+  } catch (err) {
+    vscode.window.showErrorMessage((err as Error).message);
+  }
+}
+
+/** A URI, or a tree node's resourceUri. Duck-typed: nodes come from other extensions. */
+function resourceOf(item: unknown): vscode.Uri | undefined {
+  const isUri = (v: unknown): v is vscode.Uri =>
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as vscode.Uri).scheme === 'string' &&
+    typeof (v as vscode.Uri).path === 'string' &&
+    (v as vscode.Uri).path.startsWith('/');
+  if (isUri(item)) {
+    return item;
+  }
+  const resourceUri = (item as { resourceUri?: unknown } | undefined)
+    ?.resourceUri;
+  return isUri(resourceUri) ? resourceUri : undefined;
 }
 
 async function parentNodeOf(

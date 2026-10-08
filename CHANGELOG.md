@@ -16,6 +16,7 @@
 
 ### Added
 
+- **Copy Container Path** on host files in the Explorer, editor tabs and the GitHub Pull Requests file trees copies the path the file is bind-mounted at in a running container.
 - **Every host tool is optional.** The extension checks for the Docker CLI, devc and host herdr on startup, on Refresh, when a related setting changes and when the window regains focus, and offers only what they support. Open Folder in Container and Stop / Down Container show when devc is found in `~/.local/bin` or on PATH, or when their command setting is set. Add Agent lists the host only when host herdr runs, and a container folder only when devc can start it or its container is running. Send / Fetch to SSH Host show once an SSH host is configured. The Agents view's Workspace tooltip names a missing herdr or Docker.
 - **Container terminals without devc.** With no devc and the command setting unset, a container's Attach Terminal (and a herdr agent's focus, and Add Agent on a running container) opens `docker exec -it` into the workspace mount, attached to the container's herdr when it has one, else the user's login shell. These terminals are rebuilt for the current container on restore.
 

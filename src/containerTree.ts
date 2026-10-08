@@ -721,6 +721,95 @@ export async function findMatchingBindMount(
   return undefined;
 }
 
+/** A bind mount of a running container. */
+export interface ContainerBindMount {
+  containerId: string;
+  /** The devcontainer.local_folder label, or '' for an unlabelled container. */
+  localFolder: string;
+  source: string;
+  destination: string;
+}
+
+/**
+ * Every bind mount of every running container, in two docker calls.
+ * Tab-delimited because host paths can contain spaces.
+ */
+export async function listBindMounts(
+  dockerCommand: string
+): Promise<ContainerBindMount[]> {
+  const idsRes = await execDocker(['ps', '-q'], undefined, dockerCommand);
+  if (idsRes.exitCode !== 0) {
+    return [];
+  }
+  const ids = idsRes.stdout
+    .toString('utf8')
+    .split('\n')
+    .map(id => id.trim())
+    .filter(Boolean);
+  if (ids.length === 0) {
+    return [];
+  }
+  const inspectRes = await execDocker(
+    [
+      'inspect',
+      '--format',
+      '{{.ID}}{{"\t"}}{{index .Config.Labels "devcontainer.local_folder"}}{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{"\t"}}{{.Destination}}{{end}}{{end}}',
+      ...ids,
+    ],
+    undefined,
+    dockerCommand
+  );
+  if (inspectRes.exitCode !== 0) {
+    return [];
+  }
+  const mounts: ContainerBindMount[] = [];
+  for (const line of inspectRes.stdout.toString('utf8').split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 4 || !parts[0]) {
+      continue;
+    }
+    // The short id `docker ps` prints, which the Sandboxes tree uses too.
+    const containerId = parts[0].slice(0, 12);
+    for (let i = 2; i + 1 < parts.length; i += 2) {
+      mounts.push({
+        containerId,
+        localFolder: parts[1],
+        source: parts[i],
+        destination: parts[i + 1] || '/',
+      });
+    }
+  }
+  return mounts;
+}
+
+/**
+ * Map a host path to the container path it is mounted at. The most specific
+ * mount source wins; between equally specific ones, a container whose project
+ * folder holds the path is preferred over one that merely mounts it.
+ */
+export function mapHostPath(
+  hostPath: string,
+  mounts: ContainerBindMount[]
+): { containerId: string; path: string } | undefined {
+  const rank = (m: ContainerBindMount): number =>
+    normalizePath(m.source).length * 2 +
+    (m.localFolder && isPathWithin(m.localFolder, hostPath) ? 1 : 0);
+  const best = mounts
+    .filter(m => isPathWithin(m.source, hostPath))
+    .sort((a, b) => rank(b) - rank(a))[0];
+  if (!best) {
+    return undefined;
+  }
+  const rel = posix.relative(
+    normalizePath(best.source),
+    normalizePath(hostPath)
+  );
+  return {
+    containerId: best.containerId,
+    path: rel ? posix.join(best.destination, rel) : best.destination,
+  };
+}
+
 /**
  * Find a running container for a host folder: first by the devcontainer CLI's
  * local_folder label, then by scanning bind mounts.

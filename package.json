@@ -171,6 +171,11 @@
         "category": "Dev Container FS"
       },
       {
+        "command": "devc-vscode.copyHostContainerPath",
+        "title": "Copy Container Path",
+        "category": "Dev Container FS"
+      },
+      {
         "command": "devc-vscode.refreshAgents",
         "title": "Refresh Agents",
         "category": "Dev Container FS",
@@ -296,6 +301,11 @@
           "group": "3_copy"
         },
         {
+          "command": "devc-vscode.copyHostContainerPath",
+          "when": "devc-vscode.hasDocker && view =~ /^(pr|prStatus):github$/ && viewItem =~ /^filechange/",
+          "group": "6_copypath@9"
+        },
+        {
           "command": "devc-vscode.sendFromTree",
           "when": "view == devc-vscode.containers && viewItem == directory.sync",
           "group": "inline@1"
@@ -363,6 +373,11 @@
       ],
       "explorer/context": [
         {
+          "command": "devc-vscode.copyHostContainerPath",
+          "when": "devc-vscode.hasDocker && resourceScheme == file",
+          "group": "6_copypath@9"
+        },
+        {
           "command": "devc-vscode.openFolderInContainer",
           "when": "explorerResourceIsFolder && resourceScheme != devc-vscode && devc-vscode.canOpenFolder"
         },
@@ -377,7 +392,18 @@
           "group": "devc@1"
         }
       ],
+      "editor/title/context": [
+        {
+          "command": "devc-vscode.copyHostContainerPath",
+          "when": "devc-vscode.hasDocker && resourceScheme =~ /^(file|review|pr)$/",
+          "group": "1_cutcopypaste@9"
+        }
+      ],
       "commandPalette": [
+        {
+          "command": "devc-vscode.copyHostContainerPath",
+          "when": "false"
+        },
         {
           "command": "devc-vscode.sendFromTree",
           "when": "false"

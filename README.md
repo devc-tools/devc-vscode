@@ -84,6 +84,16 @@ On an SSH host's tree, folders that are worktrees of a local repo have inline **
 
 Deletes are permanent. Containers and SSH hosts have no trash.
 
+### Container paths for host files
+
+Right-click a host file → **Copy Container Path** to copy the path the file is bind-mounted at in a running container. The action is on:
+
+- the Explorer (multi-select works)
+- editor tabs, including GitHub Pull Requests review diffs
+- files in the GitHub Pull Requests views (**Changes in Pull Request** and the files under each pull request)
+
+The most specific bind mount wins. When two containers mount the same folder, the one whose project folder holds the file is used.
+
 ### Agents
 
 - **Workspace** holds this machine's herdr session for the window, and each running dev container.
