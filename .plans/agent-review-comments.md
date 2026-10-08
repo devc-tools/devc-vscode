@@ -32,6 +32,12 @@ defensive parsing in [Diff side](#diff-side).
 
 - **Dev containers only.** SSH hosts and host herdr sessions are out of scope. A file
   qualifies only when `mapHostPath` maps it into a running container.
+- **Independent of GitHub.** Agent threads belong to this controller only. They are never
+  synced to GitHub: no drafts, pending reviews or posted PR comments. They live in the
+  window's memory and in the container's reply files. The GitHub PR extension's threads
+  are untouched. On a PR diff the gutter `+` may ask which provider to use; picking
+  **GitHub Pull Request** there makes a real PR comment, which is that extension's
+  behaviour, not ours.
 - **Push, not pull.** The comment is submitted to the agent immediately. The agent never
   has to be told to "check comments".
 - **Replies through a file.** The extension installs nothing in the container. The
@@ -161,7 +167,7 @@ Location: <containerPath>:<startLine>-<endLine> (<side label>)
 ```
 <comment text>
 
-Answer the question. Also write your answer as Markdown to <replyPath> (the reviewer reads it in their editor). Don't change code unless the question asks you to.
+Answer the question. Also write your answer as Markdown to <replyPath> (the reviewer reads it in their editor). Don't change code unless the question asks you to. Don't post to GitHub or the PR; reply only in the file.
 ````
 
 Follow-up (`seq > 1`):
@@ -170,7 +176,7 @@ Follow-up (`seq > 1`):
 [devc review <threadId>#<seq>] Follow-up on <containerPath>:<startLine>-<endLine>.
 <comment text>
 
-Write your answer as Markdown to <replyPath>.
+Write your answer as Markdown to <replyPath>. Don't post to GitHub or the PR; reply only in the file.
 ```
 
 - Lines are 1-based and inclusive. A one-line range still prints `N-N`.
