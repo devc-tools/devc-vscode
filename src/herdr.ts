@@ -265,6 +265,65 @@ export async function focusHerdrAgent(
   return res?.exitCode === 0;
 }
 
+/**
+ * The agents in an environment's herdr session right now, from one
+ * `herdr api snapshot`. Empty when herdr is not running or not installed.
+ */
+export async function readHerdrSnapshot(
+  shell: RemoteShell,
+  session: string
+): Promise<AgentInfo[]> {
+  const res = await runOrUndefined(
+    shell,
+    [
+      'sh',
+      '-c',
+      `PATH="$HOME/.local/bin:$PATH" exec ${herdrFor(session)} api snapshot`,
+    ],
+    COMMAND_TIMEOUT_MS
+  );
+  return parseSnapshot(res?.stdout.toString('utf8').trim() ?? '') ?? [];
+}
+
+/**
+ * Submit `text` to an agent's pane as if typed, with `herdr agent prompt`
+ * (herdr 0.9.3+). Undefined on success, else herdr's error code and why.
+ */
+export async function promptHerdrAgent(
+  shell: RemoteShell,
+  session: string,
+  paneId: string,
+  text: string
+): Promise<{ code?: string; message: string } | undefined> {
+  const res = await runOrUndefined(
+    shell,
+    [
+      'sh',
+      '-c',
+      `PATH="$HOME/.local/bin:$PATH" exec ${herdrFor(session)} agent prompt "$1" "$2"`,
+      'sh',
+      paneId,
+      text,
+    ],
+    COMMAND_TIMEOUT_MS
+  );
+  if (!res) {
+    return { message: 'herdr could not be run' };
+  }
+  if (res.exitCode === 0) {
+    return undefined;
+  }
+  const stdout = res.stdout.toString('utf8');
+  return {
+    code: herdrError(stdout)?.code,
+    message: failure({
+      exitCode: res.exitCode,
+      stdout,
+      stderr: res.stderr.toString('utf8'),
+    }),
+  };
+}
+
 /** Close an agent's herdr pane, ending the agent and whatever else runs there. */
 export async function closeHerdrPane(
   shell: RemoteShell,

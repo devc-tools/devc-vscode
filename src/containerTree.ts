@@ -724,6 +724,8 @@ export async function findMatchingBindMount(
 /** A bind mount of a running container. */
 export interface ContainerBindMount {
   containerId: string;
+  /** Docker's own name for the container, without the leading `/`. */
+  containerName: string;
   /** The devcontainer.local_folder label, or '' for an unlabelled container. */
   localFolder: string;
   source: string;
@@ -753,7 +755,7 @@ export async function listBindMounts(
     [
       'inspect',
       '--format',
-      '{{.ID}}{{"\t"}}{{index .Config.Labels "devcontainer.local_folder"}}{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{"\t"}}{{.Destination}}{{end}}{{end}}',
+      '{{.ID}}{{"\t"}}{{.Name}}{{"\t"}}{{index .Config.Labels "devcontainer.local_folder"}}{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{"\t"}}{{.Destination}}{{end}}{{end}}',
       ...ids,
     ],
     undefined,
@@ -762,18 +764,24 @@ export async function listBindMounts(
   if (inspectRes.exitCode !== 0) {
     return [];
   }
+  return parseBindMounts(inspectRes.stdout.toString('utf8'));
+}
+
+/** listBindMounts's `docker inspect` output, one container per line. */
+export function parseBindMounts(output: string): ContainerBindMount[] {
   const mounts: ContainerBindMount[] = [];
-  for (const line of inspectRes.stdout.toString('utf8').split('\n')) {
+  for (const line of output.split('\n')) {
     const parts = line.split('\t');
-    if (parts.length < 4 || !parts[0]) {
+    if (parts.length < 5 || !parts[0]) {
       continue;
     }
     // The short id `docker ps` prints, which the Sandboxes tree uses too.
     const containerId = parts[0].slice(0, 12);
-    for (let i = 2; i + 1 < parts.length; i += 2) {
+    for (let i = 3; i + 1 < parts.length; i += 2) {
       mounts.push({
         containerId,
-        localFolder: parts[1],
+        containerName: parts[1].replace(/^\//, ''),
+        localFolder: parts[2],
         source: parts[i],
         destination: parts[i + 1] || '/',
       });

@@ -12,6 +12,7 @@ import {
   SSH_ICON,
   folderOf,
 } from './agentTree';
+import { AgentReviewController } from './agentReview';
 import { DevContainerFileSystemProvider } from './devcontainerFs';
 import {
   ContainerInfo,
@@ -330,6 +331,15 @@ export function activate(context: vscode.ExtensionContext) {
   } catch (err) {
     console.error('devc-vscode: window registry unavailable', err);
   }
+
+  context.subscriptions.push(
+    new AgentReviewController({
+      listMounts: () => listBindMounts(getDockerCommand()),
+      containerShell,
+      focusContainerAgent,
+      log: message => agentLog.info(message),
+    })
+  );
 
   const register = (id: string, handler: (...args: never[]) => unknown) =>
     context.subscriptions.push(
@@ -1258,12 +1268,24 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     await focusSshAgent(node.ssh.host, node.agent);
     return;
   }
+  await focusContainerAgent(node.container, node.agent);
+}
+
+/**
+ * Bring a container's herdr agent into view: reveal the terminal showing
+ * herdr in that container, or open one that attaches to it, then have herdr
+ * switch to the agent's pane.
+ */
+async function focusContainerAgent(
+  container: ContainerInfo,
+  agent: AgentInfo
+): Promise<void> {
   // Reveal the terminal attached to herdr in that container: the one whose
   // pty has herdr in the foreground. Before the tracker has found a
   // terminal's pty (or for terminals opened before the extension loaded), its
   // foreground is unknown and it is the best guess. Terminals known to be
   // running something else cannot show herdr.
-  const containerId = node.container.id;
+  const containerId = container.id;
   const candidates: vscode.Terminal[] = [];
   for (const terminal of vscode.window.terminals) {
     if (
@@ -1282,14 +1304,12 @@ async function focusAgent(node?: AgentNode): Promise<void> {
     // Focus once herdr is up, so the pane switch lands in a client that is
     // showing. Without shell integration the tracker never sees the terminal,
     // so after the wait focus is tried regardless.
-    const terminal = await openHerdrAttachTerminal(node.container);
+    const terminal = await openHerdrAttachTerminal(container);
     await waitForForeground(terminal, 'herdr', HERDR_ATTACH_TIMEOUT_MS);
   }
   const shell = await containerShell(containerId);
-  if (!(await focusHerdrAgent(shell, CONTAINER_SESSION, node.agent))) {
-    vscode.window.showErrorMessage(
-      `Could not focus ${node.agent.agent} in herdr.`
-    );
+  if (!(await focusHerdrAgent(shell, CONTAINER_SESSION, agent))) {
+    vscode.window.showErrorMessage(`Could not focus ${agent.agent} in herdr.`);
   }
 }
 

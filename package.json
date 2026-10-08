@@ -239,6 +239,33 @@
         "title": "Delete herdr Session",
         "category": "Dev Container FS",
         "icon": "$(trash)"
+      },
+      {
+        "command": "devc-vscode.askAgent",
+        "title": "Ask Agent About Selection",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.agentReviewSubmit",
+        "title": "Ask Agent",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.agentReviewShowAgent",
+        "title": "Show Agent",
+        "category": "Dev Container FS",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "devc-vscode.agentReviewDelete",
+        "title": "Delete Thread",
+        "category": "Dev Container FS",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devc-vscode.agentReviewResend",
+        "title": "Resend",
+        "category": "Dev Container FS"
       }
     ],
     "menus": {
@@ -399,6 +426,39 @@
           "group": "1_cutcopypaste@9"
         }
       ],
+      "editor/context": [
+        {
+          "command": "devc-vscode.askAgent",
+          "when": "devc-vscode.hasDocker && resourceScheme =~ /^(file|review|pr)$/",
+          "group": "devc@1"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "devc-vscode.agentReviewSubmit",
+          "when": "commentController == devc-vscode.agentReview",
+          "group": "inline"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "devc-vscode.agentReviewShowAgent",
+          "when": "commentController == devc-vscode.agentReview && commentThread =~ /hasAgent/",
+          "group": "inline"
+        },
+        {
+          "command": "devc-vscode.agentReviewDelete",
+          "when": "commentController == devc-vscode.agentReview",
+          "group": "inline"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "devc-vscode.agentReviewResend",
+          "when": "commentController == devc-vscode.agentReview && comment == failed",
+          "group": "inline"
+        }
+      ],
       "commandPalette": [
         {
           "command": "devc-vscode.copyHostContainerPath",
@@ -459,6 +519,26 @@
         {
           "command": "devc-vscode.fetchFromSshHost",
           "when": "devc-vscode.hasSshHosts"
+        },
+        {
+          "command": "devc-vscode.askAgent",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "devc-vscode.agentReviewSubmit",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.agentReviewShowAgent",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.agentReviewDelete",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.agentReviewResend",
+          "when": "false"
         }
       ]
     },

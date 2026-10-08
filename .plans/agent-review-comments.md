@@ -17,16 +17,16 @@ GitHub Pull Requests extension and no display. Items and validations marked
 implementation. Build the code exactly as this plan specifies, including the
 defensive parsing in [Diff side](#diff-side).
 
-- [ ] Comment controller `devc-vscode.agentReview` with commenting ranges only on mapped documents (see [Commenting ranges](#commenting-ranges))
-- [ ] Command `devc-vscode.askAgent` (**Ask Agent About Selection**) in the editor context menu
-- [ ] Submit handler: resolve target agent, build prompt, `mkdir` reply dir, `herdr agent prompt` (see [Sending](#sending))
-- [ ] Agent picker with per-container memory (see [Choosing the agent](#choosing-the-agent))
-- [ ] Reply watcher per container; replies shown and updated in the thread (see [Replies](#replies))
-- [ ] Failure handling: unsent comment marked, **Resend** action (see [Failures](#failures))
-- [ ] Thread title actions: **Show Agent**, **Delete Thread**
-- [ ] Menus and `when` clauses in `package.json` (see [Contributions](#contributions))
-- [ ] Tests (see Validation)
-- [ ] Docs: README section, `docs/how-it-works.md` section, CHANGELOG entry
+- [x] Comment controller `devc-vscode.agentReview` with commenting ranges only on mapped documents (see [Commenting ranges](#commenting-ranges))
+- [x] Command `devc-vscode.askAgent` (**Ask Agent About Selection**) in the editor context menu
+- [x] Submit handler: resolve target agent, build prompt, `mkdir` reply dir, `herdr agent prompt` (see [Sending](#sending))
+- [x] Agent picker with per-container memory (see [Choosing the agent](#choosing-the-agent))
+- [x] Reply watcher per container; replies shown and updated in the thread (see [Replies](#replies))
+- [x] Failure handling: unsent comment marked, **Resend** action (see [Failures](#failures))
+- [x] Thread title actions: **Show Agent**, **Delete Thread**
+- [x] Menus and `when` clauses in `package.json` (see [Contributions](#contributions))
+- [x] Tests (see Validation)
+- [x] Docs: README section, `docs/how-it-works.md` section, CHANGELOG entry
 
 ## Decisions
 
@@ -252,14 +252,14 @@ pane is gone, show `That agent is gone.`
 
 ## Validation
 
-- [ ] `npm run compile && npm run lint` passes
-- [ ] `npm run compile && xvfb-run -a npm test` passes. `.npmrc` sets `ignore-scripts`, so `pretest` doesn't compile. The container has no `xvfb-run` or Electron libraries, so if they can't be installed, run `npm test` on the host **(user, host)** and say so in the hand-off. Includes a new `src/test/agentReview.test.ts` covering:
-  - [ ] prompt text for `seq == 1` and `seq > 1` matches [Prompt text](#prompt-text-contract) exactly, including the 200-line cutoff
-  - [ ] side label for `file`, `review` (base and changed), `pr` (base and head), and malformed or missing query → `diff view`
-  - [ ] reply-listing line parser (`cksum` format above, empty line, entry for an unknown thread): changed crc/size triggers a read, unchanged doesn't, unknown thread ids ignored
-  - [ ] failure message mapping for `agent_blocked`, `agent_not_found` and an unknown code
-  - [ ] `listBindMounts` / `mapHostPath` existing tests still pass with `containerName` added
-  - [ ] commenting ranges: empty for unmapped paths and other schemes, full document for a mapped `file`/`review`/`pr` URI (injected mounts)
+- [x] `npm run compile && npm run lint` passes
+- [x] `npm run compile && xvfb-run -a npm test` passes (211 passing; xvfb and Electron libraries installed in the container with apt). `.npmrc` sets `ignore-scripts`, so `pretest` doesn't compile. The container has no `xvfb-run` or Electron libraries, so if they can't be installed, run `npm test` on the host **(user, host)** and say so in the hand-off. Includes a new `src/test/agentReview.test.ts` covering:
+  - [x] prompt text for `seq == 1` and `seq > 1` matches [Prompt text](#prompt-text-contract) exactly, including the 200-line cutoff
+  - [x] side label for `file`, `review` (base and changed), `pr` (base and head), and malformed or missing query → `diff view`
+  - [x] reply-listing line parser (`cksum` format above, empty line, entry for an unknown thread): changed crc/size triggers a read, unchanged doesn't, unknown thread ids ignored
+  - [x] failure message mapping for `agent_blocked`, `agent_not_found` and an unknown code
+  - [x] `listBindMounts` / `mapHostPath` existing tests still pass with `containerName` added
+  - [x] commenting ranges: empty for unmapped paths and other schemes, full document for a mapped `file`/`review`/`pr` URI (injected mounts)
 - [ ] **(user, host)** Spike: in a host VS Code with GitHub Pull Requests, log `uri.toString()` for both sides of a review diff (checked-out and not-checked-out PR) and confirm the query shapes in [Diff side](#diff-side). If they differ, file a fix to the side-label parser
 - [ ] **(user, host)** Spike: with the PR extension and this controller both offering ranges on a line, the gutter `+` shows VS Code's comment-provider picker, and **Ask Agent About Selection** bypasses it
 - [ ] **(user, host)** With Claude running in herdr in the container: on a checked-out PR's review diff, click `+` on a changed line, pick **Agent (devc)**, ask "what does this line do?" → the prompt appears in the Claude pane with the container path, and the answer appears as a reply in the thread

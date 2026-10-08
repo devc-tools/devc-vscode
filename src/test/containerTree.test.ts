@@ -11,6 +11,7 @@ import {
   containerUri,
   isPathWithin,
   mapHostPath,
+  parseBindMounts,
   parseUriList,
   rootLabel,
   sortEntries,
@@ -452,6 +453,7 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
       const mounts = [
         {
           containerId: 'c1',
+          containerName: 'c1-1',
           localFolder: '/Users/me/code/app',
           source: '/Users/me/code/app',
           destination: '/workspaces/app',
@@ -471,22 +473,57 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
       );
     });
 
+    test('parseBindMounts reads the inspect format, name included', () => {
+      const output = [
+        '0123456789abcdef\t/app-1\t/Users/me/code/app\t/Users/me/code/app\t/workspaces/app\t/Users/me/.ssh\t/home/vscode/.ssh',
+        'fedcba9876543210\t/plain\t\t/srv/a b\t',
+        'deadbeef\t/nomounts\t',
+        '',
+      ].join('\n');
+      assert.deepStrictEqual(parseBindMounts(output), [
+        {
+          containerId: '0123456789ab',
+          containerName: 'app-1',
+          localFolder: '/Users/me/code/app',
+          source: '/Users/me/code/app',
+          destination: '/workspaces/app',
+        },
+        {
+          containerId: '0123456789ab',
+          containerName: 'app-1',
+          localFolder: '/Users/me/code/app',
+          source: '/Users/me/.ssh',
+          destination: '/home/vscode/.ssh',
+        },
+        {
+          containerId: 'fedcba987654',
+          containerName: 'plain',
+          localFolder: '',
+          source: '/srv/a b',
+          destination: '/',
+        },
+      ]);
+    });
+
     test('mapHostPath prefers the most specific mount, then the project container', () => {
       const mounts = [
         {
           containerId: 'other',
+          containerName: 'other-1',
           localFolder: '/Users/me/code/other',
           source: '/Users/me/code',
           destination: '/code',
         },
         {
           containerId: 'tools',
+          containerName: 'tools-1',
           localFolder: '',
           source: '/Users/me/code/app',
           destination: '/mnt/app',
         },
         {
           containerId: 'app',
+          containerName: 'app-1',
           localFolder: '/Users/me/code/app',
           source: '/Users/me/code/app',
           destination: '/workspaces/app',

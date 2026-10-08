@@ -92,6 +92,20 @@ Each container gets one long-lived `docker exec -i -u <remoteUser> <id> sh -c â€
 
 `docker exec` doesn't stop its process when the client exits, so the loop runs in the background and ends when the exec's stdin closes: on dispose, when the container stops, or when VS Code exits.
 
+## Agent review comments
+
+A comment controller (**Agent (devc)**) offers comment ranges on every line of a `file`, `review` or `pr` document whose path is bind-mounted into a running container. `review` and `pr` are GitHub Pull Requests' diff sides; their URI path is the host path, and the diff side and commit come from the URI's JSON query. Bind mounts are cached for 10 s for the range provider and re-read when a question is sent.
+
+**Sending.** On submit, the extension runs `herdr --session=devc api snapshot` in the container to find its agents, then `mkdir -p /tmp/devc-vscode/review/<thread>` and `herdr --session=devc agent prompt <pane> <text>` as the container's `remoteUser`. The text is passed as an argument, never through a shell string. It starts with `[devc review <thread>#<seq>]` and holds the container path, the 1-based line range, the diff side, the commented lines (read from the editor, so a base-side diff quotes base-side code; over 200 lines, the agent is told to read the file), your question, and an instruction to write the answer as Markdown to `/tmp/devc-vscode/review/<thread>/<seq>.md`. A follow-up omits the code. The agent's pane is not focused. herdr 0.9.3 or later is required in the container.
+
+**Replies.** While a container has questions awaiting replies, one `docker exec` runs `cksum /tmp/devc-vscode/review/*/*.md` every second and prints the listing when it changes, ending when its stdin closes, as the agent watcher does. A file whose checksum or size changed is read with `cat` and replaces the thread's *Waiting* placeholder, or updates the reply already shown, so a rewritten answer shows its latest version. Files of threads this window doesn't know are ignored.
+
+**Permission prompts.** Claude Code's default permission mode asks before writing outside the project, so the reply waits until you approve the write in the agent's pane. In auto mode the reply arrives without a prompt.
+
+**Failures.** A non-zero exit from `agent prompt` marks the question **Not sent** and shows herdr's error. `agent_blocked` (the agent is at a prompt in its pane) and `agent_not_found` get their own messages; the latter also forgets the remembered agent. **Resend** picks the agent again and re-sends.
+
+**Lifetime.** Threads live in the window's memory and are gone after a reload. Their reply files stay in the container's `/tmp` until **Delete Thread** removes the thread's directory or the container is recreated.
+
 ## Multiple windows
 
 Each window writes what its Agents view shows to a file in the extension's global storage and watches the other windows' files. Their agents show under **Other Workspaces**, one row per window, and the badge counts agents needing attention in every window.

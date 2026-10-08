@@ -33,4 +33,4 @@
 | 6 | [ssh-workspace-sync.md](ssh-workspace-sync.md) | Git-based Send / Fetch to SSH hosts at mirrored paths, review diff on fetch (depends on phase 5) | in progress |
 | 7 | [ssh-tree-sync-actions.md](ssh-tree-sync-actions.md) | Send / Fetch actions on synced folders in the Sandboxes view's SSH tree (depends on phase 6) | in progress |
 | 8 | [optional-tool-detection.md](optional-tool-detection.md) | Detect Docker / devc / host herdr, gate commands and UI, docker exec terminal fallback | in progress |
-| 9 | [agent-review-comments.md](agent-review-comments.md) | Ask a container agent about code from comment threads, including PR review diffs; replies shown in the thread | |
+| 9 | [agent-review-comments.md](agent-review-comments.md) | Ask a container agent about code from comment threads, including PR review diffs; replies shown in the thread | in progress |

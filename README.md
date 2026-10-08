@@ -102,6 +102,20 @@ The most specific bind mount wins. When two containers mount the same folder, th
 
 Hover over a row for its actions: **Attach Terminal**, **Add Agent**, **Stop / Down Container**, and **Stop / Delete herdr Session**. **Close Agent** ends an agent's herdr pane or terminal.
 
+### Ask an agent about code
+
+Ask a herdr agent in a dev container about a host file you're reading, including either side of a GitHub Pull Requests review diff. The file must be bind-mounted into a running container.
+
+1. Click the gutter **+** on a line (or drag across lines) and pick **Agent (devc)** if VS Code asks which provider to use. Or select lines and right-click → **Ask Agent About Selection**, which skips that question.
+2. Type your question and click **Ask Agent**. It's typed into the agent's herdr pane with the file's container path, the line range and the selected code.
+3. The agent's answer appears as a reply in the thread. Reply again in the same thread to ask a follow-up.
+
+The thread's header names the version of the file it's about (`Working tree`, or the PR diff side and commit) and, once sent, the agent answering.
+
+With several agents in the container, you pick one the first time; later threads reuse it. Threads stay in the window until it reloads and are never posted to GitHub. On each thread, **Show Agent** jumps to the agent's pane and **Delete Thread** removes it. A question that couldn't be sent is marked **Not sent**, with **Resend** beside it.
+
+Claude Code in its default permission mode asks before writing the reply file; approve it in the agent's pane to see the answer.
+
 ### Terminal links
 
 In container and SSH terminals, click a printed path to open it. A `:line:col` suffix jumps to that spot, and a folder is revealed in the Sandboxes view.
@@ -118,6 +132,7 @@ All commands are under **Dev Container FS** in the command palette.
 | Send to SSH Host… / Fetch from SSH Host… | Sync a local repo with an SSH host |
 | Send from Local / Fetch to Local | The same, from an SSH folder in the Sandboxes view |
 | New File, New Folder, Rename, Delete, Copy Container Path | Act on the Sandboxes selection |
+| Ask Agent About Selection | Open an agent comment thread on the selected lines (see [Ask an agent about code](#ask-an-agent-about-code)) |
 
 ## Settings
 
@@ -145,7 +160,7 @@ If you run devc through a shell function or alias, or want another tool, set the
 
 ## More
 
-- [How it works](docs/how-it-works.md): container scoping, the file system, terminal links, agent status, multiple windows, SSH security.
+- [How it works](docs/how-it-works.md): container scoping, the file system, terminal links, agent status, agent review comments, multiple windows, SSH security.
 - [Syncing with an SSH host](docs/ssh-sync.md): Send / Fetch in detail, including what Fetch flags for review.
 
 ## Develop
