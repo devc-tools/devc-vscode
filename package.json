@@ -429,7 +429,7 @@
       "editor/context": [
         {
           "command": "devc-vscode.askAgent",
-          "when": "devc-vscode.hasDocker && resourceScheme =~ /^(file|review|pr)$/",
+          "when": "devc-vscode.hasDocker && resourceScheme =~ /^(file|git|review|pr)$/",
           "group": "devc@1"
         }
       ],

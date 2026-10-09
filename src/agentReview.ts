@@ -25,8 +25,11 @@ import { RemoteShell } from './remoteShell';
 
 export const CONTROLLER_ID = 'devc-vscode.agentReview';
 export const REPLY_ROOT = '/tmp/devc-vscode/review';
-/** Schemes whose `uri.path` is a host path: files and GitHub PR diff sides. */
-const SCHEMES: ReadonlySet<string> = new Set(['file', 'review', 'pr']);
+/**
+ * Schemes whose `uri.path` is a host path: files, VS Code Git diff sides, and
+ * GitHub PR diff sides.
+ */
+const SCHEMES: ReadonlySet<string> = new Set(['file', 'git', 'review', 'pr']);
 /** Above this many lines, the prompt points at the file instead of quoting. */
 const MAX_SNIPPET_LINES = 200;
 /** How long listBindMounts's answer is reused by the commenting range provider. */
@@ -41,8 +44,8 @@ export function replyPath(threadId: string, seq: number): string {
 
 /**
  * Which version of the file a commented document shows, for the prompt.
- * GitHub Pull Requests puts the diff side in the query as JSON (`toReviewUri`
- * for checked-out PRs, `toPRUri` otherwise).
+ * VS Code's Git extension (`toGitUri`) and GitHub Pull Requests (`toReviewUri`
+ * for checked-out PRs, `toPRUri` otherwise) put it in the query as JSON.
  */
 export function sideLabel(uri: { scheme: string; query: string }): string {
   if (uri.scheme === 'file') {
@@ -60,6 +63,19 @@ export function sideLabel(uri: { scheme: string; query: string }): string {
   }
   const text = (v: unknown): string | undefined =>
     typeof v === 'string' || typeof v === 'number' ? String(v) : undefined;
+  if (uri.scheme === 'git') {
+    // '' and '~' are the index ('~' falls back to HEAD for a staged delete).
+    const ref = text(query.ref);
+    if (ref === undefined) {
+      return 'diff view';
+    }
+    if (ref === '' || ref === '~') {
+      return 'git diff, index';
+    }
+    return /^[0-9a-f]{7,40}$/.test(ref)
+      ? `git diff, commit ${ref}`
+      : `git diff, ${ref}`;
+  }
   if (uri.scheme === 'review') {
     const commit = text(query.commit);
     if (typeof query.base !== 'boolean' || !commit) {

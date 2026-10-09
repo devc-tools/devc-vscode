@@ -109,6 +109,13 @@ suite('Agent review comments', () => {
       query: typeof query === 'string' ? query : JSON.stringify(query),
     });
     assert.strictEqual(sideLabel(uri('file', '')), 'working tree');
+    const git = (ref: string) =>
+      sideLabel(uri('git', { path: '/Users/me/code/app/a.ts', ref }));
+    assert.strictEqual(git('HEAD'), 'git diff, HEAD');
+    assert.strictEqual(git('~'), 'git diff, index');
+    assert.strictEqual(git(''), 'git diff, index');
+    assert.strictEqual(git('abc1234'), 'git diff, commit abc1234');
+    assert.strictEqual(git('origin/main'), 'git diff, origin/main');
     assert.strictEqual(
       sideLabel(uri('review', { base: true, commit: 'abc123', path: '/x' })),
       'PR diff, base side, commit abc123'
@@ -144,6 +151,8 @@ suite('Agent review comments', () => {
       ['pr', '{"baseCommit":"b","headCommit":"h","prNumber":1}'],
       ['pr', '[]'],
       ['git', '{}'],
+      ['git', 'not json'],
+      ['vscode-userdata', '{}'],
     ]) {
       assert.strictEqual(
         sideLabel({ scheme, query }),
@@ -255,6 +264,11 @@ suite('Agent review comments', () => {
         query: '{"base":false,"commit":"abc"}',
       }),
       vscode.Uri.from({ scheme: 'pr', path: mapped, query: '{}' }),
+      vscode.Uri.from({
+        scheme: 'git',
+        path: mapped,
+        query: JSON.stringify({ path: mapped, ref: 'HEAD' }),
+      }),
     ]) {
       const result = await ranges.provideCommentingRanges(
         fakeDocument(uri, 12)
@@ -271,7 +285,7 @@ suite('Agent review comments', () => {
     assert.deepStrictEqual(
       await ranges.provideCommentingRanges(
         fakeDocument(
-          vscode.Uri.from({ scheme: 'git', path: mapped, query: '{}' }),
+          vscode.Uri.from({ scheme: 'gitlens', path: mapped, query: '{}' }),
           12
         )
       ),

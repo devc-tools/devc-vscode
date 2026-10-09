@@ -104,13 +104,13 @@ Hover over a row for its actions: **Attach Terminal**, **Add Agent**, **Stop / D
 
 ### Ask an agent about code
 
-Ask a herdr agent in a dev container about a host file you're reading, including either side of a GitHub Pull Requests review diff. The file must be bind-mounted into a running container.
+Ask a herdr agent in a dev container about a host file you're reading, including either side of a Git diff or a GitHub Pull Requests review diff. The file must be bind-mounted into a running container.
 
 1. Click the gutter **+** on a line (or drag across lines) and pick **Agent (devc)** if VS Code asks which provider to use. Or select lines and right-click → **Ask Agent About Selection**, which skips that question.
 2. Type your question and click **Ask Agent**. It's typed into the agent's herdr pane with the file's container path, the line range and the selected code.
 3. The agent's answer appears as a reply in the thread. Reply again in the same thread to ask a follow-up.
 
-The thread's header names the version of the file it's about (`Working tree`, or the PR diff side and commit) and, once sent, the agent answering.
+The thread's header names the version of the file it's about (`Working tree`, the Git diff's ref, or the PR diff side and commit) and, once sent, the agent answering.
 
 With several agents in the container, you pick one the first time; later threads reuse it. Threads stay in the window until it reloads and are never posted to GitHub. On each thread, **Show Agent** jumps to the agent's pane and **Delete Thread** removes it. A question that couldn't be sent is marked **Not sent**, with **Resend** beside it.
 
