@@ -107,6 +107,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "devc-vscode.showAllFiles",
+        "title": "Show All Files",
+        "category": "Dev Container FS",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "devc-vscode.showWorkspacesOnly",
+        "title": "Show Only /workspaces",
+        "category": "Dev Container FS",
+        "icon": "$(filter)"
+      },
+      {
         "command": "devc-vscode.openFolderInContainer",
         "title": "Open Folder in Container",
         "category": "Dev Container FS"
@@ -273,6 +285,16 @@
         {
           "command": "devc-vscode.refresh",
           "when": "view == devc-vscode.containers",
+          "group": "navigation"
+        },
+        {
+          "command": "devc-vscode.showAllFiles",
+          "when": "view == devc-vscode.containers && !devc-vscode.showAllFiles",
+          "group": "navigation"
+        },
+        {
+          "command": "devc-vscode.showWorkspacesOnly",
+          "when": "view == devc-vscode.containers && devc-vscode.showAllFiles",
           "group": "navigation"
         },
         {
@@ -460,6 +482,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "devc-vscode.showAllFiles",
+          "when": "!devc-vscode.showAllFiles"
+        },
+        {
+          "command": "devc-vscode.showWorkspacesOnly",
+          "when": "devc-vscode.showAllFiles"
+        },
         {
           "command": "devc-vscode.copyHostContainerPath",
           "when": "false"

@@ -207,8 +207,28 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
     );
   });
 
-  test('a container root expands to /', async () => {
+  test('a container root shows only /workspaces by default', async () => {
     const { provider } = fixture();
+    const children = await provider.getChildren(await rootFor(provider, 'c1'));
+    assert.deepStrictEqual(
+      children.map(c => c.uri.path),
+      ['/workspaces']
+    );
+  });
+
+  test('a container without /workspaces lists all of /', async () => {
+    const { files, provider } = fixture();
+    await files.delete(containerUri('c1', '/workspaces'));
+    const children = await provider.getChildren(await rootFor(provider, 'c1'));
+    assert.deepStrictEqual(
+      children.map(c => c.uri.path),
+      ['/etc', '/init.sh']
+    );
+  });
+
+  test('showing all files expands a container root to /', async () => {
+    const { provider } = fixture();
+    provider.setShowAllFiles(true);
     const children = await provider.getChildren(await rootFor(provider, 'c1'));
     assert.deepStrictEqual(
       children.map(c => c.uri.path),
@@ -308,6 +328,7 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
     assert.strictEqual(rootItem.resourceUri, undefined);
     assert.strictEqual(rootItem.command, undefined);
 
+    provider.setShowAllFiles(true);
     const children = await provider.getChildren(root);
     const dir = children.find(c => c.kind === 'directory')!;
     const file = children.find(c => c.kind === 'file')!;

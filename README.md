@@ -74,6 +74,7 @@ On an SSH host's tree, folders that are worktrees of a local repo have inline **
 | Action | How |
 | --- | --- |
 | Open a file | Click it |
+| See outside `/workspaces` | Click the filter button in the title bar; containers show only `/workspaces` until you do |
 | New file / folder | Right-click a container, SSH host or folder |
 | Rename | <kbd>F2</kbd>, or right-click |
 | Delete | <kbd>Delete</kbd>, or right-click (multi-select works) |

@@ -102,6 +102,9 @@ export type ContainerNode =
       sync?: SyncTarget;
     };
 
+/** The directory a container root is narrowed to unless all files are shown. */
+export const WORKSPACES_DIR = 'workspaces';
+
 /** The key SSH roots use in `roots` and in the attached set. */
 export function sshRootKey(host: string): string {
   return `ssh:${host}`;
@@ -181,6 +184,8 @@ export class ContainerTreeDataProvider
    * sshRootKeys.
    */
   private attached = new Set<string>();
+  /** Whether container roots list all of '/' rather than just /workspaces. */
+  private showAll = false;
 
   constructor(
     private readonly source: ContainerSource,
@@ -195,6 +200,23 @@ export class ContainerTreeDataProvider
       this.roots.clear();
     }
     this._onDidChangeTreeData.fire(node);
+  }
+
+  get showsAllFiles(): boolean {
+    return this.showAll;
+  }
+
+  /** Show all of each container's '/', or only its /workspaces. */
+  setShowAllFiles(showAll: boolean): void {
+    if (showAll === this.showAll) {
+      return;
+    }
+    this.showAll = showAll;
+    for (const root of this.roots.values()) {
+      if (root.kind === 'container') {
+        this._onDidChangeTreeData.fire(root);
+      }
+    }
   }
 
   /** Re-read an SSH host's root, e.g. once it is reachable again. */
@@ -254,6 +276,16 @@ export class ContainerTreeDataProvider
       // Container stopped mid-expand, or the path went away. An empty node is
       // better than an error toast on every refresh.
       return [];
+    }
+    if (element.kind === 'container' && !this.showAll) {
+      const workspaces = entries.filter(
+        ([name, type]) =>
+          name === WORKSPACES_DIR && type === vscode.FileType.Directory
+      );
+      // A container without /workspaces would otherwise look empty.
+      if (workspaces.length > 0) {
+        entries = workspaces;
+      }
     }
     const targets = await this.targetsFor(dir);
     return sortEntries(entries).map(([name, type]) => {

@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Container roots in the Sandboxes view show only `/workspaces` by default. The filter button in the view's title bar shows the rest of `/`; the choice is remembered per workspace. Revealing a path outside `/workspaces` turns the filter off.
+
 - A missing Docker CLI no longer empties the Sandboxes view: SSH host roots still list.
 
 - The Explorer tree view is renamed from **Dev Containers** to **Sandboxes**, since it holds SSH hosts as well as dev containers. Its view id (`devc-vscode.containers`) is unchanged.
