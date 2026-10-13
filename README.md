@@ -100,6 +100,7 @@ The most specific bind mount wins. When two containers mount the same folder, th
 **Focus Features…** (command palette, or the Sandboxes view's `…` menu) lists every repo and Git worktree behind the workspace: the repos your folders are in, and the ones a running dev container mounts under `/workspaces`, such as `project` and the branches in `project.worktrees`. Tick the ones to work on. They become workspace folders, the rest are removed, and the Source Control view follows.
 
 - The first workspace folder always stays, and so do folders that are not repos or worktrees.
+- Everything a running dev container for the workspace mounts under `/workspaces` stays on the list, so a removed folder can be picked again. The container is found from its project folder, the folder of the `.code-workspace` file, or any open folder it mounts.
 - A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor.
 - Each change is written to the `.code-workspace` file.
 

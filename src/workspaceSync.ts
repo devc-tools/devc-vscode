@@ -753,16 +753,24 @@ async function mainWorktreeOf(git: Git, dir: string): Promise<string | undefined
 /**
  * Main worktrees of the local repos behind `folders`: the repo each folder
  * is in, and each immediate child folder with a `.git` entry. Bare repos are
- * skipped.
+ * skipped. With `topLevelOnly`, a folder counts only when it has a `.git`
+ * entry itself, rather than through a repo found above it — such as a home
+ * directory kept in Git above a `.worktrees` folder.
  */
-export async function findLocalRepos(folders: string[], git: Git): Promise<string[]> {
+export async function findLocalRepos(
+  folders: string[],
+  git: Git,
+  { topLevelOnly = false }: { topLevelOnly?: boolean } = {}
+): Promise<string[]> {
   const dirs: string[] = [];
   for (const folder of folders) {
     const W = realpathOrUndefined(folder);
     if (!W) {
       continue;
     }
-    dirs.push(W);
+    if (!topLevelOnly || fs.existsSync(path.join(W, '.git'))) {
+      dirs.push(W);
+    }
     let entries: fs.Dirent[] = [];
     try {
       entries = fs.readdirSync(W, { withFileTypes: true });

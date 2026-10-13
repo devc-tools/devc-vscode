@@ -68,6 +68,7 @@ import {
   Feature,
   featureLabel,
   listFeatures,
+  mountedFeatureRoots,
   planFolders,
   projectOf,
   removalRuns,
@@ -1211,21 +1212,18 @@ function isDirectory(p: string): boolean {
 /**
  * Folders whose repos are offered as features: the workspace's own folders,
  * and what the containers serving it mount under /workspaces — where a
- * project and its `.worktrees` sibling sit side by side. Mounts inside a
- * `.git` (devc's frozen config and hooks) are not folders to work in.
+ * project and its `.worktrees` sibling sit side by side.
  */
 async function featureRoots(): Promise<string[]> {
   const folders = getHostFolders();
-  const mounts = await listBindMounts(getDockerCommand()).catch(() => []);
-  const mounted = mounts
-    .filter(
-      m =>
-        m.localFolder &&
-        folders.some(f => isPathWithin(f, m.localFolder)) &&
-        isPathWithin(`/${WORKSPACES_DIR}`, m.destination) &&
-        !m.source.split(/[\\/]/).includes('.git')
-    )
-    .map(m => m.source);
+  const file = vscode.workspace.workspaceFile;
+  const anchors =
+    file?.scheme === 'file' ? [...folders, path.dirname(file.fsPath)] : folders;
+  const mounts = await listBindMounts(getDockerCommand()).catch(err => {
+    agentLog?.info(`features: could not list container mounts: ${err}`);
+    return [];
+  });
+  const mounted = mountedFeatureRoots(anchors, mounts, realpathOr);
   return [...new Set([...folders, ...mounted])].filter(isDirectory);
 }
 

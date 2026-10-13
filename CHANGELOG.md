@@ -33,6 +33,8 @@
 
 ### Fixed
 
+- On Docker Desktop, bind mounts declared in a devcontainer's `mounts` were reported under `/host_mnt/...`, a path that does not exist on the host, so Focus Features… skipped them and agent review comments and container path mapping missed files in them. The prefix is now dropped.
+- Focus Features… listed only folders already in the workspace, so a removed one could not be picked again; it now lists everything the workspace's containers mount under `/workspaces`. It also no longer offers a repo found above a folder, such as a home directory kept in Git above a `.worktrees` folder.
 - A relative path anywhere in a terminal line suppressed the links for that whole line, including valid absolute paths, because building a URI from a non-absolute path threw.
 - `:line:col` suffixes were only matched after relative paths, never absolute ones, so the line number was not part of the link and clicking it did nothing.
 - `:line:col` was only half-stripped, leaving `path:42`, which never resolved.

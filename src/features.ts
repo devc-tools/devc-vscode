@@ -1,4 +1,5 @@
 import * as path from 'path';
+import type { ContainerBindMount } from './containerTree';
 import { Git, findLocalRepos, localWorktrees } from './workspaceSync';
 
 /**
@@ -15,13 +16,13 @@ export interface Feature {
 }
 
 /**
- * The worktrees of the local repos behind `roots`: the repo each root is in,
- * and each immediate child of a root with a `.git` entry — so a
- * `project.worktrees` folder finds `project`. Ordered by project name, main
+ * The worktrees of the local repos behind `roots`: each root and each
+ * immediate child of a root with a `.git` entry — so a `project.worktrees`
+ * folder finds `project`. A root without one finds nothing above it. Ordered by project name, main
  * worktree first and detached ones last.
  */
 export async function listFeatures(roots: string[], git: Git): Promise<Feature[]> {
-  const mains = await findLocalRepos(roots, git);
+  const mains = await findLocalRepos(roots, git, { topLevelOnly: true });
   const features = (
     await Promise.all(
       mains.map(async main =>
@@ -43,6 +44,57 @@ export async function listFeatures(roots: string[], git: Git): Promise<Feature[]
       featureLabel(a).localeCompare(featureLabel(b)) ||
       a.path.localeCompare(b.path)
   );
+}
+
+/** Whether `target` is `base` or sits underneath it. */
+function within(base: string, target: string): boolean {
+  const rel = path.posix.relative(base, target);
+  return rel === '' || (!rel.startsWith('..') && !path.posix.isAbsolute(rel));
+}
+
+/**
+ * The host folders the containers serving a workspace bind-mount under
+ * /workspaces, realpath'd by `real`. A container serves the workspace when
+ * one of `anchors` — its folders and the directory of its workspace file —
+ * holds the container's project folder, sits inside it, or is one of the
+ * container's /workspaces mounts. The first folder and the workspace file
+ * never leave, so what they find stays offered however few other folders
+ * are open. Mounts inside a `.git` (devc's frozen config and hooks) are not
+ * folders to work in.
+ */
+export function mountedFeatureRoots(
+  anchors: string[],
+  mounts: Pick<
+    ContainerBindMount,
+    'containerId' | 'localFolder' | 'source' | 'destination'
+  >[],
+  real: (p: string) => string
+): string[] {
+  const homes = anchors.map(real);
+  const workspaceMounts = mounts.filter(
+    m =>
+      within('/workspaces', m.destination) &&
+      !m.source.split(/[\\/]/).includes('.git')
+  );
+  const serving = new Set<string>();
+  for (const m of mounts) {
+    const project = m.localFolder && real(m.localFolder);
+    if (project && homes.some(h => within(h, project) || within(project, h))) {
+      serving.add(m.containerId);
+    }
+  }
+  for (const m of workspaceMounts) {
+    if (homes.some(h => within(real(m.source), h))) {
+      serving.add(m.containerId);
+    }
+  }
+  return [
+    ...new Set(
+      workspaceMounts
+        .filter(m => serving.has(m.containerId))
+        .map(m => real(m.source))
+    ),
+  ];
 }
 
 /** The name of the project a feature belongs to. */

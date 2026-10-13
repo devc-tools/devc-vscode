@@ -799,6 +799,19 @@ export async function listBindMounts(
   return parseBindMounts(inspectRes.stdout.toString('utf8'));
 }
 
+/**
+ * Docker Desktop reports some bind mount sources under the path its VM sees
+ * the host at, e.g. `/host_mnt/Users/me/code` for `/Users/me/code`.
+ */
+const DOCKER_DESKTOP_HOST_PREFIX = '/host_mnt/';
+
+/** A bind mount source as a path on the host. */
+function hostSource(source: string): string {
+  return source.startsWith(DOCKER_DESKTOP_HOST_PREFIX)
+    ? source.slice(DOCKER_DESKTOP_HOST_PREFIX.length - 1)
+    : source;
+}
+
 /** listBindMounts's `docker inspect` output, one container per line. */
 export function parseBindMounts(output: string): ContainerBindMount[] {
   const mounts: ContainerBindMount[] = [];
@@ -814,7 +827,7 @@ export function parseBindMounts(output: string): ContainerBindMount[] {
         containerId,
         containerName: parts[1].replace(/^\//, ''),
         localFolder: parts[2],
-        source: parts[i],
+        source: hostSource(parts[i]),
         destination: parts[i + 1] || '/',
       });
     }

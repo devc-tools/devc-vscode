@@ -526,6 +526,15 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
       ]);
     });
 
+    test('parseBindMounts drops Docker Desktop\'s /host_mnt prefix', () => {
+      const output =
+        'abc\t/app\t/Users/me/app\t/host_mnt/Users/me/lib\t/workspaces/lib\t/host_mntx/a\t/a';
+      assert.deepStrictEqual(
+        parseBindMounts(output).map(m => m.source),
+        ['/Users/me/lib', '/host_mntx/a']
+      );
+    });
+
     test('mapHostPath prefers the most specific mount, then the project container', () => {
       const mounts = [
         {

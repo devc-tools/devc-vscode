@@ -6,6 +6,7 @@ import * as path from 'path';
 import {
   featureLabel,
   listFeatures,
+  mountedFeatureRoots,
   planFolders,
   projectOf,
   removalRuns,
@@ -51,6 +52,49 @@ suite('planFolders', () => {
       added: [],
       removed: [],
     });
+  });
+});
+
+suite('mountedFeatureRoots', () => {
+  const id = (p: string) => p;
+  const mount = (
+    containerId: string,
+    localFolder: string,
+    source: string,
+    destination: string
+  ) => ({ containerId, localFolder, source, destination });
+  const dev = [
+    mount('c1', '/h/dev', '/h/dev', '/workspaces/dev'),
+    mount('c1', '/h/dev', '/h/dev/.git', '/workspaces/dev/.git'),
+    mount('c1', '/h/dev', '/h/tools/a', '/workspaces/tools/a'),
+    mount('c1', '/h/dev', '/h/tools/a.wt', '/workspaces/tools/a.wt'),
+    mount('c1', '/h/dev', '/h/skills/x', '/home/vscode/.claude/skills/x'),
+  ];
+  const all = ['/h/dev', '/h/tools/a', '/h/tools/a.wt'];
+
+  test('offers every /workspaces mount of the container whose project is open', () => {
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/dev'], dev, id), all);
+  });
+
+  test('a mounted folder alone finds its container', () => {
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/tools/a'], dev, id), all);
+  });
+
+  test('a folder inside the project finds its container', () => {
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/dev/sub'], dev, id), all);
+  });
+
+  test('compares realpaths', () => {
+    const real = (p: string) => p.replace(/^\/link/, '/h');
+    const linked = dev.map(m => ({ ...m, localFolder: '/link/dev' }));
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/other'], linked, real), []);
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/dev'], linked, real), all);
+  });
+
+  test('ignores containers that do not serve the workspace', () => {
+    const other = [mount('c2', '/h/else', '/h/else', '/workspaces/else')];
+    const mounts = [...dev, ...other];
+    assert.deepStrictEqual(mountedFeatureRoots(['/h/dev'], mounts, id), all);
   });
 });
 
@@ -131,6 +175,18 @@ suite('listFeatures', function () {
     assert.deepStrictEqual(
       [...new Set(features.map(projectOf))],
       ['alpha', 'beta']
+    );
+  });
+  test('a folder that is not a repo finds nothing above it', async () => {
+    // Stands for a home directory kept in Git, above `code/x.worktrees`.
+    await run(tmp, 'init', '-q', '-b', 'main');
+    const features = await listFeatures(
+      [path.join(tmp, 'alpha.worktrees'), path.join(tmp, 'plain')],
+      git
+    );
+    assert.deepStrictEqual(
+      features.map(f => path.relative(tmp, f.path)),
+      ['alpha', 'alpha.worktrees/feature-a', 'alpha.worktrees/loose']
     );
   });
 });
