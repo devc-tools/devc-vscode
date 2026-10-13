@@ -118,7 +118,8 @@ Three more commands tie features to herdr in the dev container. None runs by its
 
 In a saved `.code-workspace`, the window title starts with the feature herdr's focused pane is working in, such as `project / feature-a`, so a time tracker reading window titles sees which branch you are on. It follows herdr's focus, not the active editor.
 
-- `devc-vscode.windowTitle` sets the text: `${project}`, `${branch}`, `${folder}` and `${space}` (the herdr space's label). Empty turns it off.
+- `devc-vscode.windowTitleEnabled` turns it off, restoring your own title.
+- `devc-vscode.windowTitle` sets the text: `${project}`, `${branch}`, `${folder}` and `${space}` (the herdr space's label).
 - Your own `window.title` follows the text. The title returns to it when the focused pane is not in a repo on this machine, or herdr is not running.
 - The text is written to `window.title` in the `.code-workspace` file each time the feature changes, so a workspace file tracked in Git will show a diff.
 
@@ -177,6 +178,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.downCommand` | `devc down` | Run by Down Container |
 | `devc-vscode.agentKinds` | `["claude", "copilot", "pi"]` | Agents offered by Add Agent (herdr `--kind` values) |
 | `devc-vscode.herdrSession` | *(from folder)* | herdr session for this window, on this machine and SSH hosts |
+| `devc-vscode.windowTitleEnabled` | `true` | Put the feature herdr's focused pane is in at the front of the window title |
 | `devc-vscode.windowTitle` | `${project} / ${branch}` | Text put in front of the window title for the feature herdr's focused pane is in (see [Window title](#window-title)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |
