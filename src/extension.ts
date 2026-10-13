@@ -64,6 +64,14 @@ import {
   hostTerminalForeground,
   hostTtySize,
 } from './hostProcesses';
+import {
+  Feature,
+  featureLabel,
+  listFeatures,
+  planFolders,
+  projectOf,
+  removalRuns,
+} from './features';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
   ReviewRequest,
@@ -407,6 +415,7 @@ export function activate(context: vscode.ExtensionContext) {
     openFolderInContainer(uri)
   );
   register('devc-vscode.addSshHost', () => addSshHost());
+  register('devc-vscode.focusFeatures', () => focusFeatures());
   register('devc-vscode.sendToSshHost', (uri?: vscode.Uri) =>
     syncWithSshHost(uri, 'send')
   );
@@ -984,22 +993,28 @@ function syncDeps(): SyncDeps {
 
 /** The slice of the built-in Git extension's API (git.d.ts) used here. */
 interface GitExtensionApi {
+  readonly repositories: { readonly rootUri: vscode.Uri }[];
   toGitUri(uri: vscode.Uri, ref: string): vscode.Uri;
+  openRepository(root: vscode.Uri): Promise<unknown>;
 }
 
-async function openReview(request: ReviewRequest): Promise<void> {
+/** The built-in Git extension's API, or undefined when it is disabled. */
+async function gitApi(): Promise<GitExtensionApi | undefined> {
   const extension = vscode.extensions.getExtension<{
     getAPI(version: 1): GitExtensionApi;
   }>('vscode.git');
-  let api: GitExtensionApi | undefined;
   try {
-    api = (extension?.isActive
+    return (extension?.isActive
       ? extension.exports
       : await extension?.activate()
     )?.getAPI(1);
   } catch {
-    api = undefined;
+    return undefined;
   }
+}
+
+async function openReview(request: ReviewRequest): Promise<void> {
+  const api = await gitApi();
   if (!api) {
     throw new SyncError(
       "The built-in Git extension is disabled — it's needed to show the review diff."
@@ -1169,6 +1184,192 @@ function syncAttached(): void {
   })().catch(err => {
     console.error('devc-vscode: terminal sync error', err);
   });
+}
+
+// ── Features ────────────────────────────────────────────────────────────────
+
+interface FeatureItem extends vscode.QuickPickItem {
+  feature?: Feature;
+}
+
+function realpathOr(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Folders whose repos are offered as features: the workspace's own folders,
+ * and what the containers serving it mount under /workspaces — where a
+ * project and its `.worktrees` sibling sit side by side. Mounts inside a
+ * `.git` (devc's frozen config and hooks) are not folders to work in.
+ */
+async function featureRoots(): Promise<string[]> {
+  const folders = getHostFolders();
+  const mounts = await listBindMounts(getDockerCommand()).catch(() => []);
+  const mounted = mounts
+    .filter(
+      m =>
+        m.localFolder &&
+        folders.some(f => isPathWithin(f, m.localFolder)) &&
+        isPathWithin(`/${WORKSPACES_DIR}`, m.destination) &&
+        !m.source.split(/[\\/]/).includes('.git')
+    )
+    .map(m => m.source);
+  return [...new Set([...folders, ...mounted])].filter(isDirectory);
+}
+
+/** How long a workspace folder change may take to be reported. */
+const FOLDER_CHANGE_TIMEOUT_MS = 10000;
+
+/** Resolves once the workspace folders change, or false when they don't. */
+function changeWorkspaceFolders(
+  start: number,
+  deleteCount: number,
+  ...add: { uri: vscode.Uri }[]
+): Promise<boolean> {
+  return new Promise(resolve => {
+    const done = (changed: boolean) => {
+      clearTimeout(timer);
+      listener.dispose();
+      resolve(changed);
+    };
+    const listener = vscode.workspace.onDidChangeWorkspaceFolders(() =>
+      done(true)
+    );
+    const timer = setTimeout(() => done(false), FOLDER_CHANGE_TIMEOUT_MS);
+    if (!vscode.workspace.updateWorkspaceFolders(start, deleteCount, ...add)) {
+      done(false);
+    }
+  });
+}
+
+/**
+ * Pick which features — worktrees of the workspace's repos — are workspace
+ * folders. The Git extension's repositories follow: it opens and disposes a
+ * folder's own repo as the folder comes and goes, but leaves a repo open
+ * while one of its files is visible and skips one closed by hand, so both
+ * are done here too.
+ */
+async function focusFeatures(): Promise<void> {
+  const open = (vscode.workspace.workspaceFolders ?? []).map(f =>
+    f.uri.scheme === 'file' ? realpathOr(f.uri.fsPath) : f.uri.toString()
+  );
+  if (!open.length) {
+    vscode.window.showErrorMessage('Open a folder to focus features in.');
+    return;
+  }
+  const log = (line: string) => agentLog?.info(line);
+  let features: Feature[];
+  try {
+    features = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: 'Finding features…' },
+      async () =>
+        listFeatures(
+          await featureRoots(),
+          makeGit(gitEnv(getSshPath(), getControlDir()), log)
+        )
+    );
+  } catch (err) {
+    showSyncError(err);
+    return;
+  }
+  // The first folder is the window's root and stays whatever is picked.
+  features = features.filter(f => f.path !== open[0]);
+  if (!features.length) {
+    vscode.window.showInformationMessage(
+      'No other Git repos or worktrees found for this workspace.'
+    );
+    return;
+  }
+
+  const home = realpathOr(os.homedir());
+  const items: FeatureItem[] = [];
+  let project: string | undefined;
+  for (const feature of features) {
+    if (feature.main !== project) {
+      project = feature.main;
+      items.push({
+        label: projectOf(feature),
+        kind: vscode.QuickPickItemKind.Separator,
+      });
+    }
+    items.push({
+      label: `${projectOf(feature)} / ${featureLabel(feature)}`,
+      description: isPathWithin(home, feature.path)
+        ? `~${feature.path.slice(home.length)}`
+        : feature.path,
+      picked: open.includes(feature.path, 1),
+      feature,
+    });
+  }
+  const picked = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    matchOnDescription: true,
+    placeHolder: 'Features open in this workspace',
+  });
+  if (!picked) {
+    return;
+  }
+
+  const plan = planFolders(
+    open,
+    features.map(f => f.path),
+    picked.flatMap(item => (item.feature ? [item.feature.path] : []))
+  );
+  if (!plan.added.length && !plan.removed.length) {
+    return;
+  }
+  const gone = new Set(plan.removed.map(f => f.index));
+  const staying = open.filter((_, index) => !gone.has(index));
+  const api = await gitApi();
+  for (const { path: root } of plan.removed) {
+    // `git.close` asks which repository when it is given one that isn't open.
+    if (
+      api?.repositories.some(r => realpathOr(r.rootUri.fsPath) === root) &&
+      !staying.some(f => isPathWithin(root, f))
+    ) {
+      await vscode.commands.executeCommand('git.close', root);
+    }
+  }
+  for (const run of removalRuns([...gone])) {
+    if (!(await changeWorkspaceFolders(run.start, run.count))) {
+      vscode.window.showErrorMessage('Could not remove workspace folders.');
+      return;
+    }
+  }
+  if (!plan.added.length) {
+    return;
+  }
+  // Before the folders: adding the second folder of a single-folder window
+  // restarts the extension host.
+  for (const root of plan.added) {
+    try {
+      await api?.openRepository(vscode.Uri.file(root));
+    } catch (err) {
+      log(`features: could not open the repository at ${root}: ${err}`);
+    }
+  }
+  const count = vscode.workspace.workspaceFolders?.length ?? 0;
+  if (
+    !(await changeWorkspaceFolders(
+      count,
+      0,
+      ...plan.added.map(root => ({ uri: vscode.Uri.file(root) }))
+    ))
+  ) {
+    vscode.window.showErrorMessage('Could not add workspace folders.');
+  }
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────

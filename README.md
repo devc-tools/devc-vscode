@@ -95,6 +95,14 @@ Right-click a host file → **Copy Container Path** to copy the path the file is
 
 The most specific bind mount wins. When two containers mount the same folder, the one whose project folder holds the file is used.
 
+### Focus on features
+
+**Focus Features…** (command palette, or the Sandboxes view's `…` menu) lists every repo and Git worktree behind the workspace: the repos your folders are in, and the ones a running dev container mounts under `/workspaces`, such as `project` and the branches in `project.worktrees`. Tick the ones to work on. They become workspace folders, the rest are removed, and the Source Control view follows.
+
+- The first workspace folder always stays, and so do folders that are not repos or worktrees.
+- A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor.
+- Each change is written to the `.code-workspace` file.
+
 ### Agents
 
 - **Workspace** holds this machine's herdr session for the window, and each running dev container.
@@ -130,6 +138,7 @@ All commands are under **Dev Container FS** in the command palette.
 | Refresh Container Files | Re-read the Sandboxes view and re-check installed tools |
 | Open Folder in Container | Run `openFolderCommand` in a terminal for a host folder |
 | Add SSH Host… | Add an alias from `~/.ssh/config` to `sshHosts` |
+| Focus Features… | Pick which repos and worktrees are workspace folders (see [Focus on features](#focus-on-features)) |
 | Send to SSH Host… / Fetch from SSH Host… | Sync a local repo with an SSH host |
 | Send from Local / Fetch to Local | The same, from an SSH folder in the Sandboxes view |
 | New File, New Folder, Rename, Delete, Copy Container Path | Act on the Sandboxes selection |

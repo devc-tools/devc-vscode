@@ -136,6 +136,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "devc-vscode.focusFeatures",
+        "title": "Focus Features…",
+        "category": "Dev Container FS"
+      },
+      {
         "command": "devc-vscode.sendToSshHost",
         "title": "Send to SSH Host…",
         "category": "Dev Container FS"
@@ -316,6 +321,11 @@
           "command": "devc-vscode.addSshHost",
           "when": "view == devc-vscode.containers",
           "group": "navigation"
+        },
+        {
+          "command": "devc-vscode.focusFeatures",
+          "when": "view == devc-vscode.containers",
+          "group": "1_features"
         }
       ],
       "view/item/context": [
