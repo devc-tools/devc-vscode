@@ -97,17 +97,14 @@
           "default": "ssh",
           "description": "ssh client used for SSH environments (a name on PATH or an absolute path). User settings only."
         },
-        "devc-vscode.windowTitleEnabled": {
-          "type": "boolean",
-          "default": true,
-          "scope": "window",
-          "markdownDescription": "Make the window title name the Git branch that herdr's focused pane in the dev container is working in. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Turning it off restores the workspace's own title. `#devc-vscode.windowTitle#` sets the title."
-        },
         "devc-vscode.windowTitle": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": "${branch} (${rootNameShort})",
           "scope": "window",
-          "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name and `${space}` the herdr space's label. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Turned off by `#devc-vscode.windowTitleEnabled#`, or when empty."
+          "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name and `${space}` the herdr space's label. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Set to `null` to turn it off and restore the workspace's own title."
         }
       }
     },

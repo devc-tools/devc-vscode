@@ -526,7 +526,6 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration(e => {
       if (
         e.affectsConfiguration('devc-vscode.windowTitle') ||
-        e.affectsConfiguration('devc-vscode.windowTitleEnabled') ||
         e.affectsConfiguration('window.title')
       ) {
         scheduleTitle();
@@ -1587,10 +1586,12 @@ function scheduleTitle(delayMs = TITLE_DEBOUNCE_MS): void {
  */
 async function updateTitle(): Promise<void> {
   const run = ++titleRun;
-  const settings = vscode.workspace.getConfiguration('devc-vscode');
-  const template = settings.get<boolean>('windowTitleEnabled', true)
-    ? (settings.get<string>('windowTitle')?.trim() ?? '')
-    : '';
+  // Unset is the default template; null (or blank) turns the title off.
+  const template =
+    vscode.workspace
+      .getConfiguration('devc-vscode')
+      .get<string | null>('windowTitle')
+      ?.trim() ?? '';
   const saved = vscode.workspace.workspaceFile?.scheme === 'file';
   const active =
     template && saved ? await activeSpace(featureGit(() => undefined)) : undefined;
