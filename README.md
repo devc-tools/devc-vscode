@@ -97,12 +97,30 @@ The most specific bind mount wins. When two containers mount the same folder, th
 
 ### Focus on features
 
-**Focus Features…** (command palette, or the Sandboxes view's `…` menu) lists every repo and Git worktree behind the workspace: the repos your folders are in, and the ones a running dev container mounts under `/workspaces`, such as `project` and the branches in `project.worktrees`. Tick the ones to work on. They become workspace folders, the rest are removed, and the Source Control view follows.
+**Focus Features…** (command palette, or the `…` menu of the Sandboxes or Agents view) lists every repo and Git worktree behind the workspace: the repos your folders are in, and the ones a running dev container mounts under `/workspaces`, such as `project` and the branches in `project.worktrees`. Tick the ones to work on. They become workspace folders, the rest are removed, and the Source Control view follows.
 
 - The first workspace folder always stays, and so do folders that are not repos or worktrees.
 - Everything a running dev container for the workspace mounts under `/workspaces` stays on the list, so a removed folder can be picked again. The container is found from its project folder, the folder of the `.code-workspace` file, or any open folder it mounts.
 - A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor.
 - Each change is written to the `.code-workspace` file.
+
+Three more commands tie features to herdr in the dev container. None runs by itself:
+
+| Command | What it does |
+| --- | --- |
+| **Focus on Active Agents** | Makes the workspace's features the ones your agents are working in |
+| **Open herdr Space for Feature…** | Creates a herdr space labelled `project / branch`, starting in that feature's folder in the container that mounts it |
+| **Add Active herdr Space to Workspace** | Adds the repo or worktree herdr's focused pane is in as a workspace folder |
+
+**Add Agent** on a feature folder starts the agent in the running container that mounts it, in the feature's folder.
+
+#### Window title
+
+In a saved `.code-workspace`, the window title starts with the feature herdr's focused pane is working in, such as `project / feature-a`, so a time tracker reading window titles sees which branch you are on. It follows herdr's focus, not the active editor.
+
+- `devc-vscode.windowTitle` sets the text: `${project}`, `${branch}`, `${folder}` and `${space}` (the herdr space's label). Empty turns it off.
+- Your own `window.title` follows the text. The title returns to it when the focused pane is not in a repo on this machine, or herdr is not running.
+- The text is written to `window.title` in the `.code-workspace` file each time the feature changes, so a workspace file tracked in Git will show a diff.
 
 ### Agents
 
@@ -140,6 +158,9 @@ All commands are under **Dev Container FS** in the command palette.
 | Open Folder in Container | Run `openFolderCommand` in a terminal for a host folder |
 | Add SSH Host… | Add an alias from `~/.ssh/config` to `sshHosts` |
 | Focus Features… | Pick which repos and worktrees are workspace folders (see [Focus on features](#focus-on-features)) |
+| Focus on Active Agents | Make the workspace's features the ones your agents are working in |
+| Open herdr Space for Feature… | Create a herdr space for a repo or worktree in its dev container |
+| Add Active herdr Space to Workspace | Add the focused herdr pane's repo or worktree as a workspace folder |
 | Send to SSH Host… / Fetch from SSH Host… | Sync a local repo with an SSH host |
 | Send from Local / Fetch to Local | The same, from an SSH folder in the Sandboxes view |
 | New File, New Folder, Rename, Delete, Copy Container Path | Act on the Sandboxes selection |
@@ -156,6 +177,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.downCommand` | `devc down` | Run by Down Container |
 | `devc-vscode.agentKinds` | `["claude", "copilot", "pi"]` | Agents offered by Add Agent (herdr `--kind` values) |
 | `devc-vscode.herdrSession` | *(from folder)* | herdr session for this window, on this machine and SSH hosts |
+| `devc-vscode.windowTitle` | `${project} / ${branch}` | Text put in front of the window title for the feature herdr's focused pane is in (see [Window title](#window-title)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |
 

@@ -136,6 +136,44 @@ export function parseSnapshot(line: string): AgentInfo[] | undefined {
   return agents;
 }
 
+/** The pane herdr's focus is on. */
+export interface HerdrFocus {
+  paneId: string;
+  /** Label of the herdr workspace the pane lives in. */
+  workspace?: string;
+  cwd?: string;
+}
+
+/**
+ * The focused pane in one `herdr api snapshot` response, agent or not.
+ * Undefined when herdr is not running or nothing is focused.
+ */
+export function parseFocus(line: string): HerdrFocus | undefined {
+  let response: unknown;
+  try {
+    response = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const snapshot =
+    isObject(response) && isObject(response.result)
+      ? response.result.snapshot
+      : undefined;
+  if (!isObject(snapshot) || typeof snapshot.focused_pane_id !== 'string') {
+    return undefined;
+  }
+  const paneId = snapshot.focused_pane_id;
+  const pane = arrayOf(snapshot.panes).find(p => p.pane_id === paneId);
+  const workspace = arrayOf(snapshot.workspaces).find(
+    ws => ws.workspace_id === pane?.workspace_id
+  );
+  return {
+    paneId,
+    workspace: stringOr(workspace?.label),
+    cwd: stringOr(pane?.foreground_cwd) ?? stringOr(pane?.cwd),
+  };
+}
+
 /**
  * The user the devcontainer CLI execs as, from the devcontainer.metadata label.
  * herdr's socket lives under that user's home, so the watcher must run as them
@@ -188,13 +226,15 @@ export async function getRemoteUser(
  * Stream an environment's agents in a herdr session to `onAgents` until
  * disposed or the environment goes away. `onAgents` fires once per change in
  * herdr's snapshot; `onExit` fires when the stream ends on its own (container
- * stopped, host unreachable, herdr not installed).
+ * stopped, host unreachable, herdr not installed). `onFocus` gets the focused
+ * pane of each of those snapshots.
  */
 export function watchHerdr(
   shell: RemoteShell,
   session: string,
   onAgents: (agents: AgentInfo[], running: boolean) => void,
-  onExit: () => void
+  onExit: () => void,
+  onFocus?: (focus: HerdrFocus | undefined) => void
 ): { dispose(): void } {
   let child;
   try {
@@ -216,6 +256,7 @@ export function watchHerdr(
       const agents = line ? parseSnapshot(line) : undefined;
       if (agents && !disposed) {
         onAgents(agents, !isErrorResponse(line));
+        onFocus?.(parseFocus(line));
       }
     }
   });
@@ -471,6 +512,50 @@ export async function startAgent(
     return { error: failure(started) };
   }
   return { pane };
+}
+
+/**
+ * Create a herdr workspace labelled `label` whose first pane starts in `cwd`,
+ * and focus it.
+ */
+export async function createHerdrWorkspace(
+  shell: RemoteShell,
+  session: string,
+  cwd: string,
+  label: string
+): Promise<StartResult> {
+  const res = await runOrUndefined(
+    shell,
+    [
+      'sh',
+      '-c',
+      `PATH="$HOME/.local/bin:$PATH" exec ${herdrFor(session)} "$@"`,
+      'sh',
+      'workspace',
+      'create',
+      '--cwd',
+      cwd,
+      '--label',
+      label,
+      '--focus',
+    ],
+    COMMAND_TIMEOUT_MS
+  );
+  if (!res) {
+    return { error: 'herdr could not be run' };
+  }
+  const stdout = res.stdout.toString('utf8');
+  if (res.exitCode !== 0) {
+    return {
+      error: failure({
+        exitCode: res.exitCode,
+        stdout,
+        stderr: res.stderr.toString('utf8'),
+      }),
+    };
+  }
+  const pane = parseCreatedPane(stdout);
+  return pane ? { pane } : { error: 'herdr did not report the new pane' };
 }
 
 /** The root pane in herdr's `tab create` or `workspace create` response. */

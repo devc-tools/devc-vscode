@@ -723,6 +723,35 @@ export class AgentTreeDataProvider
     return undefined;
   }
 
+  /** A watched container by id, and whether its herdr is up. */
+  containerById(
+    id: string
+  ): { container: ContainerInfo; herdrRunning: boolean } | undefined {
+    const entry = this.watched.get(id);
+    return entry && { container: entry.container, herdrRunning: entry.running };
+  }
+
+  /** Where this window's agents are working: in a container, or on the host. */
+  agentFolders(): { containerId?: string; cwd: string }[] {
+    const found: { containerId?: string; cwd: string }[] = [];
+    const add = (agents: Iterable<AgentInfo>, containerId?: string) => {
+      for (const agent of agents) {
+        if (agent.cwd) {
+          found.push({ containerId, cwd: agent.cwd });
+        }
+      }
+    };
+    for (const [id, entry] of this.watched) {
+      add(entry.agents, id);
+      add(this.terminalAgents.get(id)?.values() ?? [], id);
+    }
+    add(this.localAgents.values());
+    for (const session of this.sessions.values()) {
+      add(ownedAgents(session.agents, session.attached, this.folders));
+    }
+    return found;
+  }
+
   /** Record which containers have a terminal open on them in this window. */
   setAttachedContainers(ids: Set<string>): void {
     if (

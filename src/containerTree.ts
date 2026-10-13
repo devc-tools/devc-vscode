@@ -864,6 +864,36 @@ export function mapHostPath(
 }
 
 /**
+ * Map a path in a container to the host path it is bind-mounted from. The
+ * most specific mount destination wins. Undefined for a path that lives in
+ * the container only.
+ */
+export function mapContainerPath(
+  containerId: string,
+  containerPath: string,
+  mounts: ContainerBindMount[]
+): string | undefined {
+  const best = mounts
+    .filter(
+      m =>
+        m.containerId === containerId &&
+        isPathWithin(m.destination, containerPath)
+    )
+    .sort(
+      (a, b) =>
+        normalizePath(b.destination).length - normalizePath(a.destination).length
+    )[0];
+  if (!best) {
+    return undefined;
+  }
+  const rel = posix.relative(
+    normalizePath(best.destination),
+    normalizePath(containerPath)
+  );
+  return rel ? posix.join(best.source, rel) : best.source;
+}
+
+/**
  * Find a running container for a host folder: first by the devcontainer CLI's
  * local_folder label, then by scanning bind mounts.
  */

@@ -28,13 +28,16 @@ import {
   WORKSPACES_DIR,
   isPathWithin,
   listBindMounts,
+  mapContainerPath,
   mapHostPath,
   sshRootKey,
 } from './containerTree';
 import {
   AgentInfo,
   CONTAINER_SESSION,
+  HerdrFocus,
   closeHerdrPane,
+  createHerdrWorkspace,
   focusHerdrAgent,
   getRemoteUser,
   runSessionCommand,
@@ -66,6 +69,8 @@ import {
 } from './hostProcesses';
 import {
   Feature,
+  expandTitle,
+  featureAt,
   featureLabel,
   listFeatures,
   mountedFeatureRoots,
@@ -75,6 +80,7 @@ import {
 } from './features';
 import { SNAPSHOT_VERSION, WindowRegistry } from './windowRegistry';
 import {
+  Git,
   ReviewRequest,
   SyncDeps,
   SyncError,
@@ -417,6 +423,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
   register('devc-vscode.addSshHost', () => addSshHost());
   register('devc-vscode.focusFeatures', () => focusFeatures());
+  register('devc-vscode.focusActiveAgents', () => focusActiveAgents());
+  register('devc-vscode.openFeatureSpace', () => openFeatureSpace());
+  register('devc-vscode.addSpaceFolder', () => addSpaceFolder());
   register('devc-vscode.sendToSshHost', (uri?: vscode.Uri) =>
     syncWithSshHost(uri, 'send')
   );
@@ -495,9 +504,32 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // The title follows herdr's focus as its watchers report it; the timer
+  // catches a branch switched in the focused pane's folder.
+  const titleRefresh = setInterval(() => {
+    if (focusedContainer !== undefined) {
+      scheduleTitle();
+    }
+  }, TITLE_REFRESH_MS);
+  context.subscriptions.push({
+    dispose() {
+      clearInterval(titleRefresh);
+      clearTimeout(titleTimer);
+    },
+  });
+  // Once the watchers have had time to report: a title left by the last
+  // session is dropped when nothing is focused now.
+  scheduleTitle(TITLE_STARTUP_MS);
+
   // Tools can be installed or removed while the window is open.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
+      if (
+        e.affectsConfiguration('devc-vscode.windowTitle') ||
+        e.affectsConfiguration('window.title')
+      ) {
+        scheduleTitle();
+      }
       if (
         TOOL_SETTINGS.some(key =>
           e.affectsConfiguration(`devc-vscode.${key}`)
@@ -1252,38 +1284,50 @@ function changeWorkspaceFolders(
   });
 }
 
-/**
- * Pick which features — worktrees of the workspace's repos — are workspace
- * folders. The Git extension's repositories follow: it opens and disposes a
- * folder's own repo as the folder comes and goes, but leaves a repo open
- * while one of its files is visible and skips one closed by hand, so both
- * are done here too.
- */
-async function focusFeatures(): Promise<void> {
-  const open = (vscode.workspace.workspaceFolders ?? []).map(f =>
+function featureGit(log: (line: string) => void = line => agentLog?.info(line)): Git {
+  return makeGit(gitEnv(getSshPath(), getControlDir()), log);
+}
+
+/** The workspace folders as realpath'd host paths, in order. */
+function openFolders(): string[] {
+  return (vscode.workspace.workspaceFolders ?? []).map(f =>
     f.uri.scheme === 'file' ? realpathOr(f.uri.fsPath) : f.uri.toString()
   );
+}
+
+/** Every feature of the workspace, or undefined once the failure is shown. */
+async function loadFeatures(): Promise<Feature[] | undefined> {
+  try {
+    return await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: 'Finding features…' },
+      async () => listFeatures(await featureRoots(), featureGit())
+    );
+  } catch (err) {
+    showSyncError(err);
+    return undefined;
+  }
+}
+
+/** `project / branch`, as features are named in pickers and herdr. */
+function featureName(feature: Feature): string {
+  return `${projectOf(feature)} / ${featureLabel(feature)}`;
+}
+
+/**
+ * Pick which features — worktrees of the workspace's repos — are workspace
+ * folders.
+ */
+async function focusFeatures(): Promise<void> {
+  const open = openFolders();
   if (!open.length) {
     vscode.window.showErrorMessage('Open a folder to focus features in.');
     return;
   }
-  const log = (line: string) => agentLog?.info(line);
-  let features: Feature[];
-  try {
-    features = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: 'Finding features…' },
-      async () =>
-        listFeatures(
-          await featureRoots(),
-          makeGit(gitEnv(getSshPath(), getControlDir()), log)
-        )
-    );
-  } catch (err) {
-    showSyncError(err);
+  // The first folder is the window's root and stays whatever is picked.
+  const features = (await loadFeatures())?.filter(f => f.path !== open[0]);
+  if (!features) {
     return;
   }
-  // The first folder is the window's root and stays whatever is picked.
-  features = features.filter(f => f.path !== open[0]);
   if (!features.length) {
     vscode.window.showInformationMessage(
       'No other Git repos or worktrees found for this workspace.'
@@ -1303,7 +1347,7 @@ async function focusFeatures(): Promise<void> {
       });
     }
     items.push({
-      label: `${projectOf(feature)} / ${featureLabel(feature)}`,
+      label: featureName(feature),
       description: isPathWithin(home, feature.path)
         ? `~${feature.path.slice(home.length)}`
         : feature.path,
@@ -1319,12 +1363,27 @@ async function focusFeatures(): Promise<void> {
   if (!picked) {
     return;
   }
-
-  const plan = planFolders(
+  await applyFolderChange(
     open,
-    features.map(f => f.path),
-    picked.flatMap(item => (item.feature ? [item.feature.path] : []))
+    planFolders(
+      open,
+      features.map(f => f.path),
+      picked.flatMap(item => (item.feature ? [item.feature.path] : []))
+    )
   );
+}
+
+/**
+ * Make `plan`'s changes to the workspace folders, `open` being what they
+ * are now. The Git extension's repositories follow: it opens and disposes a
+ * folder's own repo as the folder comes and goes, but leaves a repo open
+ * while one of its files is visible and skips one closed by hand, so both
+ * are done here too.
+ */
+async function applyFolderChange(
+  open: string[],
+  plan: ReturnType<typeof planFolders>
+): Promise<void> {
   if (!plan.added.length && !plan.removed.length) {
     return;
   }
@@ -1355,7 +1414,9 @@ async function focusFeatures(): Promise<void> {
     try {
       await api?.openRepository(vscode.Uri.file(root));
     } catch (err) {
-      log(`features: could not open the repository at ${root}: ${err}`);
+      agentLog?.info(
+        `features: could not open the repository at ${root}: ${err}`
+      );
     }
   }
   const count = vscode.workspace.workspaceFolders?.length ?? 0;
@@ -1368,6 +1429,284 @@ async function focusFeatures(): Promise<void> {
   ) {
     vscode.window.showErrorMessage('Could not add workspace folders.');
   }
+}
+
+/** The bind mounts of the containers the Agents view is watching. */
+async function watchedMounts() {
+  const mounts = await listBindMounts(getDockerCommand()).catch(() => []);
+  return mounts.filter(m => agentTree.containerById(m.containerId));
+}
+
+/**
+ * Make the workspace's features the ones this window's agents are working
+ * in: the repo or worktree each agent's folder belongs to.
+ */
+async function focusActiveAgents(): Promise<void> {
+  const open = openFolders();
+  if (!open.length) {
+    vscode.window.showErrorMessage('Open a folder to focus features in.');
+    return;
+  }
+  const folders = agentTree.agentFolders();
+  const mounts = folders.some(f => f.containerId) ? await watchedMounts() : [];
+  const dirs = new Set(
+    folders
+      .map(f =>
+        f.containerId ? mapContainerPath(f.containerId, f.cwd, mounts) : f.cwd
+      )
+      .filter((dir): dir is string => dir !== undefined && isDirectory(dir))
+  );
+  const git = featureGit();
+  const active = new Set<string>();
+  for (const dir of dirs) {
+    const feature = await featureAt(dir, git).catch(() => undefined);
+    if (feature) {
+      active.add(realpathOr(feature.path));
+    }
+  }
+  if (!active.size) {
+    vscode.window.showInformationMessage(
+      'No agent is working in a Git repo or worktree on this machine.'
+    );
+    return;
+  }
+  const features = await loadFeatures();
+  if (!features) {
+    return;
+  }
+  const plan = planFolders(
+    open,
+    [...new Set([...features.map(f => f.path), ...active])],
+    [...active]
+  );
+  if (!plan.added.length && !plan.removed.length) {
+    vscode.window.showInformationMessage(
+      'The workspace already holds the features its agents are working in.'
+    );
+    return;
+  }
+  await applyFolderChange(open, plan);
+}
+
+// ── Active herdr space ──────────────────────────────────────────────────────
+
+/** The focused herdr pane of each watched container. */
+const containerFocus = new Map<string, HerdrFocus>();
+/** The container whose herdr focus changed last: the one being worked in. */
+let focusedContainer: string | undefined;
+/** Host folders of focused panes, by container id and container path. */
+const focusDirs = new Map<string, string>();
+
+function setContainerFocus(
+  containerId: string,
+  focus: HerdrFocus | undefined
+): void {
+  const before = containerFocus.get(containerId);
+  if (
+    before?.paneId === focus?.paneId &&
+    before?.cwd === focus?.cwd &&
+    before?.workspace === focus?.workspace
+  ) {
+    return;
+  }
+  if (focus) {
+    containerFocus.set(containerId, focus);
+    focusedContainer = containerId;
+  } else {
+    containerFocus.delete(containerId);
+    if (focusedContainer === containerId) {
+      focusedContainer = [...containerFocus.keys()].pop();
+    }
+  }
+  scheduleTitle();
+}
+
+/** The feature herdr's focused pane is working in, and its space's label. */
+async function activeSpace(
+  git: Git
+): Promise<{ feature: Feature; space?: string } | undefined> {
+  const containerId = focusedContainer;
+  const focus =
+    containerId === undefined ? undefined : containerFocus.get(containerId);
+  if (containerId === undefined || !focus?.cwd) {
+    return undefined;
+  }
+  const key = `${containerId}\0${focus.cwd}`;
+  let dir = focusDirs.get(key);
+  if (dir === undefined) {
+    dir = mapContainerPath(
+      containerId,
+      focus.cwd,
+      await listBindMounts(getDockerCommand()).catch(() => [])
+    );
+    if (dir === undefined) {
+      return undefined;
+    }
+    focusDirs.set(key, dir);
+  }
+  if (!isDirectory(dir)) {
+    return undefined;
+  }
+  const feature = await featureAt(dir, git).catch(() => undefined);
+  return (
+    feature && {
+      feature: {
+        ...feature,
+        path: realpathOr(feature.path),
+        main: realpathOr(feature.main),
+      },
+      space: focus.workspace,
+    }
+  );
+}
+
+/** What this extension last wrote to `window.title`, to tell it from yours. */
+const TITLE_WRITTEN_KEY = 'devc-vscode.windowTitle.written';
+/** The workspace's own `window.title` (`{}` when unset), restored on clear. */
+const TITLE_ORIGINAL_KEY = 'devc-vscode.windowTitle.original';
+const TITLE_DEBOUNCE_MS = 300;
+const TITLE_REFRESH_MS = 15000;
+const TITLE_STARTUP_MS = 5000;
+let titleTimer: NodeJS.Timeout | undefined;
+let titleRun = 0;
+
+function scheduleTitle(delayMs = TITLE_DEBOUNCE_MS): void {
+  clearTimeout(titleTimer);
+  titleTimer = setTimeout(() => {
+    updateTitle().catch(err => agentLog?.info(`window title: ${err}`));
+  }, delayMs);
+}
+
+/**
+ * Put the feature of herdr's focused pane in front of the window title.
+ * VS Code has no API for the title, only the `window.title` setting, and
+ * only its workspace value is this window's alone — so this is done only
+ * for a saved workspace, where that value lives in the `.code-workspace`
+ * file rather than in a folder's `.vscode/settings.json`.
+ */
+async function updateTitle(): Promise<void> {
+  const run = ++titleRun;
+  const template =
+    vscode.workspace
+      .getConfiguration('devc-vscode')
+      .get<string>('windowTitle')
+      ?.trim() ?? '';
+  const saved = vscode.workspace.workspaceFile?.scheme === 'file';
+  const active =
+    template && saved ? await activeSpace(featureGit(() => undefined)) : undefined;
+  if (run !== titleRun) {
+    return;
+  }
+  const prefix = active
+    ? expandTitle(template, active.feature, active.space).trim()
+    : '';
+
+  const config = vscode.workspace.getConfiguration('window');
+  const found = config.inspect<string>('title');
+  const current = found?.workspaceValue;
+  const written = workspaceState.get<string>(TITLE_WRITTEN_KEY);
+  let original = workspaceState.get<{ value?: string }>(TITLE_ORIGINAL_KEY)?.value;
+  if (current !== written) {
+    // Set, changed or removed by hand since: that is the title to build on.
+    original = current;
+    await workspaceState.update(TITLE_ORIGINAL_KEY, { value: current });
+  }
+  if (!prefix) {
+    if (written !== undefined) {
+      if (current === written) {
+        await config.update(
+          'title',
+          original,
+          vscode.ConfigurationTarget.Workspace
+        );
+      }
+      await workspaceState.update(TITLE_WRITTEN_KEY, undefined);
+    }
+    return;
+  }
+  const base = original ?? found?.globalValue ?? found?.defaultValue ?? '';
+  const title = base ? `${prefix}\${separator}${base}` : prefix;
+  if (title !== written) {
+    await workspaceState.update(TITLE_WRITTEN_KEY, title);
+  }
+  if (title !== current) {
+    await config.update('title', title, vscode.ConfigurationTarget.Workspace);
+  }
+}
+
+/** Add the feature herdr's focused pane is working in as a workspace folder. */
+async function addSpaceFolder(): Promise<void> {
+  const active = await activeSpace(featureGit());
+  if (!active) {
+    vscode.window.showInformationMessage(
+      "herdr's focused pane is not in a Git repo or worktree on this machine."
+    );
+    return;
+  }
+  const open = openFolders();
+  if (open.includes(active.feature.path)) {
+    vscode.window.showInformationMessage(
+      `${featureName(active.feature)} is already a workspace folder.`
+    );
+    return;
+  }
+  await applyFolderChange(open, { added: [active.feature.path], removed: [] });
+}
+
+/**
+ * Create a herdr space for a feature in the dev container that mounts it:
+ * labelled `project / branch`, with its first pane in the feature's folder.
+ */
+async function openFeatureSpace(): Promise<void> {
+  const features = await loadFeatures();
+  if (!features) {
+    return;
+  }
+  const mounts = await watchedMounts();
+  const items = features.flatMap(feature => {
+    const mapped = mapHostPath(feature.path, mounts);
+    const entry = mapped && agentTree.containerById(mapped.containerId);
+    return entry
+      ? [{ label: featureName(feature), description: mapped.path, mapped, entry }]
+      : [];
+  });
+  if (!items.length) {
+    vscode.window.showErrorMessage(
+      "No running dev container mounts one of this workspace's repos or worktrees."
+    );
+    return;
+  }
+  const picked = await vscode.window.showQuickPick(items, {
+    matchOnDescription: true,
+    placeHolder: 'Feature to open a herdr space for',
+  });
+  if (!picked) {
+    return;
+  }
+  const { container, herdrRunning } = picked.entry;
+  if (!herdrRunning) {
+    vscode.window.showErrorMessage(
+      `herdr is not running in the ${path.basename(container.localFolder)} dev container — use Attach Terminal first.`
+    );
+    return;
+  }
+  const result = await createHerdrWorkspace(
+    await containerShell(container.id),
+    CONTAINER_SESSION,
+    picked.mapped.path,
+    picked.label
+  );
+  if ('error' in result) {
+    vscode.window.showErrorMessage(
+      `Could not open a herdr space: ${result.error}`
+    );
+    return;
+  }
+  await focusContainerAgent(container, {
+    ...result.pane,
+    agent: 'the new space',
+    status: 'unknown',
+  });
 }
 
 // ── Agents ──────────────────────────────────────────────────────────────────
@@ -1409,15 +1748,22 @@ function watchContainerAgents(
 ): { dispose(): void } {
   let watcher: { dispose(): void } | undefined;
   let disposed = false;
+  const ended = () => {
+    setContainerFocus(containerId, undefined);
+    onExit();
+  };
   containerShell(containerId).then(shell => {
     if (!disposed) {
-      watcher = watchHerdr(shell, CONTAINER_SESSION, onAgents, onExit);
+      watcher = watchHerdr(shell, CONTAINER_SESSION, onAgents, ended, focus =>
+        setContainerFocus(containerId, focus)
+      );
     }
-  }, onExit);
+  }, ended);
   return {
     dispose() {
       disposed = true;
       watcher?.dispose();
+      setContainerFocus(containerId, undefined);
     },
   };
 }
@@ -1794,21 +2140,29 @@ async function launchInContainer(
   kind: string,
   token: vscode.CancellationToken
 ): Promise<string | undefined> {
-  const entry = agentTree.containerFor(folder);
+  // A feature folder is not a container's project folder but is mounted in
+  // one: that container is the one to start, and to start the agent in.
+  const mounted = agentTree.containerFor(folder)
+    ? undefined
+    : mapHostPath(folder, await watchedMounts());
+  const project =
+    (mounted && agentTree.containerById(mounted.containerId)?.container.localFolder) ||
+    folder;
+  const entry = agentTree.containerFor(project);
   if (!entry?.herdrRunning) {
     if (commandSettingAvailable('herdrAttachCommand', await currentTools())) {
       // Brings the container, and herdr in it, up.
-      openContainerTerminal(folder, getHerdrAttachCommand());
+      openContainerTerminal(project, getHerdrAttachCommand());
     } else if (entry) {
       // Brings herdr up in the running container, if it has herdr.
-      await openFallbackTerminal(entry.container.id, folder);
+      await openFallbackTerminal(entry.container.id, project);
     } else {
       return 'devc not found — install devc or set devc-vscode.herdrAttachCommand';
     }
   }
   const found = await waitFor(
     () => {
-      const entry = agentTree.containerFor(folder);
+      const entry = agentTree.containerFor(project);
       return entry?.herdrRunning ? entry.container : undefined;
     },
     CONTAINER_START_TIMEOUT_MS,
@@ -1817,10 +2171,13 @@ async function launchInContainer(
   if (!found) {
     return token.isCancellationRequested
       ? undefined
-      : `herdr did not come up in the ${path.basename(folder)} dev container`;
+      : `herdr did not come up in the ${path.basename(project)} dev container`;
   }
-  const docker = getDockerCommand();
-  const cwd = (await findMatchingBindMount(found.id, folder, docker))?.destPath;
+  const mounts = await listBindMounts(getDockerCommand()).catch(() => []);
+  const cwd = mapHostPath(
+    folder,
+    mounts.filter(m => m.containerId === found.id)
+  )?.path;
   const result = await startShellAgent(
     await containerShell(found.id),
     CONTAINER_SESSION,

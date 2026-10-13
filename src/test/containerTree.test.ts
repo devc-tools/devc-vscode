@@ -10,6 +10,7 @@ import {
   SyncTargetSource,
   containerUri,
   isPathWithin,
+  mapContainerPath,
   mapHostPath,
   parseBindMounts,
   parseUriList,
@@ -533,6 +534,35 @@ suite('ContainerTreeDataProvider (no Docker required)', () => {
         parseBindMounts(output).map(m => m.source),
         ['/Users/me/lib', '/host_mntx/a']
       );
+    });
+
+    test('mapContainerPath prefers the most specific mount of that container', () => {
+      const mount = (containerId: string, source: string, destination: string) => ({
+        containerId,
+        containerName: `${containerId}-1`,
+        localFolder: '',
+        source,
+        destination,
+      });
+      const mounts = [
+        mount('app', '/Users/me/code/app', '/workspaces/app'),
+        mount('app', '/Users/me/code/app.worktrees', '/workspaces/app.worktrees'),
+        mount('app', '/Users/me/cache', '/workspaces/app/.cache'),
+        mount('other', '/Users/me/elsewhere', '/workspaces/app'),
+      ];
+      assert.strictEqual(
+        mapContainerPath('app', '/workspaces/app/src', mounts),
+        '/Users/me/code/app/src'
+      );
+      assert.strictEqual(
+        mapContainerPath('app', '/workspaces/app.worktrees/f', mounts),
+        '/Users/me/code/app.worktrees/f'
+      );
+      assert.strictEqual(
+        mapContainerPath('app', '/workspaces/app/.cache', mounts),
+        '/Users/me/cache'
+      );
+      assert.strictEqual(mapContainerPath('app', '/tmp/x', mounts), undefined);
     });
 
     test('mapHostPath prefers the most specific mount, then the project container', () => {

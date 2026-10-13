@@ -96,6 +96,12 @@
           "scope": "application",
           "default": "ssh",
           "description": "ssh client used for SSH environments (a name on PATH or an absolute path). User settings only."
+        },
+        "devc-vscode.windowTitle": {
+          "type": "string",
+          "default": "${project} / ${branch}",
+          "scope": "window",
+          "markdownDescription": "Text put in front of the window title for the Git repo or worktree that herdr's focused pane in the dev container is working in. `${project}` is the repo's folder name, `${branch}` its branch (the folder name for a detached HEAD), `${folder}` the worktree's folder name and `${space}` the herdr space's label. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves; your own title follows the text. Empty turns it off."
         }
       }
     },
@@ -138,6 +144,21 @@
       {
         "command": "devc-vscode.focusFeatures",
         "title": "Focus Features…",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.focusActiveAgents",
+        "title": "Focus on Active Agents",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.openFeatureSpace",
+        "title": "Open herdr Space for Feature…",
+        "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.addSpaceFolder",
+        "title": "Add Active herdr Space to Workspace",
         "category": "Dev Container FS"
       },
       {
@@ -326,6 +347,26 @@
           "command": "devc-vscode.focusFeatures",
           "when": "view == devc-vscode.containers",
           "group": "1_features"
+        },
+        {
+          "command": "devc-vscode.focusFeatures",
+          "when": "view == devc-vscode.agents",
+          "group": "1_features@1"
+        },
+        {
+          "command": "devc-vscode.focusActiveAgents",
+          "when": "view == devc-vscode.agents",
+          "group": "1_features@2"
+        },
+        {
+          "command": "devc-vscode.openFeatureSpace",
+          "when": "view == devc-vscode.agents && devc-vscode.hasDocker",
+          "group": "1_features@3"
+        },
+        {
+          "command": "devc-vscode.addSpaceFolder",
+          "when": "view == devc-vscode.agents && devc-vscode.hasDocker",
+          "group": "1_features@4"
         }
       ],
       "view/item/context": [
@@ -579,6 +620,14 @@
         {
           "command": "devc-vscode.agentReviewResend",
           "when": "false"
+        },
+        {
+          "command": "devc-vscode.openFeatureSpace",
+          "when": "devc-vscode.hasDocker"
+        },
+        {
+          "command": "devc-vscode.addSpaceFolder",
+          "when": "devc-vscode.hasDocker"
         }
       ]
     },

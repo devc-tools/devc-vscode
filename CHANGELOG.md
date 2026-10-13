@@ -18,6 +18,8 @@
 
 ### Added
 
+- **The window title names the feature herdr is focused on.** In a saved `.code-workspace`, the repo and branch of herdr's focused pane in the dev container are put in front of the window title (`project / feature-a`), for time trackers that read window titles. New setting `devc-vscode.windowTitle` sets the text or, when empty, turns it off. The text is written to the workspace's `window.title` setting.
+- **Focus on Active Agents**, **Open herdr Space for Feature…** and **Add Active herdr Space to Workspace**: set the workspace's features from where agents are working, create a herdr space labelled `project / branch` in a feature's folder, and add the focused pane's repo or worktree as a workspace folder.
 - **Focus Features…** picks which of the workspace's repos and Git worktrees are workspace folders: the repos behind its folders and the ones a running dev container mounts under `/workspaces` (a project and the branches in its `.worktrees` sibling). Unticked ones are removed and their repositories closed in Source Control; the first folder and folders that are not repos stay.
 - **Ask an agent about code.** Comment threads (**Agent (devc)**) on host files that are bind-mounted into a running dev container, including both sides of Git diffs and GitHub Pull Requests review diffs, and **Ask Agent About Selection** in the editor context menu. A question is typed into a herdr agent's pane in the container with `herdr agent prompt` (herdr 0.9.3+), with the file's container path, line range, diff side and code; the agent's answer, written to `/tmp/devc-vscode/review/`, shows as a reply in the thread. Threads support follow-ups, **Show Agent**, **Delete Thread** and **Resend**, and are never posted to GitHub.
 - **Copy Container Path** on host files in the Explorer, editor tabs and the GitHub Pull Requests file trees copies the path the file is bind-mounted at in a running container.
@@ -33,6 +35,7 @@
 
 ### Fixed
 
+- Add Agent on a workspace folder that is mounted in a dev container but is not its project folder, such as a worktree, ran the attach command from that folder as if no container were running and started the agent in herdr's default folder. It now uses the running container that mounts the folder and starts the agent in the folder's mounted path.
 - On Docker Desktop, bind mounts declared in a devcontainer's `mounts` were reported under `/host_mnt/...`, a path that does not exist on the host, so Focus Features… skipped them and agent review comments and container path mapping missed files in them. The prefix is now dropped.
 - Focus Features… listed only folders already in the workspace, so a removed one could not be picked again; it now lists everything the workspace's containers mount under `/workspaces`. It also no longer offers a repo found above a folder, such as a home directory kept in Git above a `.worktrees` folder.
 - A relative path anywhere in a terminal line suppressed the links for that whole line, including valid absolute paths, because building a URI from a non-absolute path threw.

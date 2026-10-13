@@ -17,6 +17,7 @@ import {
   AgentInfo,
   HerdrRunner,
   parseCreatedPane,
+  parseFocus,
   parseSnapshot,
   remoteUserFromMetadata,
   startAgent,
@@ -59,6 +60,37 @@ const SNAPSHOT = JSON.stringify({
       ],
     },
   },
+});
+
+suite('parseFocus', () => {
+  const focused = (paneId: unknown) => {
+    const response = JSON.parse(SNAPSHOT);
+    response.result.snapshot.focused_pane_id = paneId;
+    return JSON.stringify(response);
+  };
+
+  test('the focused pane, agent or not, with its workspace label', () => {
+    assert.deepStrictEqual(parseFocus(focused('w1:p2')), {
+      paneId: 'w1:p2',
+      workspace: 'app',
+      cwd: '/workspaces/app',
+    });
+    assert.deepStrictEqual(parseFocus(focused('w1:p1')), {
+      paneId: 'w1:p1',
+      workspace: 'app',
+      cwd: '/workspaces/app/sub',
+    });
+  });
+
+  test('nothing focused, an error or other output is no focus', () => {
+    assert.strictEqual(parseFocus(SNAPSHOT), undefined);
+    assert.strictEqual(parseFocus(focused(null)), undefined);
+    assert.strictEqual(
+      parseFocus('{"error":{"code":"server_not_running"}}'),
+      undefined
+    );
+    assert.strictEqual(parseFocus('sh: herdr: not found'), undefined);
+  });
 });
 
 suite('parseSnapshot', () => {

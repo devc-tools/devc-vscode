@@ -97,6 +97,47 @@ export function mountedFeatureRoots(
   ];
 }
 
+/** The feature — repo or worktree — the folder `dir` is in, if any. */
+export async function featureAt(dir: string, git: Git): Promise<Feature | undefined> {
+  const res = await git(dir, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--show-toplevel',
+    '--git-common-dir',
+  ]);
+  const [root, common] = res.stdout.split('\n').map(line => line.trim());
+  if (res.code !== 0 || !root || !common) {
+    return undefined;
+  }
+  const head = await git(root, ['symbolic-ref', '--short', '-q', 'HEAD']);
+  return {
+    path: root,
+    main: path.basename(common) === '.git' ? path.dirname(common) : root,
+    branch: head.code === 0 ? head.stdout.trim() || undefined : undefined,
+  };
+}
+
+/**
+ * `template` with `${project}`, `${branch}`, `${folder}` and `${space}`
+ * filled in for a feature; anything else in it is left as written. `branch`
+ * is the folder's name for a detached HEAD.
+ */
+export function expandTitle(
+  template: string,
+  feature: Feature,
+  space: string | undefined
+): string {
+  const values: Record<string, string> = {
+    project: projectOf(feature),
+    branch: feature.branch ?? path.basename(feature.path),
+    folder: path.basename(feature.path),
+    space: space ?? '',
+  };
+  return template.replace(/\$\{(\w+)\}/g, (match, name: string) =>
+    Object.hasOwn(values, name) ? values[name] : match
+  );
+}
+
 /** The name of the project a feature belongs to. */
 export function projectOf(feature: Feature): string {
   return path.basename(feature.main);

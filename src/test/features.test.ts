@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  expandTitle,
+  featureAt,
   featureLabel,
   listFeatures,
   mountedFeatureRoots,
@@ -98,6 +100,25 @@ suite('mountedFeatureRoots', () => {
   });
 });
 
+suite('expandTitle', () => {
+  const feature = { path: '/c/a.worktrees/x', main: '/c/a', branch: 'feature-x' };
+
+  test('fills in the feature and leaves other variables to VS Code', () => {
+    assert.strictEqual(
+      expandTitle('${project} / ${branch} [${space}] ${rootName}', feature, 'one'),
+      'a / feature-x [one] ${rootName}'
+    );
+    assert.strictEqual(expandTitle('${folder}', feature, undefined), 'x');
+  });
+
+  test('a detached HEAD is named by its folder', () => {
+    assert.strictEqual(
+      expandTitle('${project} / ${branch}', { path: '/c/a.worktrees/x', main: '/c/a' }, undefined),
+      'a / x'
+    );
+  });
+});
+
 suite('removalRuns', () => {
   test('groups neighbours, highest run first', () => {
     assert.deepStrictEqual(removalRuns([2, 6, 1, 5, 3, 9]), [
@@ -168,6 +189,26 @@ suite('listFeatures', function () {
       ['alpha', 'alpha.worktrees/feature-a', 'alpha.worktrees/loose', 'beta']
     );
     assert.ok(features.slice(0, 3).every(f => f.main === path.join(tmp, 'alpha')));
+  });
+
+  test('featureAt finds the worktree a folder is in', async () => {
+    const worktree = path.join(tmp, 'alpha.worktrees', 'feature-a');
+    fs.mkdirSync(path.join(worktree, 'src'));
+    assert.deepStrictEqual(await featureAt(path.join(worktree, 'src'), git), {
+      path: worktree,
+      main: path.join(tmp, 'alpha'),
+      branch: 'feature-a',
+    });
+    assert.deepStrictEqual(await featureAt(path.join(tmp, 'beta'), git), {
+      path: path.join(tmp, 'beta'),
+      main: path.join(tmp, 'beta'),
+      branch: 'main',
+    });
+    assert.strictEqual(
+      (await featureAt(path.join(tmp, 'alpha.worktrees', 'loose'), git))?.branch,
+      undefined
+    );
+    assert.strictEqual(await featureAt(path.join(tmp, 'plain'), git), undefined);
   });
 
   test('a parent folder finds the repos directly in it', async () => {

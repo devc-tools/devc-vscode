@@ -106,6 +106,20 @@ A comment controller (**Agent (devc)**) offers comment ranges on every line of a
 
 **Lifetime.** Threads live in the window's memory and are gone after a reload. Their reply files stay in the container's `/tmp` until **Delete Thread** removes the thread's directory or the container is recreated.
 
+## Features and the window title
+
+A feature is a local repo's main worktree or one of its linked worktrees. Focus Features… finds them from the workspace folders and from what the workspace's containers mount under `/workspaces`, then lists each repo's `git worktree list`.
+
+**herdr focus.** The agent watcher's snapshots also carry herdr's focused pane. Its working directory (`foreground_cwd`, else `cwd`) is mapped back to a host path through the container's bind mounts, most specific destination first, and `git rev-parse --show-toplevel --git-common-dir` there gives the worktree and its repo. When several containers are watched, the one whose focus changed last counts.
+
+**Window title.** VS Code has no API for the title, only the `window.title` setting, and only its workspace value belongs to one window. So the title is managed only in a saved `.code-workspace`, never in a folder's `.vscode/settings.json`. The value written is `devc-vscode.windowTitle`, expanded, then `${separator}` and the title you would otherwise have: the workspace's own `window.title` if it had one, else your user or default one.
+
+- It is re-resolved when herdr's focus or the focused pane's directory changes, and every 15 s to catch a branch switch. The setting is written only when the text changes.
+- The value last written is remembered in workspace state. A `window.title` that differs from it was set by you, and becomes the title to build on and restore.
+- With no feature to show, the workspace's own value is restored. A title left behind when VS Code closed is dropped a few seconds after the next start unless a pane is focused.
+
+**Open herdr Space for Feature…** runs `herdr --session=devc workspace create --cwd <mounted path> --label "<project> / <branch>" --focus` in the container, then reveals the herdr terminal and focuses the new pane as for an agent.
+
 ## Multiple windows
 
 Each window writes what its Agents view shows to a file in the extension's global storage and watches the other windows' files. Their agents show under **Other Workspaces**, one row per window, and the badge counts agents needing attention in every window.
