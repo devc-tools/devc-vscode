@@ -1579,7 +1579,7 @@ function scheduleTitle(delayMs = TITLE_DEBOUNCE_MS): void {
 }
 
 /**
- * Put the feature of herdr's focused pane in front of the window title.
+ * Make the window title name the feature of herdr's focused pane.
  * VS Code has no API for the title, only the `window.title` setting, and
  * only its workspace value is this window's alone — so this is done only
  * for a saved workspace, where that value lives in the `.code-workspace`
@@ -1597,21 +1597,20 @@ async function updateTitle(): Promise<void> {
   if (run !== titleRun) {
     return;
   }
-  const prefix = active
+  const title = active
     ? expandTitle(template, active.feature, active.space).trim()
     : '';
 
   const config = vscode.workspace.getConfiguration('window');
-  const found = config.inspect<string>('title');
-  const current = found?.workspaceValue;
+  const current = config.inspect<string>('title')?.workspaceValue;
   const written = workspaceState.get<string>(TITLE_WRITTEN_KEY);
   let original = workspaceState.get<{ value?: string }>(TITLE_ORIGINAL_KEY)?.value;
   if (current !== written) {
-    // Set, changed or removed by hand since: that is the title to build on.
+    // Set, changed or removed by hand since: that is the title to restore.
     original = current;
     await workspaceState.update(TITLE_ORIGINAL_KEY, { value: current });
   }
-  if (!prefix) {
+  if (!title) {
     if (written !== undefined) {
       if (current === written) {
         await config.update(
@@ -1624,8 +1623,6 @@ async function updateTitle(): Promise<void> {
     }
     return;
   }
-  const base = original ?? found?.globalValue ?? found?.defaultValue ?? '';
-  const title = base ? `${prefix}\${separator}${base}` : prefix;
   if (title !== written) {
     await workspaceState.update(TITLE_WRITTEN_KEY, title);
   }

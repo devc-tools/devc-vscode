@@ -101,13 +101,13 @@
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "markdownDescription": "Put the Git repo and branch that herdr's focused pane in the dev container is working in at the front of the window title. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Turning it off restores the workspace's own title. `#devc-vscode.windowTitle#` sets the text."
+          "markdownDescription": "Make the window title name the Git branch that herdr's focused pane in the dev container is working in. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Turning it off restores the workspace's own title. `#devc-vscode.windowTitle#` sets the title."
         },
         "devc-vscode.windowTitle": {
           "type": "string",
-          "default": "${project} / ${branch}",
+          "default": "${branch} (${rootNameShort})",
           "scope": "window",
-          "markdownDescription": "Text put in front of the window title for the Git repo or worktree that herdr's focused pane in the dev container is working in. `${project}` is the repo's folder name, `${branch}` its branch (the folder name for a detached HEAD), `${folder}` the worktree's folder name and `${space}` the herdr space's label. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves; your own title follows the text. Turned off by `#devc-vscode.windowTitleEnabled#`, or when empty."
+          "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name and `${space}` the herdr space's label. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Turned off by `#devc-vscode.windowTitleEnabled#`, or when empty."
         }
       }
     },
