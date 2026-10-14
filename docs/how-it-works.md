@@ -116,7 +116,7 @@ A feature is a local repo's main worktree or one of its linked worktrees. Focus 
 
 - It is re-resolved when herdr's focus or the focused pane's directory changes, and every 15 s to catch a branch switch. The setting is written only when the text changes.
 - The value last written is remembered in workspace state. A `window.title` that differs from it was set by you, and becomes the title to restore.
-- With no feature to show, or with `devc-vscode.windowTitle` set to `null`, the workspace's own value is restored. A title left behind when VS Code closed is dropped a few seconds after the next start unless a pane is focused.
+- With no feature to show, or with `devc-vscode.windowTitle` at its default `null`, the workspace's own value is restored. A title left behind when VS Code closed is dropped a few seconds after the next start unless a pane is focused.
 
 **Open herdr Space for Feature…** runs `herdr --session=devc workspace create --cwd <mounted path> --label "<project> / <branch>" --focus` in the container, then reveals the herdr terminal and focuses the new pane as for an agent.
 

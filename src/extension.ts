@@ -1586,7 +1586,7 @@ function scheduleTitle(delayMs = TITLE_DEBOUNCE_MS): void {
  */
 async function updateTitle(): Promise<void> {
   const run = ++titleRun;
-  // Unset is the default template; null (or blank) turns the title off.
+  // Off by default: null (or blank) leaves the title alone.
   const template =
     vscode.workspace
       .getConfiguration('devc-vscode')
