@@ -171,6 +171,7 @@ The **devc web** view in the activity bar shows [devc web](https://github.com/de
 - **Restart devc web** starts a new one, with a new token, for every window. The views reload; a tiles tab still points at the old server, so reopen it.
 - To run devc web from a devc-tools checkout before publishing, set `devc-vscode.devcWebDevc` to `"devc2"`. The `devc2` alias is a shell function the extension can't call, so it runs `$DEVC_BIN`, the same from-source command that sourcing devc-tools' `scripts/bash_aliases.sh` exports. It's read from VS Code's environment, else your login shell's. An absolute path to a devc binary works too.
 - Pass extra arguments in `devc-vscode.devcWebArgs`, such as `["--live"]`.
+- The view and the tiles start in zen mode: the focused tile alone, and in the sidebar its repo card and Tasks. Set `devc-vscode.devcWebZen` to `container` to show its whole container instead, or `off`. The zen button and `Ctrl+Alt+Z` still toggle it; the setting is only where they start. It needs a devc web new enough to read `?zen=`; an older one ignores it.
 - The view needs a devc whose devc web allows being framed by VS Code (devc-tools' `devc-web-vscode-embedding`). Until then it stays blank; the tiles in the integrated browser work regardless.
 - The view's layout and settings are stored apart from the same page's in a browser tab.
 
@@ -213,6 +214,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.windowTitle` | `null` | The window title while herdr's focused pane is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
 | `devc-vscode.devcWebDevc` | `installed` | Which devc runs devc web: `installed`, `devc2` (`$DEVC_BIN`, from source) or an absolute path (also per workspace) |
 | `devc-vscode.devcWebPort` | `48229` | The port of the devc web every window shares (see [devc web](#devc-web)) |
+| `devc-vscode.devcWebZen` | `repo` | How the devc web view and tiles start: zen mode by `repo` card or `container`, or `off` (see [devc web](#devc-web)) |
 | `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (also per workspace; see [devc web](#devc-web)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |

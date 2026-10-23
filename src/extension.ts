@@ -115,7 +115,9 @@ import {
   DevcWebPage,
   DevcWebServer,
   DevcWebState,
+  DevcWebZen,
   devcChoice,
+  devcWebZen,
   loginEnv,
   messageHtml,
   newViewId,
@@ -3197,6 +3199,13 @@ function devcWebPort(): number {
     : DEFAULT_DEVC_WEB_PORT;
 }
 
+/** `devc-vscode.devcWebZen`: how the devc web view and Tiles start. */
+function devcWebZenSetting(): DevcWebZen {
+  return devcWebZen(
+    vscode.workspace.getConfiguration('devc-vscode').get<unknown>('devcWebZen')
+  );
+}
+
 function devcWebArgs(): string[] {
   const args = vscode.workspace
     .getConfiguration('devc-vscode')
@@ -3233,7 +3242,10 @@ async function devcWebOrigin(ready: string): Promise<string> {
 /** A page's URL, starting devc web first when it is not running. */
 async function devcWebPageUrl(page: DevcWebPage): Promise<string> {
   const ready = await devcWeb!.url();
-  return pageUrl(ready, page, devcWebView, await devcWebOrigin(ready));
+  return pageUrl(ready, page, devcWebView, {
+    origin: await devcWebOrigin(ready),
+    zen: devcWebZenSetting(),
+  });
 }
 
 function showDevcWebError(err: unknown): void {
@@ -3326,10 +3338,13 @@ class DevcWebViewProvider implements vscode.WebviewViewProvider {
         });
       case 'ready': {
         const origin = await devcWebOrigin(state.url);
-        return sidebarHtml(pageUrl(state.url, 'sidebar', devcWebView, origin), [
-          readyOrigin(state.url),
-          origin,
-        ]);
+        return sidebarHtml(
+          pageUrl(state.url, 'sidebar', devcWebView, {
+            origin,
+            zen: devcWebZenSetting(),
+          }),
+          [readyOrigin(state.url), origin]
+        );
       }
     }
   }

@@ -18,6 +18,7 @@ import {
   messageHtml,
   newViewId,
   pageUrl,
+  devcWebZen,
   parseReadyLine,
   parseRecord,
   resolveDevc,
@@ -72,19 +73,41 @@ suite('pageUrl', () => {
   test('builds the sidebar and main pages', () => {
     assert.strictEqual(
       pageUrl(READY, 'sidebar', 'vscode-0123456789ab'),
-      `http://127.0.0.1:41234/sidebar#token=${TOKEN}&view=vscode-0123456789ab`
+      `http://127.0.0.1:41234/sidebar?zen=repo#token=${TOKEN}&view=vscode-0123456789ab`
     );
     assert.strictEqual(
       pageUrl(READY, 'main', 'vscode-0123456789ab'),
-      `http://127.0.0.1:41234/main#token=${TOKEN}&view=vscode-0123456789ab`
+      `http://127.0.0.1:41234/main?zen=repo#token=${TOKEN}&view=vscode-0123456789ab`
     );
   });
 
   test('takes a mapped origin', () => {
     assert.strictEqual(
-      pageUrl(READY, 'main', 'v', 'https://41234-x.example.dev/'),
-      `https://41234-x.example.dev/main#token=${TOKEN}&view=v`
+      pageUrl(READY, 'main', 'v', { origin: 'https://41234-x.example.dev/' }),
+      `https://41234-x.example.dev/main?zen=repo#token=${TOKEN}&view=v`
     );
+  });
+
+  test('starts in the zen mode asked for', () => {
+    assert.strictEqual(
+      pageUrl(READY, 'sidebar', 'v', { zen: 'container' }),
+      `http://127.0.0.1:41234/sidebar?zen=container#token=${TOKEN}&view=v`
+    );
+    assert.strictEqual(
+      pageUrl(READY, 'main', 'v', { zen: 'off' }),
+      `http://127.0.0.1:41234/main?zen=off#token=${TOKEN}&view=v`
+    );
+  });
+});
+
+suite('devcWebZen', () => {
+  test('takes repo, container or off; anything else is repo', () => {
+    assert.strictEqual(devcWebZen('container'), 'container');
+    assert.strictEqual(devcWebZen('off'), 'off');
+    assert.strictEqual(devcWebZen('repo'), 'repo');
+    for (const v of [undefined, null, '', 'on', 'terminal', true, 3]) {
+      assert.strictEqual(devcWebZen(v), 'repo', String(v));
+    }
   });
 });
 

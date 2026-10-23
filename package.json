@@ -130,6 +130,22 @@
           "scope": "application",
           "markdownDescription": "The port of the one `devc web` every VS Code window shares for the **devc web** view and **Open devc web Tiles**. It is started by the first window that needs it and stopped about 10 seconds after the last window using it closes. Not devc web's own default (48228), so it doesn't clash with a `devc web` you run yourself. Applies on the next start or **Restart devc web**."
         },
+        "devc-vscode.devcWebZen": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "container",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Zen mode: the focused tile alone, and in the sidebar its repo card and Tasks",
+            "Zen mode: the focused tile alone, and in the sidebar its whole container and Tasks",
+            "Not in zen mode"
+          ],
+          "default": "repo",
+          "scope": "window",
+          "markdownDescription": "How the **devc web** view and **Open devc web Tiles** start: in zen mode with the sidebar showing the focused tile's repo card (`repo`) or its whole container (`container`), or not in zen mode (`off`). Only where they start: the zen button and `Ctrl+Alt+Z` (`Cmd+Alt+Z` on a Mac) in the view still toggle it. Applies when the view or the tiles next load."
+        },
         "devc-vscode.devcWebArgs": {
           "type": "array",
           "items": {

@@ -31,6 +31,17 @@ export const STOP_TIMEOUT_MS = 5000;
 export type DevcWebPage = 'sidebar' | 'main';
 
 /**
+ * How the devc web pages start (`devc-vscode.devcWebZen`): zen mode in a
+ * scope, or not. Sent as devc web's `?zen=`; the pages can still toggle it.
+ */
+export type DevcWebZen = 'repo' | 'container' | 'off';
+
+/** `devc-vscode.devcWebZen`'s value, else its default (`repo`). */
+export function devcWebZen(value: unknown): DevcWebZen {
+  return value === 'container' || value === 'off' ? value : 'repo';
+}
+
+/**
  * The URL in a stdout line when it is devc web's ready line. A trailing
  * `\r` or other trailing whitespace is ignored; anything else must match
  * exactly.
@@ -50,19 +61,21 @@ export function readyOrigin(ready: string): string {
 }
 
 /**
- * `http://127.0.0.1:<port>/<page>#token=<t>&view=<view>` from the ready
- * line's `http://127.0.0.1:<port>/#token=<t>`. `origin` replaces the ready
- * URL's own, for a port mapped by `asExternalUri`.
+ * `http://127.0.0.1:<port>/<page>?zen=<zen>#token=<t>&view=<view>` from the
+ * ready line's `http://127.0.0.1:<port>/#token=<t>`. `origin` replaces the
+ * ready URL's own, for a port mapped by `asExternalUri`; `zen` (default
+ * `repo`) is where the page starts.
  */
 export function pageUrl(
   ready: string,
   page: DevcWebPage,
   view: string,
-  origin: string = readyOrigin(ready)
+  opts: { origin?: string; zen?: DevcWebZen } = {}
 ): string {
   const url = new URL(ready);
   const token = new URLSearchParams(url.hash.slice(1)).get('token') ?? '';
-  return `${origin.replace(/\/+$/, '')}/${page}#token=${token}&view=${encodeURIComponent(view)}`;
+  const origin = opts.origin ?? readyOrigin(ready);
+  return `${origin.replace(/\/+$/, '')}/${page}?zen=${opts.zen ?? 'repo'}#token=${token}&view=${encodeURIComponent(view)}`;
 }
 
 export function escapeHtml(text: string): string {
