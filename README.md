@@ -99,9 +99,11 @@ The most specific bind mount wins. When two containers mount the same folder, th
 
 **Focus Features…** (command palette, or the `…` menu of the Sandboxes or Agents view) lists every repo and Git worktree behind the workspace: the repos your folders are in, and the ones a running dev container mounts under `/workspaces`, such as `project` and the branches in `project.worktrees`. Tick the ones to work on. They become workspace folders, the rest are removed, and the Source Control view follows.
 
+This command, **Focus on Active Agents** and **Add Active herdr Space to Workspace** are off by default. Set `devc-vscode.featureFolders` to `true` to turn them on.
+
 - The first workspace folder always stays, and so do folders that are not repos or worktrees.
 - Everything a running dev container for the workspace mounts under `/workspaces` stays on the list, so a removed folder can be picked again. The container is found from its project folder, the folder of the `.code-workspace` file, or any open folder it mounts.
-- A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor.
+- A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor. VS Code remembers the close for the workspace: the repo stays out of Source Control, even after a reload or when its folder is added back by hand, until **Git: Reopen Closed Repositories…**.
 - Each change is written to the `.code-workspace` file.
 
 Three more commands tie features to herdr in the dev container. None runs by itself:
@@ -191,6 +193,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.downCommand` | `devc down` | Run by Down Container |
 | `devc-vscode.agentKinds` | `["claude", "copilot", "pi"]` | Agents offered by Add Agent (herdr `--kind` values) |
 | `devc-vscode.herdrSession` | *(from folder)* | herdr session for this window, on this machine and SSH hosts |
+| `devc-vscode.featureFolders` | `false` | Turns on the commands that change workspace folders from features (see [Focus on features](#focus-on-features)) |
 | `devc-vscode.windowTitle` | `null` | The window title while herdr's focused pane is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
 | `devc-vscode.devcWebDevc` | `installed` | Which devc runs devc web: `installed`, `devc2` (`$DEVC_BIN`, from source) or an absolute path (also per workspace) |
 | `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (also per workspace; see [devc web](#devc-web)) |

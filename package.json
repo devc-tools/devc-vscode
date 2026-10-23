@@ -97,6 +97,12 @@
           "default": "ssh",
           "description": "ssh client used for SSH environments (a name on PATH or an absolute path). User settings only."
         },
+        "devc-vscode.featureFolders": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "markdownDescription": "Turns on **Focus Features…**, **Focus on Active Agents** and **Add Active herdr Space to Workspace**, which add and remove workspace folders and open and close their repositories in Source Control. A repository closed this way stays closed in this workspace until **Git: Reopen Closed Repositories…**."
+        },
         "devc-vscode.windowTitle": {
           "type": [
             "string",
@@ -379,17 +385,17 @@
         },
         {
           "command": "devc-vscode.focusFeatures",
-          "when": "view == devc-vscode.containers",
+          "when": "view == devc-vscode.containers && config.devc-vscode.featureFolders",
           "group": "1_features"
         },
         {
           "command": "devc-vscode.focusFeatures",
-          "when": "view == devc-vscode.agents",
+          "when": "view == devc-vscode.agents && config.devc-vscode.featureFolders",
           "group": "1_features@1"
         },
         {
           "command": "devc-vscode.focusActiveAgents",
-          "when": "view == devc-vscode.agents",
+          "when": "view == devc-vscode.agents && config.devc-vscode.featureFolders",
           "group": "1_features@2"
         },
         {
@@ -399,7 +405,7 @@
         },
         {
           "command": "devc-vscode.addSpaceFolder",
-          "when": "view == devc-vscode.agents && devc-vscode.hasDocker",
+          "when": "view == devc-vscode.agents && devc-vscode.hasDocker && config.devc-vscode.featureFolders",
           "group": "1_features@4"
         },
         {
@@ -671,7 +677,15 @@
         },
         {
           "command": "devc-vscode.addSpaceFolder",
-          "when": "devc-vscode.hasDocker"
+          "when": "devc-vscode.hasDocker && config.devc-vscode.featureFolders"
+        },
+        {
+          "command": "devc-vscode.focusFeatures",
+          "when": "config.devc-vscode.featureFolders"
+        },
+        {
+          "command": "devc-vscode.focusActiveAgents",
+          "when": "config.devc-vscode.featureFolders"
         }
       ]
     },

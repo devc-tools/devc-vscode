@@ -451,10 +451,19 @@ export function activate(context: vscode.ExtensionContext) {
     openFolderInContainer(uri)
   );
   register('devc-vscode.addSshHost', () => addSshHost());
-  register('devc-vscode.focusFeatures', () => focusFeatures());
-  register('devc-vscode.focusActiveAgents', () => focusActiveAgents());
+  register(
+    'devc-vscode.focusFeatures',
+    () => featureFoldersEnabled() && focusFeatures()
+  );
+  register(
+    'devc-vscode.focusActiveAgents',
+    () => featureFoldersEnabled() && focusActiveAgents()
+  );
   register('devc-vscode.openFeatureSpace', () => openFeatureSpace());
-  register('devc-vscode.addSpaceFolder', () => addSpaceFolder());
+  register(
+    'devc-vscode.addSpaceFolder',
+    () => featureFoldersEnabled() && addSpaceFolder()
+  );
   register('devc-vscode.sendToSshHost', (uri?: vscode.Uri) =>
     syncWithSshHost(uri, 'send')
   );
@@ -1287,6 +1296,25 @@ async function featureRoots(): Promise<string[]> {
   });
   const mounted = mountedFeatureRoots(anchors, mounts, realpathOr);
   return [...new Set([...folders, ...mounted])].filter(isDirectory);
+}
+
+/**
+ * Whether the commands that change workspace folders, and open and close
+ * their repositories, are turned on; says how to turn them on when not.
+ * Their menu entries are hidden while off, but keybindings still reach them.
+ */
+function featureFoldersEnabled(): boolean {
+  if (
+    vscode.workspace
+      .getConfiguration('devc-vscode')
+      .get<boolean>('featureFolders')
+  ) {
+    return true;
+  }
+  vscode.window.showInformationMessage(
+    'Turn on the devc-vscode.featureFolders setting to change workspace folders from features.'
+  );
+  return false;
 }
 
 /** How long a workspace folder change may take to be reported. */
