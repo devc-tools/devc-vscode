@@ -120,6 +120,18 @@ A feature is a local repo's main worktree or one of its linked worktrees. Focus 
 
 **Open herdr Space for Feature…** runs `herdr --session=devc workspace create --cwd <mounted path> --label "<project> / <branch>" --focus` in the container, then reveals the herdr terminal and focuses the new pane as for an agent.
 
+## devc web
+
+**The server.** The extension runs `devc web --no-open` plus `devc-vscode.devcWebArgs`, using the devc `findDevc` finds, the first time the **devc web** view is shown or **Open devc web Tiles** runs. It never passes `--port`: devc picks a free one. The URL comes from the stdout line `devc web: http://127.0.0.1:<port>/#token=<64 hex>`, matched exactly as devc-desktop matches it. stdout carries the token, so it is read for that line and otherwise discarded; it never reaches a log, an output channel, a notification or a file. The last 50 stderr lines are shown in the view only when devc web exits before that line or doesn't print it within 10 s. The server is this window's own, apart from one run in a terminal or by devc-desktop; they share devc's files on disk (pinned files, tasks, projects).
+
+**Stopping.** On deactivate and on **Restart devc web**: SIGTERM to devc, then SIGKILL to its process group after 5 s. devc web runs in a process group of its own, so the kill also reaches the server devc's supervisor started. When it exits by itself, the view says so with a **Restart** link (a `command:` URI, the only one the view allows).
+
+**Pairing.** devc web pairs a `/sidebar` page and `/main` pages that share a `view` id and relays between them. Each window makes one at activation, `vscode-` plus 12 random hex characters, kept in memory. It names no herdr session, workspace or window. Both URLs go through `vscode.env.asExternalUri`, a no-op locally that forwards the port in a remote window.
+
+**The view.** A `WebviewView` holding one full-size iframe of `/sidebar`, retained while hidden so its WebSocket and state survive. The webview has scripts enabled, since VS Code sandboxes a webview's frames without `allow-scripts` otherwise, but its own document runs none: its CSP is `default-src 'none'; frame-src <server origins>; style-src 'unsafe-inline'`. The framed page is third-party in the webview, so Chromium partitions its `localStorage` apart from the same page's in a browser tab. devc web must allow `frame-ancestors` for VS Code's webviews; until it does, the view stays blank.
+
+**The tiles.** `/main` opens in the integrated browser with `workbench.action.browser.open` (registered by VS Code 1.138+; it takes the URL as its argument), found in `vscode.commands.getCommands(true)`. Without it, `simpleBrowser.show` is used, which is an iframe in a webview and needs devc web's framing too. Each run opens another tab; several tiles pages on one view all follow the sidebar. A restart leaves an open tab on the dead server.
+
 ## Multiple windows
 
 Each window writes what its Agents view shows to a file in the extension's global storage and watches the other windows' files. Their agents show under **Other Workspaces**, one row per window, and the badge counts agents needing attention in every window.

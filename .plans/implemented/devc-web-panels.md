@@ -12,19 +12,19 @@ the tiles' state back. This plan puts the sidebar in a VS Code view and opens th
 Code's integrated browser, both against a `devc web` **the extension starts itself** (the user's
 choice: like devc-desktop, so the token never leaves memory).
 
-Depends on devc-tools' [devc-web-vscode-embedding](../../devc-tools/.plans/devc-web-vscode-embedding.md)
+Depends on devc-tools' [devc-web-vscode-embedding](../../../devc-tools/.plans/devc-web-vscode-embedding.md)
 for the sidebar view: until it lands, devc web sends `frame-ancestors 'none'` and the view's iframe
 stays blank. The integrated browser (not an iframe) works without it. Dragging a sidebar row into
 the tiles needs devc-tools' `devc-web-cross-page-drag`; nothing here depends on it.
 
 ## Checklist
 
-- [ ] 1. `src/devcWeb.ts`: start, find the URL of, and stop the extension's `devc web` (pure parts tested)
-- [ ] 2. The **devc web** view: an activity-bar container with a `WebviewView` showing `/sidebar`
-- [ ] 3. **Open devc web Tiles**: `/main` in the integrated browser
-- [ ] 4. **Restart devc web**, and stopping it on deactivate
-- [ ] 5. Settings, README, CHANGELOG, `docs/how-it-works.md`
-- [ ] 6. Validation (below), then commit
+- [x] 1. `src/devcWeb.ts`: start, find the URL of, and stop the extension's `devc web` (pure parts tested)
+- [x] 2. The **devc web** view: an activity-bar container with a `WebviewView` showing `/sidebar`
+- [x] 3. **Open devc web Tiles**: `/main` in the integrated browser
+- [x] 4. **Restart devc web**, and stopping it on deactivate
+- [x] 5. Settings, README, CHANGELOG, `docs/how-it-works.md`
+- [x] 6. Validation (below), then commit
 
 ## Touchpoints
 
@@ -132,3 +132,16 @@ applies on the next start or restart.
    view. Say plainly in the report which of these could not be run from the agent's environment.
 
 Commit in this repo's style, with the `Co-Authored-By` line.
+
+## Implementation notes
+
+- **`enableScripts: true`, not `false`.** VS Code builds a webview's content frame with `allow-scripts`
+  only when scripts are enabled, and a nested iframe inherits the sandbox, so with `false` the
+  framed `/sidebar` could not run. The webview's own document still runs nothing: its CSP has no
+  `script-src`.
+- **The integrated browser's command** is `workbench.action.browser.open` (read from VS Code
+  1.141.1's workbench): it takes a URL string or `{ url, openToSide, reuseUrlFilter }`.
+- **Stop** sends SIGTERM to devc, then SIGKILL to its process group (devc web runs `detached`), so
+  the kill also reaches the deno server devc's supervisor spawned.
+- Validation 3 (in VS Code, against a devc with the embedding plan) was not run: this container
+  has no devc and no display for a manual check.

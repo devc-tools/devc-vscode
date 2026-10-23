@@ -100,6 +100,17 @@ import {
 } from './remoteShell';
 import { commandAvailable, dockerInstalled, findDevc } from './tools';
 import {
+  DevcWebError,
+  DevcWebPage,
+  DevcWebServer,
+  DevcWebState,
+  messageHtml,
+  newViewId,
+  pageUrl,
+  readyOrigin,
+  sidebarHtml,
+} from './devcWeb';
+import {
   SSH_SCHEME,
   SshFileSystemProvider,
   SshHostInfo,
@@ -119,6 +130,7 @@ import {
 
 const VIEW_ID = 'devc-vscode.containers';
 const AGENTS_VIEW_ID = 'devc-vscode.agents';
+const DEVC_WEB_VIEW_ID = 'devc-vscode.devcWeb';
 
 /** Everything a terminal needs before a path printed in it can be resolved. */
 interface TerminalContext extends PathContext {
@@ -155,6 +167,7 @@ let agentTree: AgentTreeDataProvider;
 let terminalAgents: TerminalAgentTracker;
 let windows: WindowRegistry;
 let dockerEventsProcess: cp.ChildProcess | undefined;
+let devcWeb: DevcWebServer | undefined;
 let workspaceState: vscode.Memento;
 
 // ── Activation ──────────────────────────────────────────────────────────────
@@ -363,6 +376,19 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(id, handler as never)
     );
 
+  devcWeb = new DevcWebServer(findDevc, devcWebArgs);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      DEVC_WEB_VIEW_ID,
+      new DevcWebViewProvider(devcWeb),
+      // The page holds a WebSocket and its state; recreating it on every
+      // hide would reconnect and re-render.
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
+  );
+  register('devc-vscode.openDevcWebTiles', openDevcWebTiles);
+  register('devc-vscode.restartDevcWeb', restartDevcWeb);
+
   register('devc-vscode.refresh', () => {
     detectTools();
     syncTargetCache.clear();
@@ -554,11 +580,12 @@ export function activate(context: vscode.ExtensionContext) {
   });
 }
 
-export function deactivate() {
+export function deactivate(): Promise<void> | undefined {
   if (dockerEventsProcess) {
     dockerEventsProcess.kill();
     dockerEventsProcess = undefined;
   }
+  return devcWeb?.stop();
 }
 
 // ── Tree commands ───────────────────────────────────────────────────────────
@@ -2759,6 +2786,145 @@ function commandSettingAvailable(
     vscode.workspace.getConfiguration('devc-vscode').inspect<string>(key),
     state.devc
   );
+}
+
+// ── devc web ────────────────────────────────────────────────────────────────
+
+/**
+ * Pairs this window's devc web sidebar with its tiles. Kept in memory only:
+ * a new window, or a reload, gets a new one.
+ */
+const devcWebView = newViewId();
+/** Whether Open devc web Tiles has run since the last start. */
+let devcWebTilesOpened = false;
+
+const RESTART_DEVC_WEB = 'devc-vscode.restartDevcWeb';
+/** The integrated browser's open command (VS Code 1.138+). */
+const INTEGRATED_BROWSER_OPEN = 'workbench.action.browser.open';
+
+function devcWebArgs(): string[] {
+  const args = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<unknown>('devcWebArgs', []);
+  return Array.isArray(args)
+    ? args.filter((a): a is string => typeof a === 'string')
+    : [];
+}
+
+/**
+ * `ready`'s origin as this window reaches it: mapped by `asExternalUri`,
+ * which is a no-op locally and forwards the port in a remote window.
+ */
+async function devcWebOrigin(ready: string): Promise<string> {
+  const external = await vscode.env.asExternalUri(
+    vscode.Uri.parse(`${readyOrigin(ready)}/`)
+  );
+  return new URL(external.toString(true)).origin;
+}
+
+/** A page's URL, starting devc web first when it is not running. */
+async function devcWebPageUrl(page: DevcWebPage): Promise<string> {
+  const ready = await devcWeb!.url();
+  return pageUrl(ready, page, devcWebView, await devcWebOrigin(ready));
+}
+
+function showDevcWebError(err: unknown): void {
+  vscode.window.showErrorMessage(
+    err instanceof DevcWebError
+      ? err.message
+      : `devc web: ${err instanceof Error ? err.message : err}`
+  );
+}
+
+async function openDevcWebTiles(): Promise<void> {
+  let url: string;
+  try {
+    url = await devcWebPageUrl('main');
+  } catch (err) {
+    showDevcWebError(err);
+    return;
+  }
+  devcWebTilesOpened = true;
+  // Not settled API: the integrated browser's command where it has one,
+  // else Simple Browser (an iframe in a webview, like the sidebar view).
+  const commands = await vscode.commands.getCommands(true);
+  if (commands.includes(INTEGRATED_BROWSER_OPEN)) {
+    await vscode.commands.executeCommand(INTEGRATED_BROWSER_OPEN, url);
+  } else {
+    await vscode.commands.executeCommand('simpleBrowser.show', url);
+  }
+}
+
+async function restartDevcWeb(): Promise<void> {
+  const tiles = devcWebTilesOpened;
+  devcWebTilesOpened = false;
+  await devcWeb!.stop();
+  try {
+    await devcWeb!.url();
+  } catch (err) {
+    showDevcWebError(err);
+    return;
+  }
+  vscode.window.showInformationMessage(
+    tiles
+      ? 'devc web restarted. Open tiles still point at the old server: reopen the tiles with Open devc web Tiles.'
+      : 'devc web restarted.'
+  );
+}
+
+/**
+ * The devc web view: devc web's `/sidebar` page in an iframe, or a message
+ * while there is none. Showing it starts devc web.
+ */
+class DevcWebViewProvider implements vscode.WebviewViewProvider {
+  constructor(private readonly server: DevcWebServer) {}
+
+  resolveWebviewView(view: vscode.WebviewView): void {
+    view.webview.options = {
+      // The framed page needs scripts: a webview without them sandboxes
+      // its frames without them too. The webview's own document still runs
+      // none, since its CSP has no script-src.
+      enableScripts: true,
+      enableCommandUris: [RESTART_DEVC_WEB],
+      localResourceRoots: [],
+    };
+    let rendered = 0;
+    const render = async (state: DevcWebState) => {
+      const run = ++rendered;
+      const html = await this.html(state);
+      if (run === rendered) {
+        view.webview.html = html;
+      }
+    };
+    const subscription = this.server.onDidChangeState(state => {
+      void render(state);
+    });
+    view.onDidDispose(() => subscription.dispose());
+    void render(this.server.state);
+    this.server.url().catch(() => {
+      // The view shows why.
+    });
+  }
+
+  private async html(state: DevcWebState): Promise<string> {
+    switch (state.kind) {
+      case 'idle':
+      case 'starting':
+        return messageHtml('Starting devc web…');
+      case 'stopped':
+        return messageHtml(state.message, {
+          detail: state.stderr,
+          restart: RESTART_DEVC_WEB,
+        });
+      case 'ready': {
+        const origin = await devcWebOrigin(state.url);
+        return sidebarHtml(pageUrl(state.url, 'sidebar', devcWebView, origin), [
+          readyOrigin(state.url),
+          origin,
+        ]);
+      }
+    }
+  }
 }
 
 // ── Docker events watcher ───────────────────────────────────────────────────

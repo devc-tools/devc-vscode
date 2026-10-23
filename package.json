@@ -105,6 +105,15 @@
           "default": null,
           "scope": "window",
           "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name, `${space}` the herdr space's label and `${title}` the title the pane's program sets (what an agent is doing), empty when it only repeats the pane's name or folder. Put `${separator}` around `${title}` so the separator is dropped while it is empty. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Off (`null`) by default; set it, for example to `${branch} (${rootNameShort})`, to turn it on."
+        },
+        "devc-vscode.devcWebArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Extra arguments after `devc web --no-open` for the `devc web` the extension starts for the **devc web** view and **Open devc web Tiles**, for example `[\"--live\", \"--source\", \"/path/to/devc-tools/devc\"]`. Applies on the next start or **Restart devc web**. User settings only."
         }
       }
     },
@@ -307,6 +316,18 @@
         "command": "devc-vscode.agentReviewResend",
         "title": "Resend",
         "category": "Dev Container FS"
+      },
+      {
+        "command": "devc-vscode.openDevcWebTiles",
+        "title": "Open devc web Tiles",
+        "category": "Dev Container FS",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "devc-vscode.restartDevcWeb",
+        "title": "Restart devc web",
+        "category": "Dev Container FS",
+        "icon": "$(debug-restart)"
       }
     ],
     "menus": {
@@ -370,6 +391,16 @@
           "command": "devc-vscode.addSpaceFolder",
           "when": "view == devc-vscode.agents && devc-vscode.hasDocker",
           "group": "1_features@4"
+        },
+        {
+          "command": "devc-vscode.openDevcWebTiles",
+          "when": "view == devc-vscode.devcWeb",
+          "group": "navigation@0"
+        },
+        {
+          "command": "devc-vscode.restartDevcWeb",
+          "when": "view == devc-vscode.devcWeb",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -634,6 +665,15 @@
         }
       ]
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devc-web",
+          "title": "devc web",
+          "icon": "resources/devc-web.svg"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {
@@ -643,6 +683,13 @@
         {
           "id": "devc-vscode.containers",
           "name": "Sandboxes"
+        }
+      ],
+      "devc-web": [
+        {
+          "id": "devc-vscode.devcWeb",
+          "name": "devc web",
+          "type": "webview"
         }
       ]
     },

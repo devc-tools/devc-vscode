@@ -145,6 +145,16 @@ With several agents in the container, you pick one the first time; later threads
 
 Claude Code in its default permission mode asks before writing the reply file; approve it in the agent's pane to see the answer.
 
+### devc web
+
+The **devc web** view in the activity bar shows [devc web](https://github.com/devc-tools/devc-tools)'s sidebar: containers, panes in use, pinned files and tasks. **Open devc web Tiles** (the globe in the view's title bar) opens its tiling area of terminals, files and diffs in VS Code's integrated browser. A pane or file clicked in the view opens in the tiles.
+
+- The extension runs its own `devc web --no-open` for the window, started the first time either is shown. Its token stays in the extension's memory; nothing logs it.
+- **Restart devc web** starts a new one, on a new port and token. The view reloads; a tiles tab still points at the old server, so reopen it.
+- Pass extra arguments in `devc-vscode.devcWebArgs`, such as `["--live"]`.
+- The view needs a devc whose devc web allows being framed by VS Code. Until then it stays blank; the tiles in the integrated browser work regardless.
+- The view's layout and settings are stored apart from the same page's in a browser tab.
+
 ### Terminal links
 
 In container and SSH terminals, click a printed path to open it. A `:line:col` suffix jumps to that spot, and a folder is revealed in the Sandboxes view.
@@ -165,6 +175,8 @@ All commands are under **Dev Container FS** in the command palette.
 | Send to SSH Host… / Fetch from SSH Host… | Sync a local repo with an SSH host |
 | Send from Local / Fetch to Local | The same, from an SSH folder in the Sandboxes view |
 | New File, New Folder, Rename, Delete, Copy Container Path | Act on the Sandboxes selection |
+| Open devc web Tiles | Open devc web's tiles in the integrated browser (see [devc web](#devc-web)) |
+| Restart devc web | Restart the extension's devc web on a new port and token |
 | Ask Agent About Selection | Open an agent comment thread on the selected lines (see [Ask an agent about code](#ask-an-agent-about-code)) |
 
 ## Settings
@@ -179,6 +191,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.agentKinds` | `["claude", "copilot", "pi"]` | Agents offered by Add Agent (herdr `--kind` values) |
 | `devc-vscode.herdrSession` | *(from folder)* | herdr session for this window, on this machine and SSH hosts |
 | `devc-vscode.windowTitle` | `null` | The window title while herdr's focused pane is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
+| `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (user settings only; see [devc web](#devc-web)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |
 
@@ -194,7 +207,7 @@ If you run devc through a shell function or alias, or want another tool, set the
 
 ## More
 
-- [How it works](docs/how-it-works.md): container scoping, the file system, terminal links, agent status, agent review comments, multiple windows, SSH security.
+- [How it works](docs/how-it-works.md): container scoping, the file system, terminal links, agent status, agent review comments, devc web, multiple windows, SSH security.
 - [Syncing with an SSH host](docs/ssh-sync.md): Send / Fetch in detail, including what Fetch flags for review.
 
 ## Develop

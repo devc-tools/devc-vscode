@@ -14,10 +14,9 @@
 
 - [Agent Review Comments](agent-review-comments.md) — comment threads on host editors and GitHub PR review diffs that submit the question, with the container path and code, to a herdr agent in the dev container (`herdr agent prompt`); the agent's answer comes back as a thread reply through a watched reply file.
 
-- [devc web Panels](devc-web-panels.md) — the extension starts its own `devc web` (token kept in memory, as devc-desktop does), shows `/sidebar` in a **devc web** activity-bar view and opens `/main` in the integrated browser, paired by a per-window view id.
-
 ### Completed
 
+- [devc web Panels](implemented/devc-web-panels.md) — the extension starts its own `devc web` (token kept in memory, as devc-desktop does), shows `/sidebar` in a **devc web** activity-bar view and opens `/main` in the integrated browser, paired by a per-window view id. ✅ Done (in-VS Code checks left to the user)
 - [Container File Tree as a Contributed Explorer View](implemented/explorer-tree-view.md) — replace workspace-folder grafting with a `TreeView` in the Explorer panel, backed by the existing filesystem provider. ✅ Done (host-only validation not run)
 - [Agents View: Host herdr Sessions](implemented/agents-view-host-herdr.md) — rename the view to "Agents" and show agents from host herdr sessions this window owns. ✅ Done
 - [Agents View: Plain Host Terminals](implemented/agents-view-host-terminals.md) — detect agents in plain host VS Code terminals, classified by host herdr. ✅ Done
@@ -36,4 +35,4 @@
 | 7 | [ssh-tree-sync-actions.md](ssh-tree-sync-actions.md) | Send / Fetch actions on synced folders in the Sandboxes view's SSH tree (depends on phase 6) | in progress |
 | 8 | [optional-tool-detection.md](optional-tool-detection.md) | Detect Docker / devc / host herdr, gate commands and UI, docker exec terminal fallback | in progress |
 | 9 | [agent-review-comments.md](agent-review-comments.md) | Ask a container agent about code from comment threads, including PR review diffs; replies shown in the thread | in progress |
-| 10 | [devc-web-panels.md](devc-web-panels.md) | devc web's sidebar in a VS Code view and its tiles in the integrated browser, on an extension-owned `devc web` (needs devc-tools' `devc-web-vscode-embedding`) | pending |
+| 10 | [devc-web-panels.md](implemented/devc-web-panels.md) | devc web's sidebar in a VS Code view and its tiles in the integrated browser, on an extension-owned `devc web` (needs devc-tools' `devc-web-vscode-embedding`) | ✅ Done |
