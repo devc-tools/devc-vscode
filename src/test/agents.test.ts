@@ -74,12 +74,43 @@ suite('parseFocus', () => {
       paneId: 'w1:p2',
       workspace: 'app',
       cwd: '/workspaces/app',
+      title: undefined,
     });
     assert.deepStrictEqual(parseFocus(focused('w1:p1')), {
       paneId: 'w1:p1',
       workspace: 'app',
       cwd: '/workspaces/app/sub',
+      title: 'Fixing tests',
     });
+  });
+
+  test("the title is left out when it only repeats the pane's name or folder", () => {
+    const titleOf = (pane: Record<string, unknown>) =>
+      parseFocus(
+        JSON.stringify({
+          result: {
+            snapshot: {
+              focused_pane_id: 'w1:p1',
+              panes: [{ pane_id: 'w1:p1', cwd: '/workspaces/app', ...pane }],
+            },
+          },
+        })
+      )?.title;
+    assert.strictEqual(titleOf({ terminal_title_stripped: 'vim notes.md' }), 'vim notes.md');
+    assert.strictEqual(titleOf({ terminal_title_stripped: 'app' }), undefined);
+    assert.strictEqual(
+      titleOf({ terminal_title_stripped: 'src', foreground_cwd: '/workspaces/app/src' }),
+      undefined
+    );
+    assert.strictEqual(
+      titleOf({ terminal_title_stripped: 'build', label: 'build' }),
+      undefined
+    );
+    // An agent's title is what it is doing, even when that is a folder name.
+    assert.strictEqual(
+      titleOf({ agent: 'claude', label: 'review', terminal_title_stripped: 'app' }),
+      'app'
+    );
   });
 
   test('nothing focused, an error or other output is no focus', () => {

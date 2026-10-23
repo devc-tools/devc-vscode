@@ -1505,7 +1505,8 @@ function setContainerFocus(
   if (
     before?.paneId === focus?.paneId &&
     before?.cwd === focus?.cwd &&
-    before?.workspace === focus?.workspace
+    before?.workspace === focus?.workspace &&
+    before?.title === focus?.title
   ) {
     return;
   }
@@ -1521,10 +1522,15 @@ function setContainerFocus(
   scheduleTitle();
 }
 
-/** The feature herdr's focused pane is working in, and its space's label. */
+/**
+ * The feature herdr's focused pane is working in, its space's label and the
+ * pane's title.
+ */
 async function activeSpace(
   git: Git
-): Promise<{ feature: Feature; space?: string } | undefined> {
+): Promise<
+  { feature: Feature; space?: string; title?: string } | undefined
+> {
   const containerId = focusedContainer;
   const focus =
     containerId === undefined ? undefined : containerFocus.get(containerId);
@@ -1556,6 +1562,7 @@ async function activeSpace(
         main: realpathOr(feature.main),
       },
       space: focus.workspace,
+      title: focus.title,
     }
   );
 }
@@ -1599,7 +1606,7 @@ async function updateTitle(): Promise<void> {
     return;
   }
   const title = active
-    ? expandTitle(template, active.feature, active.space).trim()
+    ? expandTitle(template, active.feature, active.space, active.title).trim()
     : '';
 
   const config = vscode.workspace.getConfiguration('window');

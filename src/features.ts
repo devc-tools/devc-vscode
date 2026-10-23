@@ -118,23 +118,27 @@ export async function featureAt(dir: string, git: Git): Promise<Feature | undefi
 }
 
 /**
- * `template` with `${project}`, `${branch}`, `${folder}` and `${space}`
- * filled in for a feature; anything else in it is left as written. `branch`
- * is the folder's name for a detached HEAD.
+ * `template` with `${project}`, `${branch}`, `${folder}`, `${space}` and
+ * `${title}` (the focused pane's title) filled in for a feature; anything else
+ * in it is left as written. `branch` is the folder's name for a detached HEAD.
+ * A `$` in a filled-in value becomes `＄`: VS Code reads any `$` in
+ * `window.title` as the start of a variable and drops the text after it.
  */
 export function expandTitle(
   template: string,
   feature: Feature,
-  space: string | undefined
+  space: string | undefined,
+  title?: string
 ): string {
   const values: Record<string, string> = {
     project: projectOf(feature),
     branch: feature.branch ?? path.basename(feature.path),
     folder: path.basename(feature.path),
     space: space ?? '',
+    title: title ?? '',
   };
   return template.replace(/\$\{(\w+)\}/g, (match, name: string) =>
-    Object.hasOwn(values, name) ? values[name] : match
+    Object.hasOwn(values, name) ? values[name].replace(/\$/g, '＄') : match
   );
 }
 

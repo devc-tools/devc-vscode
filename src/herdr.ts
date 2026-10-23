@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { execDocker } from './docker';
 import { RemoteShell } from './remoteShell';
 
@@ -142,6 +143,8 @@ export interface HerdrFocus {
   /** Label of the herdr workspace the pane lives in. */
   workspace?: string;
   cwd?: string;
+  /** What the pane's program says it is doing; see {@link focusTitle}. */
+  title?: string;
 }
 
 /**
@@ -171,7 +174,31 @@ export function parseFocus(line: string): HerdrFocus | undefined {
     paneId,
     workspace: stringOr(workspace?.label),
     cwd: stringOr(pane?.foreground_cwd) ?? stringOr(pane?.cwd),
+    title: pane && focusTitle(pane),
   };
+}
+
+/**
+ * The terminal title a pane's program set (spinner stripped), as devc web
+ * shows it after the pane's name: left out when it only repeats that name
+ * (its label, else its folder) or, outside an agent, one of its folders —
+ * what a shell's prompt usually sets.
+ */
+function focusTitle(pane: Record<string, unknown>): string | undefined {
+  const title = stringOr(pane.terminal_title_stripped);
+  const folders = [pane.cwd, pane.foreground_cwd].map(dir =>
+    typeof dir === 'string' ? path.posix.basename(dir) : ''
+  );
+  const name = stringOr(pane.label) || folders[1] || folders[0];
+  if (
+    !title ||
+    !name ||
+    title === name ||
+    (typeof pane.agent !== 'string' && folders.includes(title))
+  ) {
+    return undefined;
+  }
+  return title;
 }
 
 /**

@@ -112,9 +112,9 @@ A feature is a local repo's main worktree or one of its linked worktrees. Focus 
 
 **herdr focus.** The agent watcher's snapshots also carry herdr's focused pane. Its working directory (`foreground_cwd`, else `cwd`) is mapped back to a host path through the container's bind mounts, most specific destination first, and `git rev-parse --show-toplevel --git-common-dir` there gives the worktree and its repo. When several containers are watched, the one whose focus changed last counts.
 
-**Window title.** VS Code has no API for the title, only the `window.title` setting, and only its workspace value belongs to one window. So the title is managed only in a saved `.code-workspace`, never in a folder's `.vscode/settings.json`. The value written is `devc-vscode.windowTitle` with `${branch}`, `${project}`, `${folder}` and `${space}` filled in; other variables are left for VS Code to expand.
+**Window title.** VS Code has no API for the title, only the `window.title` setting, and only its workspace value belongs to one window. So the title is managed only in a saved `.code-workspace`, never in a folder's `.vscode/settings.json`. The value written is `devc-vscode.windowTitle` with `${branch}`, `${project}`, `${folder}`, `${space}` and `${title}` filled in; other variables are left for VS Code to expand. `${title}` is the focused pane's `terminal_title_stripped`, left out as devc web leaves it out: when it repeats the pane's label or folder, or, outside an agent, one of its folders. A `$` in a filled-in value is written as `＄`, since VS Code takes any `$` in `window.title` to start a variable and drops what follows.
 
-- It is re-resolved when herdr's focus or the focused pane's directory changes, and every 15 s to catch a branch switch. The setting is written only when the text changes.
+- It is re-resolved when herdr's focus or the focused pane's directory or title changes, and every 15 s to catch a branch switch. The setting is written only when the text changes.
 - The value last written is remembered in workspace state. A `window.title` that differs from it was set by you, and becomes the title to restore.
 - With no feature to show, or with `devc-vscode.windowTitle` at its default `null`, the workspace's own value is restored. A title left behind when VS Code closed is dropped a few seconds after the next start unless a pane is focused.
 

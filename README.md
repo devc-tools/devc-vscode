@@ -118,7 +118,8 @@ Three more commands tie features to herdr in the dev container. None runs by its
 
 In a saved `.code-workspace`, the window title can name the branch herdr's focused pane is working in, such as `feature-a (my-workspace)`, so a time tracker reading window titles sees which branch you are on. It follows herdr's focus, not the active editor.
 
-- This is off by default. Set `devc-vscode.windowTitle` to turn it on, for example to `${branch} (${rootNameShort})`. Set it back to `null` to turn it off and restore your own title. `${branch}`, `${project}`, `${folder}` and `${space}` (the herdr space's label) come from the focused pane; anything else, such as `${rootNameShort}` or `${activeEditorShort}`, is one of `window.title`'s own variables.
+- This is off by default. Set `devc-vscode.windowTitle` to turn it on, for example to `${branch} (${rootNameShort})`. Set it back to `null` to turn it off and restore your own title. `${branch}`, `${project}`, `${folder}`, `${space}` (the herdr space's label) and `${title}` (the title the pane's program sets, such as what an agent is doing) come from the focused pane; anything else, such as `${rootNameShort}` or `${activeEditorShort}`, is one of `window.title`'s own variables.
+- `${title}` is empty for a shell whose title only names its folder. Surround it with VS Code's `${separator}`, which is dropped next to an empty value: `${project}:${branch}${separator}${title}${separator}devcd` gives devc web's title, `devc-tools:main — Fixing the title — devcd`, with `window.titleSeparator` set to ` — `.
 - The title returns to your own `window.title` when the focused pane is not in a repo on this machine, or herdr is not running.
 - The title is written to `window.title` in the `.code-workspace` file each time the feature changes, so a workspace file tracked in Git will show a diff.
 

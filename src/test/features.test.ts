@@ -111,6 +111,14 @@ suite('expandTitle', () => {
     assert.strictEqual(expandTitle('${folder}', feature, undefined), 'x');
   });
 
+  test("fills in the focused pane's title, with any $ made harmless", () => {
+    assert.strictEqual(
+      expandTitle('${branch}${separator}${title}', feature, undefined, 'Fixing $PATH'),
+      'feature-x${separator}Fixing ＄PATH'
+    );
+    assert.strictEqual(expandTitle('${branch} ${title}', feature, undefined), 'feature-x ');
+  });
+
   test('a detached HEAD is named by its folder', () => {
     assert.strictEqual(
       expandTitle('${project} / ${branch}', { path: '/c/a.worktrees/x', main: '/c/a' }, undefined),

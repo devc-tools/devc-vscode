@@ -18,6 +18,7 @@
 
 ### Added
 
+- **`${title}` in `devc-vscode.windowTitle`** is the title the focused herdr pane's program sets, such as what an agent is doing, so the window title can match devc web's: `${project}:${branch}${separator}${title}${separator}devcd`.
 - **The window title can name the feature herdr is focused on.** In a saved `.code-workspace`, the window title can name the branch of herdr's focused pane in the dev container (`feature-a (my-workspace)`), for time trackers that read window titles. Off by default: set the new `devc-vscode.windowTitle` setting to turn it on, for example to `${branch} (${rootNameShort})`. It is written to the workspace's `window.title` setting.
 - **Focus on Active Agents**, **Open herdr Space for Feature…** and **Add Active herdr Space to Workspace**: set the workspace's features from where agents are working, create a herdr space labelled `project / branch` in a feature's folder, and add the focused pane's repo or worktree as a workspace folder.
 - **Focus Features…** picks which of the workspace's repos and Git worktrees are workspace folders: the repos behind its folders and the ones a running dev container mounts under `/workspaces` (a project and the branches in its `.worktrees` sibling). Unticked ones are removed and their repositories closed in Source Control; the first folder and folders that are not repos stay.

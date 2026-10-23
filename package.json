@@ -104,7 +104,7 @@
           ],
           "default": null,
           "scope": "window",
-          "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name and `${space}` the herdr space's label. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Off (`null`) by default; set it, for example to `${branch} (${rootNameShort})`, to turn it on."
+          "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name, `${space}` the herdr space's label and `${title}` the title the pane's program sets (what an agent is doing), empty when it only repeats the pane's name or folder. Put `${separator}` around `${title}` so the separator is dropped while it is empty. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Off (`null`) by default; set it, for example to `${branch} (${rootNameShort})`, to turn it on."
         }
       }
     },
