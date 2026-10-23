@@ -106,14 +106,24 @@
           "scope": "window",
           "markdownDescription": "The window title while herdr's focused pane in the dev container is working in a Git repo or worktree. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name, `${space}` the herdr space's label and `${title}` the title the pane's program sets (what an agent is doing), empty when it only repeats the pane's name or folder. Put `${separator}` around `${title}` so the separator is dropped while it is empty. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as focus moves. Off (`null`) by default; set it, for example to `${branch} (${rootNameShort})`, to turn it on."
         },
+        "devc-vscode.devcWebDevc": {
+          "type": "string",
+          "default": "installed",
+          "scope": "window",
+          "examples": [
+            "installed",
+            "devc2"
+          ],
+          "markdownDescription": "Which devc runs the extension's `devc web`, as devc-desktop's `desktopDevc` picks it: `installed` (devc in `~/.local/bin` or on PATH), `devc2` (the devc-tools checkout from source, through `$DEVC_BIN`, which sourcing devc-tools' `scripts/bash_aliases.sh` exports; read from VS Code's environment, else your login shell's) or an absolute path to a devc binary. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
+        },
         "devc-vscode.devcWebArgs": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "scope": "application",
-          "markdownDescription": "Extra arguments after `devc web --no-open` for the `devc web` the extension starts for the **devc web** view and **Open devc web Tiles**, for example `[\"--live\", \"--source\", \"/path/to/devc-tools/devc\"]`. Applies on the next start or **Restart devc web**. User settings only."
+          "scope": "window",
+          "markdownDescription": "Extra arguments after `devc web --no-open --port <a free port>` for the `devc web` the extension starts for the **devc web** view and **Open devc web Tiles**, for example `[\"--live\", \"--source\", \"/path/to/devc-tools/devc\"]`. A `--port` here replaces the free port. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
         }
       }
     },

@@ -5,10 +5,16 @@ import * as path from 'path';
 import {
   DevcWebError,
   DevcWebServer,
+  LoginEnv,
+  ResolveDevcDeps,
+  commandWords,
+  devcChoice,
+  loginEnv,
   messageHtml,
   newViewId,
   pageUrl,
   parseReadyLine,
+  resolveDevc,
   sidebarHtml,
 } from '../devcWeb';
 
@@ -154,11 +160,12 @@ suite('DevcWebServer', function () {
   }
 
   function server(
-    command: string | undefined,
+    command: string | string[],
     args: string[] = [],
     timeouts = { readyMs: 2000, stopMs: 1000 }
   ): DevcWebServer {
-    return new DevcWebServer(async () => command, () => args, timeouts);
+    const cmd = typeof command === 'string' ? [command] : command;
+    return new DevcWebServer(async () => ({ cmd }), () => args, timeouts);
   }
 
   async function rejection(p: Promise<unknown>): Promise<DevcWebError> {
@@ -180,9 +187,9 @@ suite('DevcWebServer', function () {
     s.onDidChangeState(state => states.push(state.kind));
     assert.strictEqual(await s.url(), READY);
     assert.strictEqual(await s.url(), READY);
-    assert.strictEqual(
+    assert.match(
       fs.readFileSync(path.join(dir, 'args'), 'utf8').trim(),
-      'web --no-open --live'
+      /^web --no-open --port \d{1,5} --live$/
     );
     const started = Date.now();
     await s.stop();
@@ -248,11 +255,178 @@ suite('DevcWebServer', function () {
     await s.stop();
   });
 
+  test('tries another port when the one picked is taken', async () => {
+    const s = server(
+      stub(
+        `if [ ! -e "${dir}/tried" ]; then touch "${dir}/tried"; ` +
+          `echo "devc web: port $3 is already in use" >&2; exit 1; fi\n` +
+          `echo "devc web: ${READY}"\nexec sleep 30`
+      )
+    );
+    assert.strictEqual(await s.url(), READY);
+    await s.stop();
+  });
+
+  test('gives up after three taken ports', async () => {
+    const s = server(
+      stub('echo "devc web: port $3 is already in use" >&2\nexit 1')
+    );
+    const err = await rejection(s.url());
+    assert.match(err.stderr, /already in use/);
+    assert.strictEqual(s.state.kind, 'stopped');
+  });
+
+  test('keeps a --port from the settings, without retrying', async () => {
+    const s = server(
+      stub(
+        `echo x >> "${dir}/runs"\necho "devc web: port $4 is already in use" >&2\nexit 1`
+      ),
+      ['--port', '48228']
+    );
+    const err = await rejection(s.url());
+    assert.strictEqual(err.stderr, 'devc web: port 48228 is already in use');
+    assert.strictEqual(
+      fs.readFileSync(path.join(dir, 'args'), 'utf8').trim(),
+      'web --no-open --port 48228'
+    );
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'runs'), 'utf8'), 'x\n');
+  });
+
+  test('runs a multi-word command, such as $DEVC_BIN', async () => {
+    const file = stub(`echo "devc web: ${READY}"\nexec sleep 30`);
+    const s = server(['/bin/sh', file]);
+    assert.strictEqual(await s.url(), READY);
+    assert.match(
+      fs.readFileSync(path.join(dir, 'args'), 'utf8').trim(),
+      /^web --no-open --port \d+$/
+    );
+    await s.stop();
+  });
+
   test('without devc, starts nothing', async () => {
-    const err = await rejection(server(undefined).url());
+    const s = new DevcWebServer(
+      () =>
+        Promise.reject(
+          new DevcWebError('devc web needs devc: install it or put it on PATH', '')
+        ),
+      () => []
+    );
+    const err = await rejection(s.url());
     assert.strictEqual(
       err.message,
       'devc web needs devc: install it or put it on PATH'
     );
+    assert.strictEqual(s.state.kind, 'stopped');
+  });
+
+  test('loginEnv reads PATH and $DEVC_BIN past rc output', async () => {
+    const shell = path.join(dir, 'shell');
+    fs.writeFileSync(
+      shell,
+      `#!/bin/sh\necho welcome\nPATH=/p1:/p2 DEVC_BIN='deno run x' exec /bin/sh -c "$2"\n`,
+      { mode: 0o755 }
+    );
+    assert.deepStrictEqual(await loginEnv(shell), {
+      path: '/p1:/p2',
+      devcBin: 'deno run x',
+    });
+    assert.strictEqual(await loginEnv(path.join(dir, 'missing')), undefined);
+  });
+});
+
+suite('devcChoice', () => {
+  test('reads the setting', () => {
+    assert.deepStrictEqual(devcChoice('devc2'), { kind: 'devc2' });
+    assert.deepStrictEqual(devcChoice('/opt/devc'), { kind: 'path', path: '/opt/devc' });
+    for (const v of ['installed', undefined, '', 'devc', 3]) {
+      assert.deepStrictEqual(devcChoice(v), { kind: 'installed' });
+    }
+  });
+
+  test('commandWords splits on whitespace', () => {
+    assert.deepStrictEqual(commandWords('  deno run  -A /m.ts '), [
+      'deno',
+      'run',
+      '-A',
+      '/m.ts',
+    ]);
+    assert.deepStrictEqual(commandWords('  '), []);
+  });
+});
+
+suite('resolveDevc', () => {
+  const DEVC_BIN = 'deno run --allow-read /src/devc/main.ts';
+  function deps(
+    env: Record<string, string>,
+    login: LoginEnv | undefined,
+    installed?: string
+  ): ResolveDevcDeps & { loginAsked: number } {
+    const d = {
+      loginAsked: 0,
+      installed: async () => installed,
+      env: (name: string) => env[name],
+      loginEnv: async () => {
+        d.loginAsked++;
+        return login;
+      },
+      onPath: async (name: string, p: string) =>
+        p.split(':').includes('/opt/deno') && name === 'deno'
+          ? '/opt/deno/deno'
+          : undefined,
+    };
+    return d;
+  }
+
+  test('installed: the devc findDevc finds, else an error', async () => {
+    assert.deepStrictEqual(
+      await resolveDevc({ kind: 'installed' }, deps({}, undefined, '/a/devc')),
+      { cmd: ['/a/devc'] }
+    );
+    await assert.rejects(
+      resolveDevc({ kind: 'installed' }, deps({}, undefined)),
+      /devc web needs devc/
+    );
+  });
+
+  test('a path is run as is', async () => {
+    assert.deepStrictEqual(
+      await resolveDevc({ kind: 'path', path: '/x/devc' }, deps({}, undefined)),
+      { cmd: ['/x/devc'] }
+    );
+  });
+
+  test("devc2: $DEVC_BIN from VS Code's environment first", async () => {
+    const d = deps({ DEVC_BIN: ` ${DEVC_BIN} ` }, undefined);
+    assert.deepStrictEqual(await resolveDevc({ kind: 'devc2' }, d), {
+      cmd: ['deno', 'run', '--allow-read', '/src/devc/main.ts'],
+    });
+    assert.strictEqual(d.loginAsked, 0);
+  });
+
+  test("devc2: else the login shell's, resolved on its PATH", async () => {
+    assert.deepStrictEqual(
+      await resolveDevc(
+        { kind: 'devc2' },
+        deps({}, { path: '/usr/bin:/opt/deno', devcBin: DEVC_BIN })
+      ),
+      {
+        cmd: ['/opt/deno/deno', 'run', '--allow-read', '/src/devc/main.ts'],
+        path: '/usr/bin:/opt/deno',
+      }
+    );
+  });
+
+  test('devc2: not found says to source bash_aliases.sh', async () => {
+    for (const login of [
+      undefined,
+      { path: '/usr/bin' },
+      { path: '/usr/bin', devcBin: DEVC_BIN },
+    ]) {
+      await assert.rejects(
+        resolveDevc({ kind: 'devc2' }, deps({}, login)),
+        (err: Error) =>
+          err instanceof DevcWebError && /bash_aliases\.sh/.test(err.message)
+      );
+    }
   });
 });

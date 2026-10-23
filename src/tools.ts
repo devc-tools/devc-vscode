@@ -40,11 +40,25 @@ export async function findDevc(
   platform: NodeJS.Platform = process.platform
 ): Promise<string | undefined> {
   const names = platform === 'win32' ? ['devc.exe', 'devc.cmd'] : ['devc'];
-  const dirs = [
+  return firstExecutable(names, [
     path.join(home, '.local', 'bin'),
     ...(env.PATH ?? '').split(path.delimiter),
-  ].filter(Boolean);
-  for (const dir of dirs) {
+  ]);
+}
+
+/** The first executable `name` in a PATH-style list of directories. */
+export function onPath(
+  name: string,
+  pathList: string
+): Promise<string | undefined> {
+  return firstExecutable([name], pathList.split(path.delimiter));
+}
+
+async function firstExecutable(
+  names: string[],
+  dirs: string[]
+): Promise<string | undefined> {
+  for (const dir of dirs.filter(Boolean)) {
     for (const name of names) {
       const candidate = path.join(dir, name);
       try {

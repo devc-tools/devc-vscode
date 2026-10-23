@@ -45,8 +45,9 @@ the tiles needs devc-tools' `devc-web-cross-page-drag`; nothing here depends on 
 - Found with `findDevc()`. Not found: the view shows a short message ("devc web needs devc:
   install it or put it on PATH") and the commands say the same; nothing is spawned.
 - Started lazily, the first time the view is shown or **Open devc web Tiles** runs, once per
-  window: `devc web --no-open` followed by `devc-vscode.devcWebArgs` (default `[]`). Never
-  `--port`: devc picks a free one and prints it.
+  window: `devc web --no-open` followed by `devc-vscode.devcWebArgs` (default `[]`). ~~Never
+  `--port`: devc picks a free one and prints it.~~ Wrong: devc web defaults to port 48228; see
+  the implementation notes.
 - The URL comes from stdout's ready line, matched exactly as devc-desktop does
   (`devc-desktop/src/main/launch.ts`):
   `^devc web: (http:\/\/127\.0\.0\.1:\d{1,5}\/#token=[0-9a-f]{64})$`. stdout is otherwise
@@ -145,3 +146,13 @@ Commit in this repo's style, with the `Co-Authored-By` line.
   the kill also reaches the deno server devc's supervisor spawned.
 - Validation 3 (in VS Code, against a devc with the embedding plan) was not run: this container
   has no devc and no display for a manual check.
+- **`--port` is passed.** devc web listens on a fixed default port (48228, devc-tools'
+  `DEVC_WEB_DEFAULT_PORT`) rather than picking a free one, so the extension's server collided
+  with a devc web run elsewhere ("port 48228 is already in use"). The extension asks the OS for
+  a free 127.0.0.1 port and passes `--port`, retrying up to three times on "already in use"; a
+  `--port` in `devcWebArgs` is used as given.
+- **`devc-vscode.devcWebDevc`** (added after the plan, at the user's request): `installed` |
+  `devc2` | an absolute path, as devc-desktop's `desktopDevc`. `devc2` runs `$DEVC_BIN` (the
+  from-source invocation `scripts/bash_aliases.sh` exports, since `devc2` itself is a shell
+  function `spawn` cannot run), from the extension host's environment, else `$SHELL -ilc`'s.
+- **Both settings are `window`-scoped**, not `application` as planned, so a workspace can set them (user's request). Safe because the extension declares no `untrustedWorkspaces` support, so VS Code doesn't run it in Restricted Mode.

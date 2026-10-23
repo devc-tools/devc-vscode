@@ -98,16 +98,19 @@ import {
   ensureControlDir,
   sshTerminalCommand,
 } from './remoteShell';
-import { commandAvailable, dockerInstalled, findDevc } from './tools';
+import { commandAvailable, dockerInstalled, findDevc, onPath } from './tools';
 import {
   DevcWebError,
   DevcWebPage,
   DevcWebServer,
   DevcWebState,
+  devcChoice,
+  loginEnv,
   messageHtml,
   newViewId,
   pageUrl,
   readyOrigin,
+  resolveDevc,
   sidebarHtml,
 } from './devcWeb';
 import {
@@ -376,7 +379,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(id, handler as never)
     );
 
-  devcWeb = new DevcWebServer(findDevc, devcWebArgs);
+  devcWeb = new DevcWebServer(devcWebCommand, devcWebArgs);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       DEVC_WEB_VIEW_ID,
@@ -2809,6 +2812,19 @@ function devcWebArgs(): string[] {
   return Array.isArray(args)
     ? args.filter((a): a is string => typeof a === 'string')
     : [];
+}
+
+/** The devc `devc-vscode.devcWebDevc` picks, read at each start. */
+function devcWebCommand() {
+  const choice = devcChoice(
+    vscode.workspace.getConfiguration('devc-vscode').get('devcWebDevc')
+  );
+  return resolveDevc(choice, {
+    installed: () => findDevc(),
+    env: name => process.env[name],
+    loginEnv: () => loginEnv(),
+    onPath,
+  });
 }
 
 /**

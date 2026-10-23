@@ -149,8 +149,9 @@ Claude Code in its default permission mode asks before writing the reply file; a
 
 The **devc web** view in the activity bar shows [devc web](https://github.com/devc-tools/devc-tools)'s sidebar: containers, panes in use, pinned files and tasks. **Open devc web Tiles** (the globe in the view's title bar) opens its tiling area of terminals, files and diffs in VS Code's integrated browser. A pane or file clicked in the view opens in the tiles.
 
-- The extension runs its own `devc web --no-open` for the window, started the first time either is shown. Its token stays in the extension's memory; nothing logs it.
+- The extension runs its own `devc web --no-open` for the window, on a free port so it doesn't clash with a devc web you run yourself, started the first time either is shown. Its token stays in the extension's memory; nothing logs it.
 - **Restart devc web** starts a new one, on a new port and token. The view reloads; a tiles tab still points at the old server, so reopen it.
+- To run devc web from a devc-tools checkout before publishing, set `devc-vscode.devcWebDevc` to `"devc2"`. The `devc2` alias is a shell function the extension can't call, so it runs `$DEVC_BIN`, the same from-source command that sourcing devc-tools' `scripts/bash_aliases.sh` exports. It's read from VS Code's environment, else your login shell's. An absolute path to a devc binary works too.
 - Pass extra arguments in `devc-vscode.devcWebArgs`, such as `["--live"]`.
 - The view needs a devc whose devc web allows being framed by VS Code. Until then it stays blank; the tiles in the integrated browser work regardless.
 - The view's layout and settings are stored apart from the same page's in a browser tab.
@@ -191,7 +192,8 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.agentKinds` | `["claude", "copilot", "pi"]` | Agents offered by Add Agent (herdr `--kind` values) |
 | `devc-vscode.herdrSession` | *(from folder)* | herdr session for this window, on this machine and SSH hosts |
 | `devc-vscode.windowTitle` | `null` | The window title while herdr's focused pane is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
-| `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (user settings only; see [devc web](#devc-web)) |
+| `devc-vscode.devcWebDevc` | `installed` | Which devc runs devc web: `installed`, `devc2` (`$DEVC_BIN`, from source) or an absolute path (also per workspace) |
+| `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (also per workspace; see [devc web](#devc-web)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |
 
