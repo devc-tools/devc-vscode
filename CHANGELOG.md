@@ -4,6 +4,8 @@
 
 ### Changed
 
+- A linked Git worktree added as a workspace folder by Focus Features…, Focus on Active Agents, Add Active herdr Space to Workspace or the Workspace Folders view is named `repo/folder`, such as `project/feature-a`, instead of its bare folder name.
+
 - Container roots in the Sandboxes view show only `/workspaces` by default. The filter button in the view's title bar shows the rest of `/`; the choice is remembered per workspace. Revealing a path outside `/workspaces` turns the filter off.
 
 - A missing Docker CLI no longer empties the Sandboxes view: SSH host roots still list.
@@ -18,6 +20,7 @@
 
 ### Added
 
+- **Workspace Folders view** in the Explorer. **Pin Folder…** adds a Git repo (a worktree pins its main repo) or any other folder, and each folder, repo and worktree gets a checkbox for whether they are workspace folders. Toggles are marked *will open* / *will close* until **Apply**, which adds and removes the folders as Focus Features… does, with Source Control following; **Discard Changes** drops them. If Source Control hasn't shown an opened repo after a few seconds, a warning offers **Reopen Closed Repositories** and **Reload Window**. The window's first folder (or its repo) is pinned automatically and listed first, marked *workspace root* with no checkbox; other pins are kept per window, keyed by that folder. **Unpin** leaves folders as they are. Not gated by `devc-vscode.featureFolders`.
 - **devc web in VS Code.** A **devc web** view in the activity bar shows devc web's sidebar, and **Open devc web Tiles** opens its tiles in the integrated browser, paired so the sidebar's clicks open in the tiles. Every window shares one `devc web --no-open` the extension runs on `devc-vscode.devcWebPort` (48229) under a watchdog that stops it about 10 seconds after no window uses it, even after a crash; its token stays in VS Code's secret storage. **Restart devc web** starts a new one for every window, and the new `devc-vscode.devcWebArgs` setting adds arguments such as `--live`, and `devc-vscode.devcWebDevc` set to `devc2` runs devc-tools from source through `$DEVC_BIN`. The view needs a devc web that allows framing by VS Code.
 - **`${title}` in `devc-vscode.windowTitle`** is the title the focused herdr pane's program sets, such as what an agent is doing, so the window title can match devc web's: `${project}:${branch}${separator}${title}${separator}devcd`.
 - **`devc-vscode.featureFolders`**, off by default, turns on **Focus Features…**, **Focus on Active Agents** and **Add Active herdr Space to Workspace**. They close the repo of each folder they remove with **Git: Close Repository**, which VS Code remembers for the workspace, so the repo stays out of Source Control after a reload or when its folder is added back by hand. **Git: Reopen Closed Repositories…** brings it back.

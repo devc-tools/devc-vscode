@@ -34,15 +34,22 @@ export async function listFeatures(roots: string[], git: Git): Promise<Feature[]
       )
     )
   ).flat();
+  return features.sort(compareFeatures);
+}
+
+/**
+ * The order features are listed in: by project name, main worktree first and
+ * detached ones last.
+ */
+export function compareFeatures(a: Feature, b: Feature): number {
   const rank = (f: Feature) => (f.path === f.main ? 0 : 1);
-  return features.sort(
-    (a, b) =>
-      projectOf(a).localeCompare(projectOf(b)) ||
-      a.main.localeCompare(b.main) ||
-      rank(a) - rank(b) ||
-      Number(a.branch === undefined) - Number(b.branch === undefined) ||
-      featureLabel(a).localeCompare(featureLabel(b)) ||
-      a.path.localeCompare(b.path)
+  return (
+    projectOf(a).localeCompare(projectOf(b)) ||
+    a.main.localeCompare(b.main) ||
+    rank(a) - rank(b) ||
+    Number(a.branch === undefined) - Number(b.branch === undefined) ||
+    featureLabel(a).localeCompare(featureLabel(b)) ||
+    a.path.localeCompare(b.path)
   );
 }
 
@@ -145,6 +152,16 @@ export function expandTitle(
 /** The name of the project a feature belongs to. */
 export function projectOf(feature: Feature): string {
   return path.basename(feature.main);
+}
+
+/**
+ * The name a linked worktree's workspace folder is given,
+ * `project/folder`; undefined for a repo's main worktree.
+ */
+export function worktreeFolderName(feature: Feature): string | undefined {
+  return feature.path === feature.main
+    ? undefined
+    : `${projectOf(feature)}/${path.basename(feature.path)}`;
 }
 
 /** What a feature is called within its project. */

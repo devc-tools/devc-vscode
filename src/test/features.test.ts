@@ -12,6 +12,7 @@ import {
   planFolders,
   projectOf,
   removalRuns,
+  worktreeFolderName,
 } from '../features';
 import { makeGit } from '../workspaceSync';
 
@@ -123,6 +124,26 @@ suite('expandTitle', () => {
     assert.strictEqual(
       expandTitle('${project} / ${branch}', { path: '/c/a.worktrees/x', main: '/c/a' }, undefined),
       'a / x'
+    );
+  });
+});
+
+suite('worktreeFolderName', () => {
+  test('names a linked worktree project/folder', () => {
+    assert.strictEqual(
+      worktreeFolderName({
+        path: '/w/alpha.worktrees/feature-a',
+        main: '/w/alpha',
+        branch: 'feat/a',
+      }),
+      'alpha/feature-a'
+    );
+  });
+
+  test('leaves a main worktree unnamed', () => {
+    assert.strictEqual(
+      worktreeFolderName({ path: '/w/alpha', main: '/w/alpha', branch: 'main' }),
+      undefined
     );
   });
 });

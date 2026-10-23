@@ -104,7 +104,23 @@ This command, **Focus on Active Agents** and **Add Active herdr Space to Workspa
 - The first workspace folder always stays, and so do folders that are not repos or worktrees.
 - Everything a running dev container for the workspace mounts under `/workspaces` stays on the list, so a removed folder can be picked again. The container is found from its project folder, the folder of the `.code-workspace` file, or any open folder it mounts.
 - A repo whose folder is removed is closed in Source Control, even with one of its files still open in an editor. VS Code remembers the close for the workspace: the repo stays out of Source Control, even after a reload or when its folder is added back by hand, until **Git: Reopen Closed Repositories…**.
-- Each change is written to the `.code-workspace` file.
+- Each change is written to the `.code-workspace` file. A linked worktree is added under the name `repo/folder`, such as `project/feature-a`; a repo's main folder keeps its own name.
+
+#### Workspace Folders
+
+The **Workspace Folders** view in the Explorer keeps a standing list instead of a one-shot picker.
+
+1. Click **+** (**Pin Folder…**) and pick one or more folders. A repo is listed with its Git worktrees under it, and picking a worktree pins its main repo. Any other folder is pinned by itself.
+2. Tick or untick a folder, a repo (its main folder) or any of its worktrees. Changed rows are marked *will open* or *will close*.
+3. Click **✓** (**Apply**) to add and remove the folders, or **Discard Changes** to drop the ticks.
+
+Source Control follows, as with Focus Features…. If a repo you opened hasn't appeared there after a few seconds, a warning offers **Reopen Closed Repositories** and **Reload Window**.
+
+- The window's first folder is always listed first, pinned automatically: its repo when it is a repo or a worktree, else the folder itself. Its row says *workspace root* and has no checkbox, since it always stays in the workspace.
+- Other pins belong to that first folder, so they survive a reload and a single-folder window becoming multi-root.
+- **Unpin** (the **×** on a pin) only takes it off the list. Its folders stay.
+- Worktrees added or removed outside VS Code show up on **Refresh** or when the view is shown again.
+- The view does not need `devc-vscode.featureFolders`. Hide it from the Explorer's `…` menu if you don't use it. Like Focus Features…, a repo it closes stays closed in this workspace until it is opened again here or with **Git: Reopen Closed Repositories…**.
 
 Three more commands tie features to herdr in the dev container. None runs by itself:
 

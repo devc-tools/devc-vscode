@@ -198,6 +198,36 @@
         "category": "Dev Container FS"
       },
       {
+        "command": "devc-vscode.pinRepo",
+        "title": "Pin Folder…",
+        "category": "Dev Container FS",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devc-vscode.unpinRepo",
+        "title": "Unpin",
+        "category": "Dev Container FS",
+        "icon": "$(close)"
+      },
+      {
+        "command": "devc-vscode.applyWorkspaceRepos",
+        "title": "Apply",
+        "category": "Dev Container FS",
+        "icon": "$(check)"
+      },
+      {
+        "command": "devc-vscode.discardWorkspaceRepos",
+        "title": "Discard Changes",
+        "category": "Dev Container FS",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "devc-vscode.refreshWorkspaceRepos",
+        "title": "Refresh",
+        "category": "Dev Container FS",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "devc-vscode.sendToSshHost",
         "title": "Send to SSH Host…",
         "category": "Dev Container FS"
@@ -425,6 +455,26 @@
           "command": "devc-vscode.restartDevcWeb",
           "when": "view == devc-vscode.devcWeb",
           "group": "navigation@1"
+        },
+        {
+          "command": "devc-vscode.pinRepo",
+          "when": "view == devc-vscode.workspaceRepos",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devc-vscode.applyWorkspaceRepos",
+          "when": "view == devc-vscode.workspaceRepos && devc-vscode.workspaceReposPending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devc-vscode.discardWorkspaceRepos",
+          "when": "view == devc-vscode.workspaceRepos && devc-vscode.workspaceReposPending",
+          "group": "navigation@3"
+        },
+        {
+          "command": "devc-vscode.refreshWorkspaceRepos",
+          "when": "view == devc-vscode.workspaceRepos",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -527,6 +577,16 @@
           "command": "devc-vscode.deleteSession",
           "when": "view == devc-vscode.agents && viewItem =~ /^agentSsh\\.running/",
           "group": "inline@3"
+        },
+        {
+          "command": "devc-vscode.unpinRepo",
+          "when": "view == devc-vscode.workspaceRepos && viewItem =~ /^pinned/",
+          "group": "inline"
+        },
+        {
+          "command": "devc-vscode.unpinRepo",
+          "when": "view == devc-vscode.workspaceRepos && viewItem =~ /^pinned/",
+          "group": "1_pin"
         }
       ],
       "explorer/context": [
@@ -694,6 +754,18 @@
         {
           "command": "devc-vscode.focusActiveAgents",
           "when": "config.devc-vscode.featureFolders"
+        },
+        {
+          "command": "devc-vscode.unpinRepo",
+          "when": "false"
+        },
+        {
+          "command": "devc-vscode.applyWorkspaceRepos",
+          "when": "devc-vscode.workspaceReposPending"
+        },
+        {
+          "command": "devc-vscode.discardWorkspaceRepos",
+          "when": "devc-vscode.workspaceReposPending"
         }
       ]
     },
@@ -715,6 +787,10 @@
         {
           "id": "devc-vscode.containers",
           "name": "Sandboxes"
+        },
+        {
+          "id": "devc-vscode.workspaceRepos",
+          "name": "Workspace Folders"
         }
       ],
       "devc-web": [
