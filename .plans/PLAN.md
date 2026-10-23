@@ -16,6 +16,7 @@
 
 ### Completed
 
+- [devc web Shared Server](implemented/devc-web-shared-server.md) — one `devc web` on `devc-vscode.devcWebPort` for every window, under a watchdog that stops it ~10 s after no window uses it; the token shared through SecretStorage. ✅ Done (in-VS Code checks left to the user)
 - [devc web Panels](implemented/devc-web-panels.md) — the extension starts its own `devc web` (token kept in memory, as devc-desktop does), shows `/sidebar` in a **devc web** activity-bar view and opens `/main` in the integrated browser, paired by a per-window view id. ✅ Done (in-VS Code checks left to the user)
 - [Container File Tree as a Contributed Explorer View](implemented/explorer-tree-view.md) — replace workspace-folder grafting with a `TreeView` in the Explorer panel, backed by the existing filesystem provider. ✅ Done (host-only validation not run)
 - [Agents View: Host herdr Sessions](implemented/agents-view-host-herdr.md) — rename the view to "Agents" and show agents from host herdr sessions this window owns. ✅ Done
@@ -36,3 +37,4 @@
 | 8 | [optional-tool-detection.md](optional-tool-detection.md) | Detect Docker / devc / host herdr, gate commands and UI, docker exec terminal fallback | in progress |
 | 9 | [agent-review-comments.md](agent-review-comments.md) | Ask a container agent about code from comment threads, including PR review diffs; replies shown in the thread | in progress |
 | 10 | [devc-web-panels.md](implemented/devc-web-panels.md) | devc web's sidebar in a VS Code view and its tiles in the integrated browser, on an extension-owned `devc web` (needs devc-tools' `devc-web-vscode-embedding`) | ✅ Done |
+| 12 | [devc-web-shared-server.md](implemented/devc-web-shared-server.md) | One shared devc web for every window on a fixed port, stopped when none uses it | ✅ Done |

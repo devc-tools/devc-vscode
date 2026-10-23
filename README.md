@@ -151,11 +151,11 @@ Claude Code in its default permission mode asks before writing the reply file; a
 
 The **devc web** view in the activity bar shows [devc web](https://github.com/devc-tools/devc-tools)'s sidebar: containers, panes in use, pinned files and tasks. **Open devc web Tiles** (the globe in the view's title bar) opens its tiling area of terminals, files and diffs in VS Code's integrated browser. A pane or file clicked in the view opens in the tiles.
 
-- The extension runs its own `devc web --no-open` for the window, on a free port so it doesn't clash with a devc web you run yourself, started the first time either is shown. Its token stays in the extension's memory; nothing logs it.
-- **Restart devc web** starts a new one, on a new port and token. The view reloads; a tiles tab still points at the old server, so reopen it.
+- Every VS Code window shares one `devc web --no-open` the extension runs on port `devc-vscode.devcWebPort` (48229, so it doesn't clash with a devc web you run yourself on 48228), started by the first window that shows either. It stops about 10 seconds after the last window using it closes or reloads away, even after a crash. Its token is kept in VS Code's secret storage for the other windows; nothing logs it or writes it to a file.
+- **Restart devc web** starts a new one, with a new token, for every window. The views reload; a tiles tab still points at the old server, so reopen it.
 - To run devc web from a devc-tools checkout before publishing, set `devc-vscode.devcWebDevc` to `"devc2"`. The `devc2` alias is a shell function the extension can't call, so it runs `$DEVC_BIN`, the same from-source command that sourcing devc-tools' `scripts/bash_aliases.sh` exports. It's read from VS Code's environment, else your login shell's. An absolute path to a devc binary works too.
 - Pass extra arguments in `devc-vscode.devcWebArgs`, such as `["--live"]`.
-- The view needs a devc whose devc web allows being framed by VS Code. Until then it stays blank; the tiles in the integrated browser work regardless.
+- The view needs a devc whose devc web allows being framed by VS Code (devc-tools' `devc-web-vscode-embedding`). Until then it stays blank; the tiles in the integrated browser work regardless.
 - The view's layout and settings are stored apart from the same page's in a browser tab.
 
 ### Terminal links
@@ -179,7 +179,7 @@ All commands are under **Dev Container FS** in the command palette.
 | Send from Local / Fetch to Local | The same, from an SSH folder in the Sandboxes view |
 | New File, New Folder, Rename, Delete, Copy Container Path | Act on the Sandboxes selection |
 | Open devc web Tiles | Open devc web's tiles in the integrated browser (see [devc web](#devc-web)) |
-| Restart devc web | Restart the extension's devc web on a new port and token |
+| Restart devc web | Restart the shared devc web, with a new token, for every window |
 | Ask Agent About Selection | Open an agent comment thread on the selected lines (see [Ask an agent about code](#ask-an-agent-about-code)) |
 
 ## Settings
@@ -196,6 +196,7 @@ All commands are under **Dev Container FS** in the command palette.
 | `devc-vscode.featureFolders` | `false` | Turns on the commands that change workspace folders from features (see [Focus on features](#focus-on-features)) |
 | `devc-vscode.windowTitle` | `null` | The window title while herdr's focused pane is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
 | `devc-vscode.devcWebDevc` | `installed` | Which devc runs devc web: `installed`, `devc2` (`$DEVC_BIN`, from source) or an absolute path (also per workspace) |
+| `devc-vscode.devcWebPort` | `48229` | The port of the devc web every window shares (see [devc web](#devc-web)) |
 | `devc-vscode.devcWebArgs` | `[]` | Extra arguments after `devc web --no-open` (also per workspace; see [devc web](#devc-web)) |
 | `devc-vscode.sshHosts` | `[]` | SSH hosts (user settings only; use **Add SSH Host…**) |
 | `devc-vscode.sshPath` | `ssh` | ssh client (user settings only) |

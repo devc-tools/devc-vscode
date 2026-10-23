@@ -1,15 +1,20 @@
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as net from 'net';
+import * as path from 'path';
+import type { WatchdogOptions } from './devcWebWatchdog';
 
 /**
- * The extension's own `devc web`: a child process started on first use, its
- * URL read from the ready line, and the pages built from that URL. No vscode
- * import, so all of it tests under plain mocha.
+ * The extension's `devc web`: one server on one port for every window,
+ * started on first use under a watchdog that stops it when no window uses it,
+ * its URL read from the ready line, and the pages built from that URL. No
+ * vscode import, so all of it tests under plain mocha.
  *
  * The ready line carries the server's token. stdout is read only for that
  * line and is otherwise discarded: nothing from it reaches a log, an output
- * channel, a notification or a file.
+ * channel, a notification or a file. Other windows get it from the secret
+ * store (RecordStore).
  */
 
 /** devc web's ready line, as devc-desktop matches it. */
@@ -22,8 +27,6 @@ const STDERR_LINES = 50;
 export const READY_TIMEOUT_MS = 10000;
 /** How long a stopping devc web has after SIGTERM before SIGKILL. */
 export const STOP_TIMEOUT_MS = 5000;
-/** Starts tried when the free port picked is taken before devc web binds it. */
-const PORT_ATTEMPTS = 3;
 
 export type DevcWebPage = 'sidebar' | 'main';
 
@@ -263,27 +266,102 @@ export class DevcWebError extends Error {
 }
 
 /**
- * One `devc web --no-open --port <free port> <args>` child, started by `url()` and stopped by
- * `stop()`. A later `url()` after a stop or a failure starts a new one, with
- * a new port and token.
+ * Where the windows find the shared devc web: its watchdog's pid and its
+ * ready URL, which holds the token. Kept in a secret store, never a file.
+ */
+export interface SharedRecord {
+  pid: number;
+  url: string;
+}
+
+/** One value shared by every window, such as a SecretStorage key. */
+export interface RecordStore {
+  get(): Promise<string | undefined>;
+  store(value: string): Promise<void>;
+  delete(): Promise<void>;
+}
+
+/** The record in `text`, when it is one. */
+export function parseRecord(text: string | undefined): SharedRecord | undefined {
+  try {
+    const value = JSON.parse(text ?? '') as Partial<SharedRecord>;
+    return typeof value.pid === 'number' &&
+      Number.isSafeInteger(value.pid) &&
+      value.pid > 0 &&
+      typeof value.url === 'string' &&
+      parseReadyLine(`devc web: ${value.url}`) === value.url
+      ? { pid: value.pid, url: value.url }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface DevcWebTimeouts {
+  /** How long devc web has to print its ready line. */
+  readyMs: number;
+  /** How long a stopping devc web has after SIGTERM before SIGKILL. */
+  stopMs: number;
+  /** How often a window checks the shared server is still the one it uses. */
+  pollMs: number;
+  /** How long the watchdog keeps devc web with no client window alive. */
+  graceMs: number;
+  /** How often the watchdog checks the client windows. */
+  watchdogPollMs: number;
+}
+
+export const DEFAULT_TIMEOUTS: DevcWebTimeouts = {
+  readyMs: READY_TIMEOUT_MS,
+  stopMs: STOP_TIMEOUT_MS,
+  pollMs: 2000,
+  graceMs: 10000,
+  watchdogPollMs: 2000,
+};
+
+export interface DevcWebServerOptions {
+  /** The devc to run; rejects with a DevcWebError saying why there is none. */
+  command(): Promise<DevcCommand>;
+  args(): string[];
+  /** The port devc web listens on, unless `args` names one. */
+  port(): number;
+  /** The directory every window shares: `clients/` and `start.lock`. */
+  dir: string;
+  store: RecordStore;
+  /** This window's pid, its client file's name: the extension host's. */
+  pid?: number;
+  timeouts?: Partial<DevcWebTimeouts>;
+}
+
+/** The watchdog script, next to this module in `out/`. */
+const WATCHDOG = path.join(__dirname, 'devcWebWatchdog.js');
+/** How often a window waiting on another's start looks for its record. */
+const WAIT_POLL_MS = 200;
+
+/**
+ * This window's handle on the one `devc web` every window shares, on one
+ * port. `url()` adopts the running one or starts it under the watchdog
+ * (devcWebWatchdog.ts), and registers the window as a client; the watchdog
+ * stops devc web once no client window is alive. `stop()` stops it for every
+ * window (Restart); `dispose()` only unregisters this one.
  */
 export class DevcWebServer {
-  private child: cp.ChildProcess | undefined;
-  /** Bumped by each stop, so a start it interrupted reports nothing. */
-  private generation = 0;
+  /** The shared server this window uses. */
+  private record: SharedRecord | undefined;
   private starting: Promise<string> | undefined;
   private current: DevcWebState = { kind: 'idle' };
   private readonly listeners = new Set<(state: DevcWebState) => void>();
+  private monitor: NodeJS.Timeout | undefined;
+  private checking = false;
+  /** In stop(): the exit it causes is not news. */
+  private stopping = false;
+  private disposed = false;
+  private readonly pid: number;
+  private readonly timeouts: DevcWebTimeouts;
 
-  constructor(
-    /** The devc to run; rejects with a DevcWebError saying why there is none. */
-    private readonly command: () => Promise<DevcCommand>,
-    private readonly args: () => string[],
-    private readonly timeouts = {
-      readyMs: READY_TIMEOUT_MS,
-      stopMs: STOP_TIMEOUT_MS,
-    }
-  ) {}
+  constructor(private readonly options: DevcWebServerOptions) {
+    this.pid = options.pid ?? process.pid;
+    this.timeouts = { ...DEFAULT_TIMEOUTS, ...options.timeouts };
+  }
 
   get state(): DevcWebState {
     return this.current;
@@ -296,26 +374,52 @@ export class DevcWebServer {
     return { dispose: () => this.listeners.delete(listener) };
   }
 
-  /** The ready URL, starting devc web first when it is not running. */
+  /** The ready URL, starting devc web first when no window runs it. */
   url(): Promise<string> {
     if (this.current.kind === 'ready') {
       return Promise.resolve(this.current.url);
     }
-    this.starting ??= this.start().finally(() => {
+    this.starting ??= this.connect().finally(() => {
       this.starting = undefined;
     });
     return this.starting;
   }
 
-  /** SIGTERM, then SIGKILL after the stop timeout; resolves once it exited. */
+  /**
+   * Stops the shared devc web, for every window: SIGTERM to its watchdog,
+   * SIGKILL to its process group when it has not exited in time.
+   */
   async stop(): Promise<void> {
-    this.generation++;
-    const child = this.child;
-    this.child = undefined;
-    if (child) {
-      await terminate(child, this.timeouts.stopMs);
+    await this.starting?.catch(() => {});
+    this.stopping = true;
+    try {
+      const record = this.record ?? (await this.liveRecord());
+      this.record = undefined;
+      if (record) {
+        await killGroup(record.pid, this.timeouts.stopMs + 2000);
+        await this.forget(record);
+      }
+    } finally {
+      this.stopping = false;
     }
     this.setState({ kind: 'idle' });
+  }
+
+  /** Unregisters this window, leaving devc web to the others or the watchdog. */
+  dispose(): void {
+    this.disposed = true;
+    clearInterval(this.monitor);
+    this.monitor = undefined;
+    fs.rmSync(this.clientFile, { force: true });
+    this.listeners.clear();
+  }
+
+  private get clientFile(): string {
+    return path.join(this.options.dir, 'clients', String(this.pid));
+  }
+
+  private get lockFile(): string {
+    return path.join(this.options.dir, 'start.lock');
   }
 
   private setState(state: DevcWebState): void {
@@ -325,59 +429,225 @@ export class DevcWebServer {
     }
   }
 
-  private async start(): Promise<string> {
-    this.setState({ kind: 'starting' });
-    const generation = this.generation;
-    let command: DevcCommand;
-    try {
-      command = await this.command();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.setState({ kind: 'stopped', message, stderr: '' });
-      throw err instanceof DevcWebError ? err : new DevcWebError(message, '');
-    }
-    const args = this.args();
-    // devc web listens on one fixed port unless told otherwise, which a
-    // devc web run elsewhere may hold: pick a free one, unless the setting
-    // names a port.
-    const ownPort = !args.some(a => a === '--port' || a.startsWith('--port='));
-    for (let attempt = 1; ; attempt++) {
-      const port = ownPort ? ['--port', String(await freePort())] : [];
-      try {
-        return await this.spawn(command, ['web', '--no-open', ...port, ...args]);
-      } catch (err) {
-        const stopped = generation !== this.generation;
-        if (
-          !stopped &&
-          ownPort &&
-          attempt < PORT_ATTEMPTS &&
-          err instanceof DevcWebError &&
-          /already in use/.test(err.stderr)
-        ) {
-          continue;
-        }
-        if (!stopped && err instanceof DevcWebError) {
-          this.setState({
-            kind: 'stopped',
-            message: err.message,
-            stderr: err.stderr,
-          });
-        }
-        throw err;
-      }
+  private register(): void {
+    if (!this.disposed && !fs.existsSync(this.clientFile)) {
+      fs.mkdirSync(path.dirname(this.clientFile), { recursive: true });
+      fs.writeFileSync(this.clientFile, '');
     }
   }
 
-  /** One devc web child: resolves its ready URL, or rejects without it. */
-  private spawn(command: DevcCommand, args: string[]): Promise<string> {
-    const [file, ...prefix] = command.cmd;
-    const child = cp.spawn(file, [...prefix, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: command.path ? { ...process.env, PATH: command.path } : process.env,
-      // Its own process group, so a stop reaches the server devc runs.
-      detached: process.platform !== 'win32',
-    });
-    this.child = child;
+  private async connect(): Promise<string> {
+    this.setState({ kind: 'starting' });
+    try {
+      // Before looking, so the watchdog never sees a moment without us.
+      this.register();
+      const record = await this.findOrStart();
+      this.record = record;
+      this.setState({ kind: 'ready', url: record.url });
+      this.monitor ??= setInterval(
+        () => void this.check(),
+        this.timeouts.pollMs
+      ).unref();
+      return record.url;
+    } catch (err) {
+      const error =
+        err instanceof DevcWebError
+          ? err
+          : new DevcWebError(err instanceof Error ? err.message : String(err), '');
+      this.setState({
+        kind: 'stopped',
+        message: error.message,
+        stderr: error.stderr,
+      });
+      throw error;
+    }
+  }
+
+  /** The live shared server, else one this window starts while holding the lock. */
+  private async findOrStart(): Promise<SharedRecord> {
+    const t = this.timeouts;
+    const deadline = Date.now() + t.readyMs + t.stopMs + 2000;
+    for (;;) {
+      const live = await this.liveRecord();
+      if (live) {
+        return live;
+      }
+      if (this.lock()) {
+        try {
+          return (await this.liveRecord()) ?? (await this.startShared());
+        } finally {
+          this.unlock();
+        }
+      }
+      if (Date.now() > deadline) {
+        throw new DevcWebError(
+          'devc web is being started by another window, but did not come up',
+          ''
+        );
+      }
+      await new Promise(resolve => setTimeout(resolve, WAIT_POLL_MS));
+    }
+  }
+
+  /** The stored record when its watchdog is alive and its port answers; a dead one is deleted. */
+  private async liveRecord(): Promise<SharedRecord | undefined> {
+    const text = await this.options.store.get().catch(() => undefined);
+    if (text === undefined) {
+      return undefined;
+    }
+    const record = parseRecord(text);
+    if (record && isAlive(record.pid) && (await reachable(record.url))) {
+      return record;
+    }
+    // Unless another window stored a new one meanwhile.
+    if ((await this.options.store.get().catch(() => undefined)) === text) {
+      await this.options.store.delete().catch(() => {});
+    }
+    return undefined;
+  }
+
+  private async forget(record: SharedRecord): Promise<void> {
+    const text = await this.options.store.get().catch(() => undefined);
+    if (parseRecord(text)?.pid === record.pid) {
+      await this.options.store.delete().catch(() => {});
+    }
+  }
+
+  /** Takes `start.lock`, removing one left by a dead window. */
+  private lock(): boolean {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        fs.mkdirSync(this.options.dir, { recursive: true });
+        fs.writeFileSync(this.lockFile, String(this.pid), { flag: 'wx' });
+        return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw err;
+        }
+      }
+      let holder = NaN;
+      try {
+        holder = Number(fs.readFileSync(this.lockFile, 'utf8'));
+      } catch {
+        // Removed meanwhile: try again.
+        continue;
+      }
+      if (Number.isSafeInteger(holder) && holder > 0 && isAlive(holder)) {
+        return false;
+      }
+      fs.rmSync(this.lockFile, { force: true });
+    }
+    return false;
+  }
+
+  private unlock(): void {
+    try {
+      if (fs.readFileSync(this.lockFile, 'utf8') === String(this.pid)) {
+        fs.rmSync(this.lockFile, { force: true });
+      }
+    } catch {
+      // Already gone.
+    }
+  }
+
+  /** Starts devc web under the watchdog and stores its record. */
+  private async startShared(): Promise<SharedRecord> {
+    const command = await this.options.command();
+    const args = this.options.args();
+    const ownPort = !args.some(a => a === '--port' || a.startsWith('--port='));
+    const port = ownPort ? ['--port', String(this.options.port())] : [];
+    const watchdog: WatchdogOptions = {
+      clientsDir: path.dirname(this.clientFile),
+      cmd: [...command.cmd, 'web', '--no-open', ...port, ...args],
+      graceMs: this.timeouts.graceMs,
+      pollMs: this.timeouts.watchdogPollMs,
+      stopMs: this.timeouts.stopMs,
+    };
+    const child = cp.spawn(
+      process.execPath,
+      [WATCHDOG, JSON.stringify(watchdog)],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          ...(command.path ? { PATH: command.path } : {}),
+          // The extension host's execPath is Electron's.
+          ELECTRON_RUN_AS_NODE: '1',
+        },
+        // Its own process group: it outlives this window, and a stop
+        // reaches devc web and the server devc runs.
+        detached: true,
+        windowsHide: true,
+      }
+    );
+    let url: string;
+    try {
+      url = await this.readReady(child);
+    } catch (err) {
+      if (
+        ownPort &&
+        err instanceof DevcWebError &&
+        /already in use/.test(err.stderr)
+      ) {
+        throw new DevcWebError(
+          `devc web's port ${port[1]} is in use: free it or set devc-vscode.devcWebPort`,
+          err.stderr
+        );
+      }
+      throw err;
+    }
+    // Nothing more is read: the watchdog stops forwarding at the ready line.
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    child.unref();
+    const record = { pid: child.pid!, url };
+    child.once('exit', () => void this.check());
+    await this.options.store
+      .store(JSON.stringify(record))
+      .catch(() => {
+        // Without the store, other windows can't find it and fail on the
+        // port; this one still works.
+      });
+    return record;
+  }
+
+  /**
+   * Whether the shared server is still the one this window uses: one another
+   * window restarted is adopted, one that is gone leaves the view stopped.
+   */
+  private async check(): Promise<void> {
+    if (this.disposed || this.checking || this.stopping || this.starting) {
+      return;
+    }
+    this.register();
+    if (this.record && isAlive(this.record.pid)) {
+      return;
+    }
+    this.checking = true;
+    try {
+      const live = await this.liveRecord();
+      if (this.disposed || this.stopping || this.starting) {
+        return;
+      }
+      if (live) {
+        if (live.url !== this.record?.url || this.current.kind !== 'ready') {
+          this.record = live;
+          this.setState({ kind: 'ready', url: live.url });
+        }
+      } else if (this.current.kind === 'ready') {
+        this.setState({
+          kind: 'stopped',
+          message: 'devc web stopped',
+          stderr: '',
+        });
+      }
+    } finally {
+      this.checking = false;
+    }
+  }
+
+  /** The watchdog's ready URL, or a rejection without it. */
+  private readReady(child: cp.ChildProcess): Promise<string> {
     const stderr = tailLines(STDERR_LINES);
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
@@ -387,13 +657,10 @@ export class DevcWebServer {
       let failed = false;
       const fail = (message: string) => {
         clearTimeout(timer);
-        if (failed) {
+        if (ready || failed) {
           return;
         }
         failed = true;
-        if (this.child === child) {
-          this.child = undefined;
-        }
         reject(new DevcWebError(message, stderr.text()));
       };
       const timer = setTimeout(() => {
@@ -418,9 +685,6 @@ export class DevcWebServer {
             ready = true;
             pending = '';
             clearTimeout(timer);
-            if (this.child === child) {
-              this.setState({ kind: 'ready', url });
-            }
             resolve(url);
             return;
           }
@@ -429,37 +693,59 @@ export class DevcWebServer {
       child.on('error', err => fail(`devc web could not start: ${err.message}`));
       child.on('exit', (code, signal) => {
         const how = signal ? `was killed (${signal})` : `exited (${code})`;
-        if (!ready) {
-          fail(`devc web ${how} before it was ready`);
-        } else if (this.child === child) {
-          this.child = undefined;
-          this.setState({
-            kind: 'stopped',
-            message: `devc web ${how}`,
-            // Its stderr is shown only for a failed start.
-            stderr: '',
-          });
-        }
+        fail(`devc web ${how} before it was ready`);
       });
     });
   }
 }
 
-/** A port free on 127.0.0.1 now, from the OS. */
-export function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() =>
-        typeof address === 'object' && address
-          ? resolve(address.port)
-          : reject(new Error('no port'))
-      );
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: it exists but belongs to someone else — still alive.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Whether something accepts a connection on the URL's port on 127.0.0.1. */
+function reachable(url: string, timeoutMs = 1000): Promise<boolean> {
+  return new Promise(resolve => {
+    const socket = net.connect({
+      host: '127.0.0.1',
+      port: Number(new URL(url).port),
     });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
   });
+}
+
+/**
+ * SIGTERM to `pid`, then SIGKILL to its process group when it is still alive
+ * after `stopMs`; resolves once it is gone.
+ */
+async function killGroup(pid: number, stopMs: number): Promise<void> {
+  const kill = (target: number, sig: NodeJS.Signals) => {
+    try {
+      process.kill(target, sig);
+    } catch {
+      // Already gone.
+    }
+  };
+  kill(pid, 'SIGTERM');
+  const deadline = Date.now() + stopMs;
+  while (isAlive(pid) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (isAlive(pid)) {
+    kill(process.platform === 'win32' ? pid : -pid, 'SIGKILL');
+  }
 }
 
 /** The last `max` lines of a stream, fed in chunks. */

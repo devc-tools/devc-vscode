@@ -379,7 +379,17 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand(id, handler as never)
     );
 
-  devcWeb = new DevcWebServer(devcWebCommand, devcWebArgs);
+  devcWeb = new DevcWebServer({
+    command: devcWebCommand,
+    args: devcWebArgs,
+    port: devcWebPort,
+    dir: path.join(context.globalStorageUri.fsPath, 'devc-web'),
+    store: {
+      get: () => Promise.resolve(context.secrets.get(DEVC_WEB_SECRET)),
+      store: value => Promise.resolve(context.secrets.store(DEVC_WEB_SECRET, value)),
+      delete: () => Promise.resolve(context.secrets.delete(DEVC_WEB_SECRET)),
+    },
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       DEVC_WEB_VIEW_ID,
@@ -592,12 +602,14 @@ export function activate(context: vscode.ExtensionContext) {
   });
 }
 
-export function deactivate(): Promise<void> | undefined {
+export function deactivate(): void {
   if (dockerEventsProcess) {
     dockerEventsProcess.kill();
     dockerEventsProcess = undefined;
   }
-  return devcWeb?.stop();
+  // The shared devc web stays for the other windows; its watchdog stops it
+  // once none is left.
+  devcWeb?.dispose();
 }
 
 // ── Tree commands ───────────────────────────────────────────────────────────
@@ -2833,6 +2845,19 @@ const RESTART_DEVC_WEB = 'devc-vscode.restartDevcWeb';
 /** The integrated browser's open command (VS Code 1.138+). */
 const INTEGRATED_BROWSER_OPEN = 'workbench.action.browser.open';
 
+/** Where the shared devc web's watchdog pid and ready URL (with its token) are kept. */
+const DEVC_WEB_SECRET = 'devcWeb.server';
+const DEFAULT_DEVC_WEB_PORT = 48229;
+
+function devcWebPort(): number {
+  const port = vscode.workspace
+    .getConfiguration('devc-vscode')
+    .get<unknown>('devcWebPort', DEFAULT_DEVC_WEB_PORT);
+  return typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536
+    ? port
+    : DEFAULT_DEVC_WEB_PORT;
+}
+
 function devcWebArgs(): string[] {
   const args = vscode.workspace
     .getConfiguration('devc-vscode')
@@ -2911,8 +2936,8 @@ async function restartDevcWeb(): Promise<void> {
   }
   vscode.window.showInformationMessage(
     tiles
-      ? 'devc web restarted. Open tiles still point at the old server: reopen the tiles with Open devc web Tiles.'
-      : 'devc web restarted.'
+      ? 'devc web restarted, for every window. Open tiles still point at the old server: reopen the tiles with Open devc web Tiles.'
+      : 'devc web restarted, for every window.'
   );
 }
 

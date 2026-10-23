@@ -120,7 +120,15 @@
             "installed",
             "devc2"
           ],
-          "markdownDescription": "Which devc runs the extension's `devc web`, as devc-desktop's `desktopDevc` picks it: `installed` (devc in `~/.local/bin` or on PATH), `devc2` (the devc-tools checkout from source, through `$DEVC_BIN`, which sourcing devc-tools' `scripts/bash_aliases.sh` exports; read from VS Code's environment, else your login shell's) or an absolute path to a devc binary. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
+          "markdownDescription": "Which devc runs the extension's `devc web`, as devc-desktop's `desktopDevc` picks it: `installed` (devc in `~/.local/bin` or on PATH), `devc2` (the devc-tools checkout from source, through `$DEVC_BIN`, which sourcing devc-tools' `scripts/bash_aliases.sh` exports; read from VS Code's environment, else your login shell's) or an absolute path to a devc binary. Every window shares one `devc web`, so the window that starts it decides. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
+        },
+        "devc-vscode.devcWebPort": {
+          "type": "integer",
+          "default": 48229,
+          "minimum": 1,
+          "maximum": 65535,
+          "scope": "application",
+          "markdownDescription": "The port of the one `devc web` every VS Code window shares for the **devc web** view and **Open devc web Tiles**. It is started by the first window that needs it and stopped about 10 seconds after the last window using it closes. Not devc web's own default (48228), so it doesn't clash with a `devc web` you run yourself. Applies on the next start or **Restart devc web**."
         },
         "devc-vscode.devcWebArgs": {
           "type": "array",
@@ -129,7 +137,7 @@
           },
           "default": [],
           "scope": "window",
-          "markdownDescription": "Extra arguments after `devc web --no-open --port <a free port>` for the `devc web` the extension starts for the **devc web** view and **Open devc web Tiles**, for example `[\"--live\", \"--source\", \"/path/to/devc-tools/devc\"]`. A `--port` here replaces the free port. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
+          "markdownDescription": "Extra arguments after `devc web --no-open --port <devcWebPort>` for the `devc web` the extension starts for the **devc web** view and **Open devc web Tiles**, for example `[\"--live\", \"--source\", \"/path/to/devc-tools/devc\"]`. A `--port` here replaces `#devc-vscode.devcWebPort#`. Every window shares one `devc web`, so the window that starts it decides. Applies on the next start or **Restart devc web**. Can be set per workspace, which takes effect only in a trusted workspace."
         }
       }
     },
