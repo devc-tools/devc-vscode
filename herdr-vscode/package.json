@@ -1,0 +1,72 @@
+{
+  "name": "herdr-vscode",
+  "displayName": "herdr",
+  "description": "herdr sessions, spaces, agents and panes in VS Code.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devc-tools/devc-vscode.git"
+  },
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:herdr.sessions"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "herdr",
+          "title": "herdr",
+          "icon": "resources/herdr.svg"
+        }
+      ]
+    },
+    "views": {
+      "herdr": [
+        {
+          "id": "herdr.sessions",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "herdr.sessions",
+        "contents": "herdr sessions will appear here."
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "bundle": "node esbuild.mjs",
+    "build": "npm run compile && npm run bundle",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src",
+    "pretest": "npm run build && npm run lint",
+    "test": "vscode-test",
+    "package:dev": "vsce package --no-dependencies -o herdr-vscode-dev.vsix && code --install-extension herdr-vscode-dev.vsix"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "0.28.2",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}

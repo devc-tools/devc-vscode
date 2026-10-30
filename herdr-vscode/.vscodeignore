@@ -1,0 +1,8 @@
+**
+!dist/**/*.js
+!resources/**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+dist/**/*.map

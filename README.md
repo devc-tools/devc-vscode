@@ -234,6 +234,10 @@ If you run devc through a shell function or alias, or want another tool, set the
 - [How it works](docs/how-it-works.md): container scoping, the file system, terminal links, agent status, agent review comments, devc web, multiple windows, SSH security.
 - [Syncing with an SSH host](docs/ssh-sync.md): Send / Fetch in detail, including what Fetch flags for review.
 
+## herdr-vscode
+
+[`herdr-vscode/`](herdr-vscode/README.md) is a second, separate extension in this repo: herdr sessions, spaces, agents and panes in VS Code, for people who already use herdr. It has its own `package.json`, lockfile, build and tests (`cd herdr-vscode`), shares nothing with devc-vscode at build time, and can be installed alongside it. It is a scaffold for now. See [herdr-vscode/README.md](herdr-vscode/README.md).
+
 ## Develop
 
 ```sh
@@ -243,6 +247,6 @@ npm test             # .npmrc sets ignore-scripts, so compile first — pretest 
 npx vsce package     # -> devc-vscode-<version>.vsix
 ```
 
-Press <kbd>F5</kbd> to launch an Extension Development Host. Setting defaults come from the installed manifest, so reinstall the `.vsix` (or restart the dev host) after editing `package.json`.
+Press <kbd>F5</kbd> (the **Run devc-vscode** launch configuration) to launch an Extension Development Host. Setting defaults come from the installed manifest, so reinstall the `.vsix` (or restart the dev host) after editing `package.json`.
 
 You can develop inside a dev container while VS Code runs on the host against the same bind-mounted tree. The `ContainerTreeDataProvider` suite uses fakes and runs anywhere. The `DevContainerFileSystemProvider` suite needs a reachable container, so run it from the host. A headless container needs `xvfb` and Electron's shared libraries for `xvfb-run -a npm test`.

@@ -50,7 +50,7 @@
 | 10 | [devc-web-panels.md](implemented/devc-web-panels.md) | devc web's sidebar in a VS Code view and its tiles in the integrated browser, on an extension-owned `devc web` (needs devc-tools' `devc-web-vscode-embedding`) | ✅ Done |
 | 11 | [workspace-repos-view.md](implemented/workspace-repos-view.md) | Explorer view: pin repos, tick repos / worktrees as workspace folders, apply with Source Control following | ✅ Done |
 | 12 | [devc-web-shared-server.md](implemented/devc-web-shared-server.md) | One shared devc web for every window on a fixed port, stopped when none uses it | ✅ Done |
-| 13 | [herdr-vscode-scaffold.md](herdr-vscode-scaffold.md) | Empty herdr-vscode extension in `herdr-vscode/`; root build fenced off from it | |
+| 13 | [herdr-vscode-scaffold.md](herdr-vscode-scaffold.md) | Empty herdr-vscode extension in `herdr-vscode/`; root build fenced off from it | implemented, manual checks pending |
 | 14 | [herdr-sidebar.md](herdr-sidebar.md) | herdr-vscode Sessions / Spaces / Agents views over remote-api-bridge (depends on phase 13) | |
 | 15 | [herdr-mirrored-tabs.md](herdr-mirrored-tabs.md) | herdr tab as an editor tab of live pane tiles, synced with herdr (depends on phase 14) | |
 | 16 | [herdr-layout-tabs.md](herdr-layout-tabs.md) | User-built Layout tabs of any panes; `herdr.openPaneIn` (depends on phase 15) | |

@@ -14,17 +14,17 @@ Features come in herdr-sidebar and later plans.
 
 ## Checklist
 
-- [ ] 1. Record the baseline: root `npm test` pass/fail counts and `npx vsce ls` output, in this
+- [x] 1. Record the baseline: root `npm test` pass/fail counts and `npx vsce ls` output, in this
       plan's Implementation notes
-- [ ] 2. Root fences: `tsconfig.json` gains `"include": ["src"]`; `.vscodeignore` gains
+- [x] 2. Root fences: `tsconfig.json` gains `"include": ["src"]`; `.vscodeignore` gains
       `herdr-vscode/**`
-- [ ] 3. `herdr-vscode/` scaffold: `package.json`, `package-lock.json`, `.npmrc`, `.nvmrc`,
+- [x] 3. `herdr-vscode/` scaffold: `package.json`, `package-lock.json`, `.npmrc`, `.nvmrc`,
       `tsconfig.json`, `esbuild.mjs`, `eslint.config.mjs`, `.vscodeignore`, `.vscode-test.mjs`,
       `src/extension.ts`, `src/test/extension.test.ts`, `resources/herdr.svg`, `README.md`,
       `CHANGELOG.md`, `LICENSE`
-- [ ] 4. `.vscode/launch.json` and `.vscode/tasks.json`: a "Run herdr-vscode" launch config next to
+- [x] 4. `.vscode/launch.json` and `.vscode/tasks.json`: a "Run herdr-vscode" launch config next to
       the existing one
-- [ ] 5. Root `README.md`: a short "herdr-vscode" section pointing at `herdr-vscode/README.md`
+- [x] 5. Root `README.md`: a short "herdr-vscode" section pointing at `herdr-vscode/README.md`
 
 ## Contracts
 
@@ -104,11 +104,11 @@ and devc-vscode nothing under `herdr.*`.
 
 ## Validation
 
-- [ ] At the root: `npm run compile` and `npm test` give the step 1 baseline results (same
+- [x] At the root: `npm run compile` and `npm test` give the step 1 baseline results (same
       passes; nothing newly failing)
-- [ ] At the root: `npx vsce ls | grep -c herdr-vscode` prints `0`
-- [ ] `cd herdr-vscode && npm ci && npm run build && npm test` passes; `dist/extension.js` exists
-- [ ] `cd herdr-vscode && npx vsce package --no-dependencies -o /tmp/herdr.vsix`; `unzip -l
+- [x] At the root: `npx vsce ls | grep -c herdr-vscode` prints `0`
+- [x] `cd herdr-vscode && npm ci && npm run build && npm test` passes; `dist/extension.js` exists
+- [x] `cd herdr-vscode && npx vsce package --no-dependencies -o /tmp/herdr.vsix`; `unzip -l
       /tmp/herdr.vsix` lists `extension/dist/extension.js` and `extension/resources/herdr.svg`
       and no `node_modules/`, `src/`, `out/` or `.map` entries
 - [ ] `code --install-extension /tmp/herdr.vsix`: a herdr icon is in the activity bar; Sessions
@@ -130,4 +130,40 @@ and devc-vscode nothing under `herdr.*`.
 
 ## Implementation notes
 
-(Record the step 1 baseline here.)
+### Step 1 baseline (2026-10-30, before any change but the PLAN.md status)
+
+- Environment: `npm test` launches VS Code 1.144.0 (linux-arm64) from `.vscode-test/`. In this
+  container it first needed `libgtk-3` (installed with apt: `libgtk-3-0t64 libnss3 libgbm1
+  libasound2t64 libxss1 libsecret-1-0`) and a display, so it was run as `xvfb-run -a npm test`.
+  Without those it exits 127 (`libgtk-3.so.0: cannot open shared object file`).
+- Root `npm test` (`pretest` compile + lint pass): **293 passing, 23 pending, 1 failing**, the
+  failure being `DevcWebServer › gives up when no ready line comes in time`. That suite is
+  timing-sensitive and flaky here: of three runs, two gave exactly this result and one gave 3
+  failures, all in `DevcWebServer` (`waits while another window holds the start lock`,
+  `takes over a lock left by a dead window`, `gives up when no ready line comes in time`).
+- Root `npx vsce ls`: 32 entries — `.nvmrc`, `CHANGELOG.md`, `LICENSE`, `README.md`,
+  `package.json`, 22 `out/*.js` files (no `out/test/`), `resources/devc-web.svg`, and 4
+  `node_modules/@xterm/headless/` files. `npx vsce ls | grep -c herdr-vscode` prints `0`.
+
+### After the change
+
+- Root `npm run compile` and `eslint src` pass; `xvfb-run -a npm test`: **293 passing, 23 pending,
+  1 failing** (`DevcWebServer › gives up when no ready line comes in time`), the baseline result.
+- Root `npx vsce ls`: the same 32 entries as the baseline (only the listing order differs);
+  `grep -c herdr-vscode` prints `0`.
+- herdr-vscode: `npm ci`, `npm run build`, `npm run lint` pass; `xvfb-run -a npm test`: 2 passing;
+  `dist/extension.js` exists; the `.vsix` holds `extension/dist/extension.js`,
+  `extension/resources/herdr.svg`, `package.json`, `readme.md`, `changelog.md`, `LICENSE.txt`
+  and nothing else.
+
+### Deviations and gotchas
+
+- `.vscodeignore` uses `!dist/**/*.js`, not `!dist/**`. vsce applies every `!` pattern after the
+  ignore patterns regardless of order, so `!dist/**` re-included `dist/extension.js.map` despite
+  the later `dist/**/*.map`. A later plan that ships non-JS files from `dist/` (a webview's CSS,
+  fonts) must add its own `!dist/**/*.css`-style line.
+- `.npmrc`'s `ignore-scripts=true` also stops npm running `pretest` (as the root README notes for
+  devc-vscode), so `npm test` alone does not build or lint; run `npm run build && npm run lint`
+  first. The `pretest` script is kept as the contract names it.
+- `vscode-test` downloads its own VS Code into `herdr-vscode/.vscode-test/` (gitignored), separate
+  from the root's.
