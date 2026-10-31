@@ -308,7 +308,7 @@ above after ` · `.)
       it back restores them, worst status rolled up
 - [ ] Manual: an agent in a dev container session shows the container's folder name first with the
       default-style agents rows; an agent on this machine shows none
-- [ ] Manual: `herdr workspace report-metadata --source me --token jj_status=jj:kq <ws>` in a session
+- [ ] Manual: `herdr workspace report-metadata <ws> --source me --token jj_status=jj:kq` (id first; herdr 0.9.5 rejects options before it) in a session
       whose spaces rows include `$jj_status` shows `jj:kq` on that space's row
 - [ ] Manual: a typo (`"bogus"`) in the rows → both views go back to defaults and the herdr output
       channel shows `sidebar config: …: unknown … token \`bogus\`; using default rows` once; fixing
