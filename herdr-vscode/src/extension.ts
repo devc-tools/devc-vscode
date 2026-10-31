@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
 import { BaselineStore } from './baselines';
 import { PaneDecorations } from './decorations';
@@ -154,6 +155,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		),
 		vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitHeadContentProvider((key) => environments.find(key))),
 	);
+
+	// Ask Agent: comment threads answered by a herdr agent in any environment that can see the file.
+	const agentReview = new AgentReviewController({
+		model: m,
+		environments,
+		mounts: (env) => paths.mounts(env),
+		rowLabel,
+		followed: () => paneContext.followed,
+		log,
+	});
+	context.subscriptions.push(agentReview, ...agentReview.registerCommands());
 
 	const pickLayout = async (placeHolder: string): Promise<SavedLayout | undefined> => {
 		const saved = layouts.list();

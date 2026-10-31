@@ -19,26 +19,26 @@ Paths are under `herdr-vscode/` unless they say otherwise.
 
 ## Checklist
 
-- [ ] 1. Live probe on throwaway `hv-test` (see [Live probe](#live-probe)); record the results in
+- [x] 1. Live probe on throwaway `hv-test` (see [Live probe](#live-probe)); record the results in
       Implementation notes before writing the send path
-- [ ] 2. Copy `devc-vscode/src/agentReview.ts` to `herdr-vscode/src/agentReview.ts` with the header
+- [x] 2. Copy `devc-vscode/src/agentReview.ts` to `herdr-vscode/src/agentReview.ts` with the header
       `// Copied from devc-vscode/src/agentReview.ts at <short commit>; maintained separately.`
       (`<short commit>` = `git rev-parse --short HEAD` at copy time), then adapt it as this plan
       says. devc-vscode is never imported from or edited
-- [ ] 3. Document → environment path mapping in `src/paths.ts` (see [Paths](#paths))
-- [ ] 4. Comment controller `herdr.agentReview` and its commenting ranges (see
+- [x] 3. Document → environment path mapping in `src/paths.ts` (see [Paths](#paths))
+- [x] 4. Comment controller `herdr.agentReview` and its commenting ranges (see
       [Commenting ranges](#commenting-ranges))
-- [ ] 5. `herdr.askAgent` (**Ask herdr Agent About Selection**) in the editor context menu
-- [ ] 6. Choosing the agent: thread's agent → followed pane → only candidate → remembered → picker
+- [x] 5. `herdr.askAgent` (**Ask herdr Agent About Selection**) in the editor context menu
+- [x] 6. Choosing the agent: thread's agent → followed pane → only candidate → remembered → picker
       (see [Choosing the agent](#choosing-the-agent))
-- [ ] 7. Sending through the session's bridge (`agent.prompt`), prompt text, reply directory (see
+- [x] 7. Sending through the session's bridge (`agent.prompt`), prompt text, reply directory (see
       [Sending](#sending))
-- [ ] 8. Reply watcher per environment; replies shown and updated in the thread (see [Replies](#replies))
-- [ ] 9. Failures with **Resend**; thread title actions **Show Agent** and **Delete Thread**
-- [ ] 10. Thread state follows `pane.moved`; watchers stop with their environment
-- [ ] 11. `package.json` contributions and the `herdr.hasAgents` context key (see [Contributions](#contributions))
-- [ ] 12. Tests (list under Validation), including `src/test/liveAskAgent.test.ts`
-- [ ] 13. README section, `docs/how-it-works.md` section, CHANGELOG entry
+- [x] 8. Reply watcher per environment; replies shown and updated in the thread (see [Replies](#replies))
+- [x] 9. Failures with **Resend**; thread title actions **Show Agent** and **Delete Thread**
+- [x] 10. Thread state follows `pane.moved`; watchers stop with their environment
+- [x] 11. `package.json` contributions and the `herdr.hasAgents` context key (see [Contributions](#contributions))
+- [x] 12. Tests (list under Validation), including `src/test/liveAskAgent.test.ts`
+- [x] 13. README section, `docs/how-it-works.md` section, CHANGELOG entry
 
 ## Decisions
 
@@ -351,30 +351,30 @@ These results decide the live suite's scope (below) and go in Implementation not
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, with a new
+- [x] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, with a new
       `src/test/agentReview.test.ts` covering:
-  - [ ] prompt text for `seq == 1` and `seq > 1` exactly as in [Prompt text](#prompt-text-contract),
+  - [x] prompt text for `seq == 1` and `seq > 1` exactly as in [Prompt text](#prompt-text-contract),
         including `N-N` for one line and the 200-line cutoff (200 quoted, 201 not)
-  - [ ] side label for `file`, `git` (index `""`, `~`, a 40-hex commit, `HEAD`), `review` (base and
+  - [x] side label for `file`, `git` (index `""`, `~`, a 40-hex commit, `HEAD`), `review` (base and
         changed), `pr` (base and head), malformed and missing query → `diff view`,
         `herdr-container`, `herdr-ssh`, `herdr-git` with `HEAD` and with another query
-  - [ ] thread label: before an agent, with an agent, one line (`line 7`), a PR side with a 40-hex
+  - [x] thread label: before an agent, with an agent, one line (`line 7`), a PR side with a 40-hex
         commit shortened to 7, and the mockup's `Ask agent · claude (v3_auth) · lines 19–21`
-  - [ ] `containerPathOf`: longest source wins, exact source → destination, outside every source →
+  - [x] `containerPathOf`: longest source wins, exact source → destination, outside every source →
         undefined, trailing slashes; `environmentPathOf`: every cell of the [Paths](#paths) table,
         including `herdr-container` of another container, an upper-case `herdr-ssh` authority,
         a `herdr-git` URI from `gitHeadUri` for the same and a different env key
-  - [ ] commenting ranges with injected agents and mounts: full document for each mapped scheme,
+  - [x] commenting ranges with injected agents and mounts: full document for each mapped scheme,
         `[]` for an unmapped `file:` doc, for an `untitled:` doc, and when the only agent's
         environment cannot see the doc
-  - [ ] agent choice order with fakes: thread's agent kept; followed pane beats the remembered pick;
+  - [x] agent choice order with fakes: thread's agent kept; followed pane beats the remembered pick;
         a followed non-agent pane or one that cannot see the doc is skipped; one candidate used
         without a picker; remembered pick used; otherwise the picker is reached (stubbed)
-  - [ ] reply-listing parser: an entry that changed crc or size is reported once, an unchanged one is
+  - [x] reply-listing parser: an entry that changed crc or size is reported once, an unchanged one is
         not, an empty line and an unknown thread id are ignored, a devc-vscode path
         (`/tmp/devc-vscode/review/...`) is ignored
-  - [ ] failure messages for `agent_blocked`, `agent_not_found`, another code, and a plain `Error`
-  - [ ] extension-host round trip on a real `CommentController` and a temp-file document, with a fake
+  - [x] failure messages for `agent_blocked`, `agent_not_found`, another code, and a plain `Error`
+  - [x] extension-host round trip on a real `CommentController` and a temp-file document, with a fake
         model whose `request` records calls and a `LocalShell` with the reply root pointed at a temp
         directory: submit → the `You` comment, one `agent.prompt` call with
         `{target, text}` and no `wait`, the placeholder `_Waiting for reply…_`; writing
@@ -382,16 +382,16 @@ These results decide the live suite's scope (below) and go in Implementation not
         rejected request with `agent_blocked` → `Not sent`, `contextValue` `failed`, no placeholder;
         **Resend** after the fake succeeds → placeholder; **Delete Thread** removes `<root>/<id>`;
         after the last reply the watcher process has exited
-  - [ ] `src/test/extension.test.ts`: the five commands are contributed and registered; the menus
+  - [x] `src/test/extension.test.ts`: the five commands are contributed and registered; the menus
         above exist with exactly those `when` clauses; no contributed id starts with `devc-vscode.`
-- [ ] `HERDR_VSCODE_LIVE_HOME=<dir> xvfb-run -a npm test` with only `hv-test` running there passes,
+- [x] `HERDR_VSCODE_LIVE_HOME=<dir> xvfb-run -a npm test` with only `hv-test` running there passes,
       including a new `src/test/liveAskAgent.test.ts` that: sends `agent.prompt` through the real
       bridge to a plain shell pane and gets the error mapped as in [Failures](#failures); and, if the
       probe found the fake `claude` detected, runs the full round trip on it (prompt received, reply
       file written by the fake in its environment's real `/tmp/herdr-vscode/review/<id>/1.md`,
       reply shown in a real thread). `hv-test` is stopped and deleted afterwards
-- [ ] `git diff --stat -- devc-vscode` is empty
-- [ ] `grep -rn "devc-vscode" herdr-vscode/src --include=*.ts` shows only the `// Copied from` /
+- [x] `git diff --stat -- devc-vscode` is empty
+- [x] `grep -rn "devc-vscode" herdr-vscode/src --include=*.ts` shows only the `// Copied from` /
       `// Ported from` header lines (no imports)
 - [ ] Manual, host: with Claude in a host herdr session following its pane in Pane Context, open a
       file in its repo, click `+` on lines 19–21, ask a question → the thread is titled
@@ -443,3 +443,85 @@ These results decide the live suite's scope (below) and go in Implementation not
 - `devc-vscode/src/agentReview.ts`, `devc-vscode/src/herdr.ts`, `devc-vscode/package.json` (read only:
   the source of the port)
 - `.plans/PLAN.md` (phase 21 status)
+
+## Implementation notes
+
+### Live probe (herdr 0.9.5, throwaway `hv-test` in an isolated `HOME` at `/tmp/hvt`)
+
+1. `agent.prompt` to a plain shell pane (`w1:p1`, no agent): `{"code":"agent_not_found","message":"agent target w1:p1 not found"}`.
+   A pane id that does not exist (`w1:p99`, `w9:p1`) gives the same code (`agent target w1:p99 not found`). No other code
+   to map: `agent_not_found` covers both.
+2. A POSIX `sh` script named `claude` (in `<home>/.local/bin`), run in a split pane by `pane.send_text "claude\r"`, **is
+   detected**: `agent.list` / `agent.get` show `"agent":"claude","agent_status":"unknown","state_change_seq":0`; the
+   snapshot's pane gets `"agent":"claude"`. After the first `agent.prompt` herdr reports it `idle` (`state_change_seq` 1).
+3. A 3-line `agent.prompt` reached the fake as exactly three lines, `line one\n…\nline three\n`: **no bracketed paste
+   markers** (the fake never enables bracketed paste mode), lines split at `\n`, and a final Enter after the last line.
+   The reply (`ok`) was written to the path in the prompt. A 150-line prompt was accepted (`agent_prompted`) and arrived as
+   150 lines. With the pane reported `blocked` (`pane.report_agent`), `agent.prompt` gave
+   `{"code":"agent_blocked","message":"agent w1:p2 is blocked and requires interactive input"}`; reported `working`, it
+   was accepted and delivered. A successful call returns `{"type":"agent_prompted","agent":{…}}`.
+
+So the live suite runs the full round trip on the fake agent, and checks `agent_not_found` (plain pane) and
+`agent_blocked` (a reported `blocked`) mapped through real bridge errors.
+
+### Status (2026-10-31)
+
+Implemented. Everything but the ten Manual items was run and passes; those need a person in a VS Code window (and a
+dev container, devc-vscode, a real Claude, or an SSH host for some), so they stay unticked and the plan stays out of
+`implemented/`. No Docker and no SSH host here: container and SSH mapping has unit tests only.
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 288 passing, 53 pending (opt-in live suites); before this
+  phase 271 / 50. No dependencies added. `git diff --stat -- devc-vscode` empty.
+- `src/test/agentReview.test.ts` (15 tests): the prompt contract, side and thread labels, `containerPathOf` /
+  `environmentPathOf` (every cell, with and without the container label query, `herdr-git` after `toString()`), ranges,
+  candidates and picker items, choice order, the listing parser, failure messages; and the extension-host round trip on
+  a real `CommentController` with a fake model and a real `LocalShell` watcher on a temp reply root (reply shown 954 ms
+  after the file was written; the rewrite updates it; `agent_blocked` → `Not sent`; Resend; Delete Thread removes the
+  directory; after the last reply the watcher exits with code 0 and `pgrep -f <root>` finds no loop left); plus
+  `agent_not_found` clearing `hasAgent`, the follow-up form, `pane.moved`, and Show Agent on a gone pane.
+- Live (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`, fresh `hv-test` with one workspace): `liveAskAgent` alone 3/3; one full run
+  336 passing, 4 pending, 1 failing: the pre-existing `live model … lists only the isolated session` (the home lists
+  `hv-ctl` too). None of the known-flaky tests failed in that run. Live measurements: the fake `claude` (run by absolute
+  path from a temp directory) was detected in 809–916 ms; a plain shell pane gives `agent_not_found` (mapped to
+  `That agent is gone. …`); the fake received the exact prompt and its `ok` reply showed in the real thread 50 ms after
+  the prompt arrived (the watcher's first listing); a `pane.report_agent` `blocked` gave `Not sent` with the
+  `agent_blocked` message, and Resend after `idle` delivered. `hv-test` and `hv-ctl` were stopped and deleted, and
+  `/tmp/hvt` and `/tmp/herdr-vscode` removed.
+- `grep -rn "devc-vscode" herdr-vscode/src --include=*.ts`: the header lines, plus two string literals in tests that are
+  not imports: the parser test's `/tmp/devc-vscode/review/…` path (which the Validation asks for) and the pre-existing
+  `remoteFs.test.ts` title `errors from stderr map as in devc-vscode`.
+
+### Deviations and decisions
+
+- **Commands are registered by `extension.ts`** through `controller.registerCommands()`, not in the constructor, so the
+  extension-host tests can make their own controllers (same id) beside the extension's without a duplicate-command error.
+  `submit`, `resend`, `showAgent`, `deleteThread`, `askAboutSelection` and `watcherProcess` are public for the tests.
+- The watch script quotes the root: `cksum '/tmp/herdr-vscode/review'/*/*.md` (same glob, safe for a test root).
+- **Stopping a watcher** closes its stdin and kills it only if it is still running 2 s later (`endConnection`, as the
+  bridge does). devc-vscode's `stdin.end(); kill()` can race on this machine (not measured, by reading): a `kill` that
+  lands before `cat` sees EOF ends `sh` without running `kill $loop`, which would orphan the loop on the host.
+  (Through `docker exec` the kill never reaches the remote process, so devc-vscode does not hit it.)
+- **A rewrite after the watcher stopped** is not seen until the next send in that environment starts it again: the
+  contract stops a watcher once nothing is pending. The round-trip test keeps a second thread pending to cover the rewrite.
+- A placeholder is not put over a reply that a watcher already running in that environment read first (a fast agent).
+- Each question records its environment and agent kind; a watcher's pending check and a reply's author use those, so a
+  follow-up to an agent in another environment does not orphan the first one's pending reply.
+- Choosing a candidate needs no separate "still hasAgent / still connected" check: candidates are agent rows of connected
+  snapshots only. A followed pane key that is not a candidate (a shell, or an agent that cannot see the file) is skipped.
+- The picker's `detail` is the Agents row description as `agentRows(…, 'all')` builds it, which includes the state
+  (`<row label> › <space> · <state>[ · <title>]`), not only `<row label> › <space>[ · <title>]`.
+- `herdr.askAgent`'s range comes from `selectedLines`; the thread label is set there (`Ask agent · <lines>`), and the side
+  label is appended after the lines when it is not the working tree.
+- No thread state is keyed by pane id across a herdr restart: a thread whose pane is gone simply has no candidate under
+  that ref and falls through the choice order. Nothing is persisted.
+
+### For later phases
+
+- Phase 22 (mirror fidelity): nothing here touches tiles or mirroring. Ask Agent follows `pane.moved` for its threads and
+  last pick; a pane move made by mirror-fidelity drags reaches it through the same event.
+- Phase 23 (sidebar config): the picker's items reuse `agentRows` rows (label and description) and the Agents view's
+  order (`sortAndFilterAgents(rows, 'all')`) through `agentPickItems` in `src/agentReview.ts`, and the thread label uses
+  the row label (`paneLabel`). If phase 23 changes how `agentRows` builds labels or descriptions, the picker and thread
+  titles follow, and `src/test/agentReview.test.ts` ("candidates carry the environment path") pins the current strings.

@@ -146,6 +146,38 @@ The last two have no language servers, Source Control or search, since those nee
 coreutils and findutils there (BusyBox, as on Alpine, is not supported). A save overwrites in place and is not atomic.
 An open editor of such a file notices outside changes within about 5 s (`mtime`, at 1 s resolution, or size).
 
+## Ask an agent about code
+
+Ask a herdr agent about lines of code from the editor, in a comment thread. Click the `+` in the gutter (or
+select lines and run **Ask herdr Agent About Selection** from the editor's context menu, which skips VS Code's
+provider picker), write the question and **Ask Agent**. The thread is titled
+`Ask agent · claude (v3_auth) · lines 19–21`: the question shows as yours, then `claude` · *Waiting for reply…*,
+which the agent's answer replaces. Follow-ups in the thread go to the same agent.
+
+- **Where:** files on this machine, VS Code Git and GitHub Pull Request diff sides, and Pane Context's container,
+  SSH and `HEAD` documents, whenever an agent in a connected session can see the file: one on this machine, one in a
+  dev container that bind-mounts it (or whose own file it is), or one on that SSH host. Other files get no `+`.
+- **Which agent:** the thread's own while its pane is there; else the pane Pane Context follows, if it is an agent
+  that can see the file; else the only one that can; else the one you picked last in this window; else a picker
+  (**Which agent should answer?**).
+- **What is sent:** the question goes straight into the agent's pane (herdr's `agent.prompt`), with the file's path
+  **as the agent's environment sees it** (the container path for a container agent), the lines, which version of the
+  file it is (working tree, index, a commit, a PR side), and the code (up to 200 lines). Nothing else reaches the agent:
+  no selection tracking, no open files. The pane is not focused; **Show Agent** on the thread opens it (per
+  `herdr.openPaneIn`).
+- **The answer** is a Markdown file the agent writes to `/tmp/herdr-vscode/review/<thread>/<n>.md` in its
+  environment; it shows in the thread within about a second, and again if the agent rewrites it. **Delete Thread**
+  removes the thread and its files. Threads are kept in this window only, never posted to GitHub, and are gone on reload.
+- **Not sent:** when the agent is waiting on a prompt in its pane (`claude is waiting on a prompt in its pane. Answer
+  it, then Resend.`), when its pane is gone, or when herdr fails, the question is marked `Not sent`; **Resend** on it
+  tries again.
+
+Claude Code in its default permission mode asks before writing outside the project, so the answer waits until you
+approve the write to `/tmp/herdr-vscode/review/…` in the agent's pane. In auto mode it does not wait.
+
+With devc-vscode also installed, a container-mounted file's `+` offers both **Agent (devc)** and **Agent (herdr)**;
+each answers in its own threads.
+
 ## Requirements
 
 - herdr **0.9.5 or later** in each environment, on `PATH` or in `~/.local/bin`. Older herdr
@@ -195,7 +227,9 @@ model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.t
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, Layout tabs, dragging panes into them, Pane Context, and it stops and restarts that session's server. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
+  takeover, restore, Layout tabs, dragging panes into them, Pane Context, and it stops and restarts that session's server.
+  Ask Agent runs a fake `claude` (a `sh` loop) in a pane of `hv-test` and prompts only that pane; its replies go to
+  this machine's `/tmp/herdr-vscode/review`, and are removed afterwards. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
   bytes).
 
 Open `herdr-vscode/` as the folder in VS Code and press <kbd>F5</kbd> (**Run Extension**) to build

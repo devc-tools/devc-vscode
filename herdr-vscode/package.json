@@ -298,6 +298,33 @@
         "command": "herdr.cancelPlacement",
         "title": "Cancel Placing Pane",
         "category": "herdr"
+      },
+      {
+        "command": "herdr.askAgent",
+        "title": "Ask herdr Agent About Selection",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.agentReview.submit",
+        "title": "Ask Agent",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.agentReview.showAgent",
+        "title": "Show Agent",
+        "category": "herdr",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "herdr.agentReview.delete",
+        "title": "Delete Thread",
+        "category": "herdr",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "herdr.agentReview.resend",
+        "title": "Resend",
+        "category": "herdr"
       }
     ],
     "menus": {
@@ -460,6 +487,38 @@
           "group": "2_edit@2"
         }
       ],
+      "editor/context": [
+        {
+          "command": "herdr.askAgent",
+          "when": "herdr.hasAgents && resourceScheme =~ /^(file|git|review|pr|herdr-container|herdr-ssh|herdr-git)$/",
+          "group": "herdr@1"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "herdr.agentReview.submit",
+          "when": "commentController == herdr.agentReview"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "herdr.agentReview.showAgent",
+          "when": "commentController == herdr.agentReview && commentThread =~ /hasAgent/",
+          "group": "inline"
+        },
+        {
+          "command": "herdr.agentReview.delete",
+          "when": "commentController == herdr.agentReview",
+          "group": "inline"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "herdr.agentReview.resend",
+          "when": "commentController == herdr.agentReview && comment == failed",
+          "group": "inline"
+        }
+      ],
       "commandPalette": [
         {
           "command": "herdr.openTab",
@@ -547,6 +606,26 @@
         },
         {
           "command": "herdr.cancelPlacement",
+          "when": "false"
+        },
+        {
+          "command": "herdr.askAgent",
+          "when": "herdr.hasAgents && editorIsOpen"
+        },
+        {
+          "command": "herdr.agentReview.submit",
+          "when": "false"
+        },
+        {
+          "command": "herdr.agentReview.showAgent",
+          "when": "false"
+        },
+        {
+          "command": "herdr.agentReview.delete",
+          "when": "false"
+        },
+        {
+          "command": "herdr.agentReview.resend",
           "when": "false"
         }
       ]

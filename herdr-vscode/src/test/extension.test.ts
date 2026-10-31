@@ -186,4 +186,66 @@ suite('herdr-vscode', () => {
 		const left = await vscode.workspace.openTextDocument(vscode.Uri.parse('herdr-git://container:gone/r/a.ts?HEAD#2'));
 		assert.strictEqual(left.getText(), '');
 	});
+
+	test('ask agent: commands, menus and when clauses; no devc ids', async () => {
+		const ext = extension();
+		await ext.activate();
+		const contributed = ext.packageJSON.contributes;
+		const ids = ['herdr.askAgent', 'herdr.agentReview.submit', 'herdr.agentReview.showAgent', 'herdr.agentReview.delete', 'herdr.agentReview.resend'];
+		const commands = contributed.commands as { command: string; title: string; icon?: string }[];
+		assert.deepStrictEqual(
+			ids.map((id) => {
+				const c = commands.find((x) => x.command === id);
+				return [c?.title, c?.icon];
+			}),
+			[
+				['Ask herdr Agent About Selection', undefined],
+				['Ask Agent', undefined],
+				['Show Agent', '$(terminal)'],
+				['Delete Thread', '$(trash)'],
+				['Resend', undefined],
+			],
+		);
+		const registered = new Set(await vscode.commands.getCommands(true));
+		for (const id of ids) {
+			assert.ok(registered.has(id), id);
+		}
+		const menu = (name: string) => (contributed.menus[name] as { command: string; when: string; group?: string }[]).map((m) => [m.command, m.when, m.group]);
+		assert.deepStrictEqual(menu('editor/context'), [
+			['herdr.askAgent', 'herdr.hasAgents && resourceScheme =~ /^(file|git|review|pr|herdr-container|herdr-ssh|herdr-git)$/', 'herdr@1'],
+		]);
+		assert.deepStrictEqual(menu('comments/commentThread/context'), [['herdr.agentReview.submit', 'commentController == herdr.agentReview', undefined]]);
+		assert.deepStrictEqual(menu('comments/commentThread/title'), [
+			['herdr.agentReview.showAgent', 'commentController == herdr.agentReview && commentThread =~ /hasAgent/', 'inline'],
+			['herdr.agentReview.delete', 'commentController == herdr.agentReview', 'inline'],
+		]);
+		assert.deepStrictEqual(menu('comments/comment/title'), [['herdr.agentReview.resend', 'commentController == herdr.agentReview && comment == failed', 'inline']]);
+		const palette = menu('commandPalette').filter(([c]) => ids.includes(c!));
+		assert.deepStrictEqual(palette, [
+			['herdr.askAgent', 'herdr.hasAgents && editorIsOpen', undefined],
+			['herdr.agentReview.submit', 'false', undefined],
+			['herdr.agentReview.showAgent', 'false', undefined],
+			['herdr.agentReview.delete', 'false', undefined],
+			['herdr.agentReview.resend', 'false', undefined],
+		]);
+		// The editor/context regex as VS Code reads it.
+		const scheme = new RegExp(/resourceScheme =~ \/(.*)\/$/.exec(menu('editor/context')[0][1]!)![1]);
+		for (const ok of ['file', 'git', 'review', 'pr', 'herdr-container', 'herdr-ssh', 'herdr-git']) {
+			assert.ok(scheme.test(ok), ok);
+		}
+		for (const no of ['untitled', 'vscode-remote', 'gitx', 'xfile']) {
+			assert.ok(!scheme.test(no), no);
+		}
+		const everyId = JSON.stringify(contributed).match(/"(?:command|id|view)":"[^"]*"/g) ?? [];
+		assert.deepStrictEqual(everyId.filter((x) => x.includes('"devc-')), []);
+		assert.ok(!(ext.packageJSON.activationEvents as string[]).some((e) => e.includes('agentReview')), 'no new activation events');
+	});
+
+	test('ask agent: the command runs with no agent (discovery off)', async () => {
+		await extension().activate();
+		const doc = await vscode.workspace.openTextDocument({ content: 'x' });
+		await vscode.window.showTextDocument(doc);
+		await vscode.commands.executeCommand('herdr.askAgent');
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+	});
 });

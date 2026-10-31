@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { execDocker } from './docker';
 import { Environment, Environments, readSettings } from './environments';
+import { GIT_SCHEME, parseGitHeadUri } from './git';
 import { RemoteShell } from './remoteShell';
 
 /** Files in a dev container, outside its bind mounts (`src/remoteFs.ts`). */
@@ -51,6 +52,54 @@ export function hostPathOf(containerPath: string, mounts: readonly BindMount[]):
 	}
 	const rest = containerPath.slice(holder.destination.replace(/\/+$/, '').length);
 	return `${holder.source.replace(/\/+$/, '')}${rest}` || '/';
+}
+
+/** A host path inside a container, through the mount with the longest source that holds it. */
+export function containerPathOf(hostPath: string, mounts: readonly BindMount[]): string | undefined {
+	const holder = mounts
+		.filter((m) => isUnder(hostPath, m.source))
+		.sort((a, b) => b.source.replace(/\/+$/, '').length - a.source.replace(/\/+$/, '').length)[0];
+	if (!holder) {
+		return undefined;
+	}
+	const rest = hostPath.slice(holder.source.replace(/\/+$/, '').length);
+	return `${holder.destination.replace(/\/+$/, '')}${rest}` || '/';
+}
+
+/** Schemes whose `uri.path` is a host path: files, VS Code Git diff sides, GitHub PR diff sides. */
+const HOST_PATH_SCHEMES: ReadonlySet<string> = new Set(['file', 'git', 'review', 'pr']);
+
+/** What {@link environmentPathOf} needs of an environment. */
+export type PathEnvironment = Pick<Environment, 'key' | 'kind' | 'alias' | 'containerId'>;
+
+/**
+ * A document's path as an environment sees it, or undefined when it cannot.
+ * A container URI's `?{"label":…}` query plays no part, so URIs from before it
+ * existed map too.
+ */
+export function environmentPathOf(uri: vscode.Uri, env: PathEnvironment, mounts: readonly BindMount[]): string | undefined {
+	if (HOST_PATH_SCHEMES.has(uri.scheme)) {
+		switch (env.kind) {
+			case 'host':
+				return uri.path;
+			case 'container':
+				return containerPathOf(uri.path, mounts);
+			default:
+				return undefined;
+		}
+	}
+	switch (uri.scheme) {
+		case CONTAINER_SCHEME:
+			return env.kind === 'container' && !!env.containerId && uri.authority.toLowerCase() === env.containerId.slice(0, 12).toLowerCase() ? uri.path : undefined;
+		case SSH_SCHEME:
+			return env.kind === 'ssh' && !!env.alias && uri.authority.toLowerCase() === env.alias.toLowerCase() ? uri.path : undefined;
+		case GIT_SCHEME: {
+			const parsed = parseGitHeadUri(uri);
+			return parsed && parsed.envKey.toLowerCase() === env.key.toLowerCase() ? `${parsed.toplevel}/${parsed.file}` : undefined;
+		}
+		default:
+			return undefined;
+	}
 }
 
 /** What {@link environmentUri} needs of an environment. */

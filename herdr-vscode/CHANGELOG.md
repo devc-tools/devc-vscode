@@ -4,6 +4,11 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Ask Agent**: comment threads on editor lines (the gutter `+`, or **Ask herdr Agent About Selection**) that ask a
+  herdr agent on this machine, in a dev container or on an SSH host about the code, with the file's path as that
+  agent sees it; the agent's answer shows as a reply in the thread. **Show Agent**, **Delete Thread**, **Resend**.
+  Ported from devc-vscode's agent review comments; both can be installed together.
+
 - Pane Context: **Changed in This Pane · since 10:31**, every change in the pane's worktree since you first
   followed it there (kept across reloads; **Reset Baseline**; commits since counted), above the repo's whole
   status, now **All Changes** (collapsed). **Open Changes** on both.

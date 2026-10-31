@@ -555,3 +555,59 @@ against the pane's directory), checks `test -e`, then `test -d`. A file opens th
 with the selection at `line:col`; a directory is revealed in Files when under the root.
 Besides the regex itself, a match in a token with `://` is dropped, as is a number like `1.2.3`, and a trailing full stop
 is not part of the path. Cell positions come from `getCell`, since a wide character is two cells and one string unit.
+
+## Ask Agent
+
+`src/agentReview.ts`, copied from devc-vscode's `agentReview.ts` and adapted. One comment controller,
+`herdr.agentReview` (label `Agent (herdr)`).
+
+### Path mapping
+
+`environmentPathOf(uri, env, mounts)` in `src/paths.ts` gives a document's path in an environment, or nothing:
+
+| `uri.scheme` | host | container | SSH |
+| --- | --- | --- | --- |
+| `file`, `git`, `review`, `pr` (`uri.path` is the host path) | `uri.path` | `containerPathOf(uri.path, mounts)` | — |
+| `herdr-container` | — | `uri.path` when the authority is this container's 12-char id | — |
+| `herdr-ssh` | — | — | `uri.path` when the authority is this alias (ignoring case) |
+| `herdr-git` | `<toplevel>/<file>` when the authority is this environment's key (ignoring case) | same | same |
+
+`containerPathOf` is `hostPathOf` backwards: the bind mount with the longest `Source` holding the path. A container URI's
+`?{"label":…}` query plays no part. A **candidate** is an agent row (`agentRows` over every connected session) whose
+session's environment maps the document. The commenting range is the whole document when there is a candidate, else none.
+VS Code has no change event for commenting ranges: the controller re-assigns `commentingRangeProvider` (the same object)
+when the set of environments with an agent changes, which also sets `herdr.hasAgents`, and on every Docker container
+event (mounts may have changed).
+
+### Choosing and sending
+
+Each send (first, follow-up, Resend) chooses again: the thread's pane if it is still a candidate; Pane Context's followed
+pane; the only candidate; the window's last pick; else a QuickPick in the Agents view's order. A `pane.moved` event moves
+a thread's pane and the last pick to the new id.
+
+The prompt goes through the session's bridge, as `agent.prompt` with `{"target":"<pane id>","text":"<prompt>"}` and no
+`wait`, the operation behind `herdr agent prompt`. herdr types it into the pane line by line with a final Enter (measured
+with a fake agent: no bracketed-paste markers when the program has not asked for them). The first line is a tag,
+`[herdr-vscode review <thread id>#<n>]`. Before sending, `mkdir -p /tmp/herdr-vscode/review/<thread id>` runs in the
+agent's environment. herdr's error codes: `agent_blocked` (the agent is at a prompt), `agent_not_found` (no agent in
+that pane, including a pane that is gone or a plain shell); anything else is shown as herdr's message.
+
+### Replies
+
+One watcher per environment, started by a successful send and stopped when no thread waits on a reply there, when the
+environment goes, or on deactivate; if it ends on its own while replies are awaited, it restarts after 5 s. It is a
+`sh -c` script through the environment's shell (this machine's too): a background loop runs
+`cksum /tmp/herdr-vscode/review/*/*.md | tr '\n' ';'` every second and prints the listing when it changes; closing its
+stdin ends it (`docker exec` and `ssh` never signal the remote process). Each listing entry whose crc or size changed,
+for a thread this window knows, is read with `cat` and replaces that question's placeholder or earlier reply. A change
+made while no reply is awaited in that environment (the watcher stopped) is seen only after the next send there.
+
+Claude Code in its default permission mode asks before writing outside the project, so the reply waits on that approval
+in the pane; in auto mode it does not.
+
+### Coexisting with devc-vscode
+
+devc-vscode has the same feature for its dev container agents. Every id here is `herdr.*`, the label is `Agent (herdr)`
+(devc's is `Agent (devc)`), the reply root `/tmp/herdr-vscode/review` (devc's `/tmp/devc-vscode/review`) and the tag
+`[herdr-vscode review …]` (devc's `[devc review …]`), so each watcher ignores the other's files. Context values
+(`failed`, `hasAgent`) are the same strings, but every menu is scoped by `commentController == herdr.agentReview`.
