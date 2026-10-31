@@ -20,6 +20,20 @@
 
 - [herdr Pane Context](herdr-pane-context.md) — a view of the followed pane's repo, changes and files (local and bind-mounted paths as plain files; other container and SSH paths through read-write providers ported from devc-vscode), with pin, Add to Workspace, Split Pane Here, and path links in tiles.
 
+- [herdr Layout Drag and Drop](herdr-layout-drag-drop.md) — drag panes from Spaces, Agents and Pane Context into a Layout tab (a tree drag arms a placement the Layout panel completes, since VS Code can't drop a tree drag into a webview), onto Golden Layout's own drop zones; drag tiles between Layout tabs.
+
+- [herdr Sidebar Triage](herdr-sidebar-triage.md) — Agents filter quick pick with counts, a derived Done state, time in state, this-session / all-sessions scope; branch and git status on space rows; tab summaries; Start for a dev container's herdr; a session status bar item.
+
+- [herdr Pane Changes](herdr-pane-changes.md) — Pane Context's "Changed in This Pane" since a per-pane git baseline (full status kept as "All Changes"), git markers in Files, `devc:` / `ssh:` labels for remote files, Open in Source Control and Terminal Here on the repo row, same / other worktree on other panes.
+
+- [herdr Ask Agent](herdr-ask-agent.md) — comment threads on editor lines that ask a herdr agent in any environment (`agent.prompt` over the bridge), the answer coming back as a thread reply; ported from devc-vscode's agent review comments.
+
+- [herdr Mirror Fidelity](herdr-mirror-fidelity.md) — mirrored tabs mirror both ways: splitter drags set herdr's split ratios, tile drags swap or move panes in herdr, maximise ↔ herdr zoom.
+
+- [herdr Sidebar Config](herdr-sidebar-config.md) — Spaces and Agents rows follow the `[ui.sidebar.*]` rows in this machine's herdr config.toml, mapping herdr's row tokens onto labels, icons and descriptions.
+
+- [herdr SSH](herdr-ssh.md) — live checks and fixes for SSH hosts across every herdr-vscode feature, plus Start / Stop on SSH sessions. Blocked until a reachable SSH host with herdr is available.
+
 ### Completed
 
 - [herdr Sidebar](implemented/herdr-sidebar.md) — herdr-vscode's Sessions (host, SSH, dev containers), Spaces (selected session's spaces → tabs → panes) and Agents (all sessions, blocked first, badge) views over `herdr remote-api-bridge`. ✅ Done (SSH not tested live, deferred)
@@ -53,3 +67,10 @@
 | 15 | [herdr-mirrored-tabs.md](herdr-mirrored-tabs.md) | herdr tab as an editor tab of live pane tiles, synced with herdr (depends on phase 14) | implemented, manual checks pending |
 | 16 | [herdr-layout-tabs.md](herdr-layout-tabs.md) | User-built Layout tabs of any panes; `herdr.openPaneIn` (depends on phase 15) | implemented, manual checks pending |
 | 17 | [herdr-pane-context.md](herdr-pane-context.md) | Pane Context view: repo, changes, files of the followed pane; terminal links (depends on phase 15) | implemented, manual checks pending |
+| 18 | [herdr-layout-drag-drop.md](herdr-layout-drag-drop.md) | Drag panes from the trees into Layout tabs; tiles between Layout tabs (depends on phase 16) | |
+| 19 | [herdr-sidebar-triage.md](herdr-sidebar-triage.md) | Agents filters with counts, done, time in state, scope; space git, tab summaries, container Start, status bar (depends on phase 14) | |
+| 20 | [herdr-pane-changes.md](herdr-pane-changes.md) | Pane Context: changes since a baseline, git markers, remote labels, repo actions (depends on phase 17) | |
+| 21 | [herdr-ask-agent.md](herdr-ask-agent.md) | Ask a herdr agent from editor comment threads (depends on phases 17 and 20) | |
+| 22 | [herdr-mirror-fidelity.md](herdr-mirror-fidelity.md) | Mirrored tabs: split ratios, pane moves and zoom both ways (depends on phase 15) | |
+| 23 | [herdr-sidebar-config.md](herdr-sidebar-config.md) | Sidebar rows from herdr's `[ui.sidebar.*]` config (depends on phase 19) | |
+| 24 | [herdr-ssh.md](herdr-ssh.md) | SSH hosts verified live and fixed; SSH session Start / Stop (blocked on a reachable host) | |
