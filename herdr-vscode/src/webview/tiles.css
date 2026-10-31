@@ -1,0 +1,221 @@
+/* The tiles webview: Golden Layout themed with VS Code's variables only. */
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+}
+
+body {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	height: 100vh;
+}
+
+[hidden] {
+	display: none !important;
+}
+
+/* Toolbar */
+
+#toolbar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+#breadcrumb {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--vscode-tab-inactiveForeground);
+}
+
+#toolbar button,
+.tile-overlay button {
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 2px;
+	padding: 1px 8px;
+	background: transparent;
+	color: var(--vscode-tab-activeForeground);
+	font: inherit;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+#toolbar button:hover,
+.tile-overlay button:hover {
+	border-color: var(--vscode-focusBorder);
+}
+
+#tiles {
+	position: relative;
+	min-height: 0;
+	overflow: hidden;
+}
+
+#message {
+	padding: 20px;
+	color: var(--vscode-tab-inactiveForeground);
+}
+
+/* Golden Layout */
+
+.lm_goldenlayout,
+.lm_content {
+	background: var(--vscode-editor-background);
+}
+
+.lm_splitter {
+	background: var(--vscode-panel-border);
+}
+
+.lm_splitter:hover,
+.lm_splitter.lm_dragging {
+	background: var(--vscode-focusBorder);
+}
+
+.lm_header {
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.lm_header .lm_tabs {
+	height: 100%;
+}
+
+.lm_header .lm_tab {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	height: 100%;
+	box-sizing: border-box;
+	padding: 0 8px;
+	color: var(--vscode-tab-inactiveForeground);
+	cursor: default;
+}
+
+.lm_header .lm_tab .lm_title {
+	flex: none;
+}
+
+/* One tile per stack here: the stack's close control is the tile's, so the tab needs none. */
+.lm_header .lm_tab .lm_close_tab {
+	display: none !important;
+}
+
+.lm_stack:has(.tile-focused) > .lm_header {
+	box-shadow: inset 0 -1px 0 var(--vscode-focusBorder);
+}
+
+.lm_stack:has(.tile-focused) > .lm_header .lm_tab {
+	color: var(--vscode-tab-activeForeground);
+}
+
+.lm_header .lm_controls {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.lm_header .lm_controls > * {
+	width: 20px;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: var(--vscode-tab-inactiveForeground);
+}
+
+.lm_header .lm_controls > *:hover {
+	color: var(--vscode-tab-activeForeground);
+}
+
+.lm_header .lm_maximise::before {
+	content: '\2922';
+}
+
+.lm_maximised .lm_header .lm_maximise::before {
+	content: '\2921';
+}
+
+.lm_header .lm_controls .lm_close::before {
+	content: '\00d7';
+	font-size: 1.2em;
+}
+
+/* Tile headers */
+
+.tile-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	box-sizing: border-box;
+	border-radius: 50%;
+	border: 1px solid var(--vscode-tab-inactiveForeground);
+}
+
+.tile-dot-blocked {
+	background: var(--vscode-charts-orange);
+	border-color: var(--vscode-charts-orange);
+}
+
+.tile-dot-working {
+	background: var(--vscode-charts-blue);
+	border-color: var(--vscode-charts-blue);
+}
+
+.tile-dot-done {
+	background: var(--vscode-charts-green);
+	border-color: var(--vscode-charts-green);
+}
+
+.tile-dot-shell {
+	border-radius: 1px;
+	opacity: 0.6;
+}
+
+.tile-detail {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	opacity: 0.6;
+}
+
+/* Tile bodies */
+
+.tile-host {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+.tile-term {
+	position: absolute;
+	inset: 0;
+}
+
+.tile-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	background: var(--vscode-editor-background);
+	opacity: 0.95;
+}

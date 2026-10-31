@@ -51,4 +51,16 @@ suite('herdr-vscode', () => {
 		await vscode.commands.executeCommand('herdr.agents.showBlocked');
 		await vscode.commands.executeCommand('herdr.agents.showAll');
 	});
+
+	test('mirrored tabs: commands, serializer activation, no Attach in Terminal', async () => {
+		const ext = extension();
+		await ext.activate();
+		const registered = new Set(await vscode.commands.getCommands(true));
+		assert.ok(registered.has('herdr.openTab'));
+		assert.ok(registered.has('herdr.openPaneTab'));
+		assert.ok(![...registered].some((c) => c.startsWith('herdr.attach')));
+		assert.ok((ext.packageJSON.activationEvents as string[]).includes('onWebviewPanel:herdr.tiles'));
+		// Without the session connected (the test host discovers nothing) nothing opens.
+		await vscode.commands.executeCommand('herdr.openPaneTab', 'host/none', 'w1:p1');
+	});
 });

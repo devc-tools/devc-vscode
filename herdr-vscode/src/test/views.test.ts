@@ -1,10 +1,12 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { Environment } from '../environments';
-import { attachCommand } from '../extension';
+import { focusedPaneStatus } from '../focus';
 import { LocalShell } from '../remoteShell';
 import { EnvState, SessionConnection } from '../sessions';
 import { countsDescription, statusIconSpec, statusRank, worstStatus } from '../status';
+import { eventTouchesTab, panelTitle, tileMetas } from '../tilesPanel';
+import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { agentRows, blockedCount, sortAndFilterAgents } from '../views/agentsView';
 import { effectiveSelection, groupOf, sessionRows } from '../views/sessionsView';
 import { buildSpaces, spacesTreeItem } from '../views/spacesView';
@@ -247,19 +249,50 @@ suite('Sessions rows', () => {
 		assert.strictEqual(effectiveSelection(undefined, states, () => undefined), undefined);
 	});
 
-	test('attach commands', () => {
-		const settings = { dockerPath: 'docker', sshPath: 'ssh', controlDir: undefined };
-		assert.strictEqual(
-			attachCommand({ session: 'code-wksp' }, { kind: 'host' }, settings),
-			`sh -c 'PATH="$HOME/.local/bin:$PATH"; exec herdr "$@"' herdr --session 'code-wksp'`,
-		);
-		const container = attachCommand({ session: 'devc' }, containerEnv, settings)!;
-		assert.ok(container.startsWith('docker exec -it -u vscode 3f2a9c1b04de sh -c '), container);
-		assert.ok(container.includes('herdr --session=devc'), container);
-		const ssh = attachCommand({ session: 'default' }, { kind: 'ssh', alias: 'buildbox' }, settings)!;
-		assert.ok(ssh.startsWith('ssh -t '), ssh);
-		assert.ok(ssh.includes(' -- buildbox '), ssh);
-		assert.ok(ssh.includes("herdr --session '\\''default'\\''"), ssh);
-		assert.strictEqual(attachCommand({}, { kind: 'host' }, settings), undefined);
+	test('tab rows open the mirrored tab', () => {
+		const tab = buildSpaces(snapshot(), 'host/s')[0].children[0];
+		const item = spacesTreeItem(tab);
+		assert.strictEqual(item.command?.command, 'herdr.openTab');
+		assert.deepStrictEqual(item.command?.arguments, ['host/s', tab.tabId]);
+	});
+
+	test('re-layout events: by tab, by pane, others ignored', () => {
+		const tabOf = (id: string) => (id === 'mine' ? 't1' : id === 'other' ? 't2' : undefined);
+		const on = (event: string, data: Record<string, unknown>) => eventTouchesTab({ event, data }, 't1', tabOf);
+		assert.strictEqual(on('layout.updated', { layout: { tab_id: 't1' } }), true);
+		assert.strictEqual(on('layout.updated', { layout: { tab_id: 't2' } }), false);
+		assert.strictEqual(on('pane.created', { pane: { pane_id: 'new', tab_id: 't1' } }), true);
+		assert.strictEqual(on('pane.created', { pane: { pane_id: 'new', tab_id: 't2' } }), false);
+		assert.strictEqual(on('tab.renamed', { tab_id: 't1', label: 'x' }), true);
+		assert.strictEqual(on('pane.closed', { pane_id: 'mine' }), true);
+		assert.strictEqual(on('pane.exited', { pane_id: 'other' }), false);
+		assert.strictEqual(on('pane.closed', { pane_id: 'unknown' }), true, 'it might have been here');
+		assert.strictEqual(on('pane.moved', { pane_id: 'other' }), true, 'it may have moved out of or into this tab');
+		assert.strictEqual(on('pane.updated', { pane_id: 'mine' }), false);
+	});
+
+	test('panel title and tile headers', () => {
+		const s = snapshot();
+		assert.strictEqual(panelTitle(s, 'w2:t1'), 'main · api');
+		assert.strictEqual(panelTitle(s, 'gone'), undefined);
+		assert.deepStrictEqual(tileMetas(s, 'host/s', 'w2:t1'), [
+			{ paneKey: 'host/s|w2:p1', label: 'api-fixer', detail: 'Refactoring', status: 'working' },
+			{ paneKey: 'host/s|w2:p2', label: 'test', detail: undefined, status: 'shell' },
+		]);
+	});
+
+	test('focused pane status bar text', () => {
+		const s = snapshot();
+		assert.deepStrictEqual(focusedPaneStatus(s, 'w2:p1', 'my-session'), {
+			text: '$(circle-filled) api-fixer · working',
+			tooltip: 'my-session › api › main',
+		});
+		assert.strictEqual(focusedPaneStatus(s, 'w2:p2', 'r')?.text, '$(circle-filled) test · shell');
+		assert.strictEqual(focusedPaneStatus(s, 'gone', 'r'), undefined);
+	});
+
+	test('pane keys round-trip', () => {
+		assert.strictEqual(makePaneKey('container:abc/devc', 'w1:p2'), 'container:abc/devc|w1:p2');
+		assert.deepStrictEqual(splitPaneKey('container:abc/devc|w1:p2'), { sessionKey: 'container:abc/devc', paneId: 'w1:p2' });
 	});
 });

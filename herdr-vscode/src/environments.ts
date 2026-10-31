@@ -135,18 +135,6 @@ export class Environments implements vscode.Disposable {
 		return this.envs.get(key);
 	}
 
-	get sshPath(): string {
-		return this.settings.sshPath;
-	}
-
-	get dockerPath(): string {
-		return this.settings.dockerPath;
-	}
-
-	get sshControlDir(): string | undefined {
-		return this.controlDir;
-	}
-
 	/** First discovery, and the Docker events watcher. */
 	start(): void {
 		if (process.platform !== 'win32') {

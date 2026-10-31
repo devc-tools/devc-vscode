@@ -241,6 +241,8 @@ export class SessionConnection {
 		readonly name: string,
 		private readonly hooks: {
 			changed(): void;
+			/** Every event of this session, as it arrives. */
+			event(ev: HerdrEvent): void;
 			log(line: string): void;
 			/** Re-lists the environment; this connection is disposed if the session is gone. */
 			relist(): Promise<void>;
@@ -362,9 +364,10 @@ export class SessionConnection {
 		}, delay);
 	}
 
-	private onEvent(gen: number, _ev: HerdrEvent): void {
+	private onEvent(gen: number, ev: HerdrEvent): void {
 		if (gen === this.gen) {
 			this.scheduleSnapshot(gen, SNAPSHOT_DEBOUNCE_MS);
+			this.hooks.event(ev);
 		}
 	}
 
@@ -449,6 +452,9 @@ export class SessionModel implements vscode.Disposable {
 	private readonly listing = new Map<string, Promise<void>>();
 	private readonly changed = new vscode.EventEmitter<void>();
 	readonly onDidChange = this.changed.event;
+	private readonly events = new vscode.EventEmitter<{ sessionKey: string; event: HerdrEvent }>();
+	/** Every event of every connected session, as it arrives (`onDidChange` follows the snapshot). */
+	readonly onDidEvent = this.events.event;
 	private changeTimer: NodeJS.Timeout | undefined;
 	private readonly ticker: NodeJS.Timeout;
 	private readonly envListener: vscode.Disposable;
@@ -585,6 +591,7 @@ export class SessionModel implements vscode.Disposable {
 			}
 			const conn = new SessionConnection(key, env, name, {
 				changed: () => this.fireChanged(),
+				event: (event) => this.events.fire({ sessionKey: key, event }),
 				log: this.log,
 				relist: () => this.relist(envKey),
 			});
@@ -617,5 +624,6 @@ export class SessionModel implements vscode.Disposable {
 		this.conns.clear();
 		this.environments.dispose();
 		this.changed.dispose();
+		this.events.dispose();
 	}
 }

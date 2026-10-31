@@ -41,6 +41,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	suiteSetup(async () => {
 		conn = new SessionConnection(key, env, session, {
 			changed: () => undefined,
+			event: () => undefined,
 			log: (l) => console.log(`[live] ${l}`),
 			relist: async () => undefined,
 		});

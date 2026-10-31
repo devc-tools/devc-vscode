@@ -1,5 +1,6 @@
 **
 !dist/**/*.js
+!dist/**/*.css
 !resources/**
 !package.json
 !README.md

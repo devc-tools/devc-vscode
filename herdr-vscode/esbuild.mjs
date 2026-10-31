@@ -11,3 +11,14 @@ await esbuild.build({
 	sourcemap: true,
 	logLevel: 'info',
 });
+
+await esbuild.build({
+	entryPoints: ['src/webview/tiles.ts'],
+	outfile: 'dist/webview/tiles.js',
+	bundle: true,
+	platform: 'browser',
+	format: 'iife',
+	target: 'es2022',
+	sourcemap: true,
+	logLevel: 'info',
+});

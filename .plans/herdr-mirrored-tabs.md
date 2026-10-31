@@ -17,22 +17,22 @@ Prior art in devc-tools (`/workspaces/tools/devc-tools`): `.plans/archived/devc-
 
 ## Checklist
 
-- [ ] 1. Webview bundle: `src/webview/tiles.ts` + `src/webview/tiles.css` → `dist/webview/tiles.js`
+- [x] 1. Webview bundle: `src/webview/tiles.ts` + `src/webview/tiles.css` → `dist/webview/tiles.js`
       and `dist/webview/tiles.css` (second esbuild entry); dependencies pinned
-- [ ] 2. Pane stream manager in the extension host (`terminal session control`)
-- [ ] 3. Mirrored panel: open/reveal, `layout.export` → Golden Layout config, re-layout on events
-- [ ] 4. Tile rendering: xterm per pane, frames in, input/scroll/resize out, status dot in the
+- [x] 2. Pane stream manager in the extension host (`terminal session control`)
+- [x] 3. Mirrored panel: open/reveal, `layout.export` → Golden Layout config, re-layout on events
+- [x] 4. Tile rendering: xterm per pane, frames in, input/scroll/resize out, status dot in the
       tile header
-- [ ] 5. Panel toolbar: breadcrumb, Split Right, Split Down
-- [ ] 6. Close pane from a tile (with confirmation)
-- [ ] 7. Focus tracking (last focused pane) and the herdr status bar item
-- [ ] 8. Panel restore across reloads (`WebviewPanelSerializer`)
-- [ ] 9. Commands and menus: `herdr.openTab` (Spaces tab rows, click), `herdr.openPaneTab`
+- [x] 5. Panel toolbar: breadcrumb, Split Right, Split Down
+- [x] 6. Close pane from a tile (with confirmation)
+- [x] 7. Focus tracking (last focused pane) and the herdr status bar item
+- [x] 8. Panel restore across reloads (`WebviewPanelSerializer`)
+- [x] 9. Commands and menus: `herdr.openTab` (Spaces tab rows, click), `herdr.openPaneTab`
       (pane and agent rows, context menu)
-- [ ] 10. Tests (list under Validation)
-- [ ] 11. README (opening tabs; the pty-size caveat), CHANGELOG, `docs/how-it-works.md`
+- [x] 10. Tests (list under Validation)
+- [x] 11. README (opening tabs; the pty-size caveat), CHANGELOG, `docs/how-it-works.md`
       (streams, layout mapping, input handling as built)
-- [ ] 12. Remove **Attach in Terminal** (see Terminals live in the editor area)
+- [x] 12. Remove **Attach in Terminal** (see Terminals live in the editor area)
 
 ## Contracts
 
@@ -180,9 +180,9 @@ missing → "This herdr tab was closed.".
 
 ## Validation
 
-- [ ] `npm run build` (in `herdr-vscode/`) emits `dist/webview/tiles.js` and `dist/webview/tiles.css`;
+- [x] `npm run build` (in `herdr-vscode/`) emits `dist/webview/tiles.js` and `dist/webview/tiles.css`;
       `npx vsce ls` (in the package) lists both and no `node_modules`
-- [ ] `npm test` (in `herdr-vscode/`) passes, including unit tests for: LayoutNode → GL config
+- [x] `npm test` (in `herdr-vscode/`) passes, including unit tests for: LayoutNode → GL config
       (single pane; right split with ratio 0.6 → sizes `60%`/`40%`; nested down-in-right;
       nested right-in-right stays nested); terminal record parsing (frame, closed with each
       reason, junk line ignored); controller sharing (two tiles, one spawn; last tile closed →
@@ -206,7 +206,7 @@ missing → "This herdr tab was closed.".
       the tile
 - [ ] Manual, container and SSH: the above open-and-type check works for a container session and
       an SSH session
-- [ ] `grep -rn attachSession herdr-vscode/src herdr-vscode/package.json` prints nothing; Session
+- [x] `grep -rn attachSession herdr-vscode/src herdr-vscode/package.json` prints nothing; Session
       rows show no terminal icon
 
 ## Relevant Files
@@ -224,3 +224,114 @@ missing → "This herdr tab was closed.".
 - `herdr-vscode/src/test/*.test.ts`
 - `herdr-vscode/README.md`, `CHANGELOG.md`, `docs/how-it-works.md`
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Status (2026-10-30)
+
+Implemented; the Manual items above were not run, because they need a person in VS Code. No Docker
+and no reachable SSH host here, so the container and SSH item has no live evidence at all (the
+argv goes through the same `RemoteShell.spawn` and `herdrArgv` as the bridge). The plan stays out
+of `implemented/` until the manual pass.
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 67 passing, 21 pending (opt-in live
+  suites). `npx vsce ls`: `dist/extension.js`, `dist/webview/tiles.{js,css}`, `resources/herdr.svg`,
+  `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, and no `node_modules`, although the three
+  packages are in `dependencies`. `git diff --stat -- devc-vscode` is empty.
+- Opt-in, real extension host under xvfb with a **real webview**, against throwaway `hv-test` in an
+  isolated `HOME` (`HERDR_VSCODE_LIVE_HOME`, `src/test/liveTiles.test.ts` + `liveModel.test.ts`: 17
+  passing). What this covers, as evidence for the Manual items but not a replacement for them:
+  - three-tile arrangement from a tab with split right then split down: rectangles right, title
+    `mirror · space1`, painted in about 1 s, one controller per pane, and a framebuffer screenshot
+    of the Extension Development Host looked right (toolbar, three then four tiles, status bar
+    `hvh · shell`). The tab was opened with `panels.openTab`, not a Spaces click.
+  - the pty took the tile's size (`stty size` printed the tile's rows and cols).
+  - ArrowUp as a synthetic `keydown` on xterm's textarea reached `cat -v` as `^[[A`. **Real
+    keyboards, vim and Claude Code prompts were not tried** (no `xdotool` here).
+  - `split` message: fourth tile in 260–410 ms, beside the focused tile, existing terminals not
+    re-created. `pane.close` from outside: tile gone in 220–305 ms, others keep their terminal.
+  - Takeover by a second controller: *Opened in another viewer.*; the Reconnect message cleared it.
+    Not a second VS Code window.
+  - Golden Layout's close control: a real click reached `closePane` and the tile stayed. The test
+    host refuses modals, so **the dialog and its Close Pane button were not exercised**; the
+    `pane.close` params were, separately.
+  - Restore: `deserializeWebviewPanel` with the saved state brought tiles back. Not a real window
+    reload.
+  - After `tab.close`: *This herdr tab was closed.*, no tiles, no controllers. Session never
+    connecting: *Connecting to …*, then closed at 10 s.
+  - Closing the panel: no `--session hv-test terminal session control` in `ps` after 30–105 ms.
+  - xterm's own focus event was reported by `reveal(paneId)` on an existing and on a new panel.
+- Never run at all: Ctrl+Shift+C/V and Cmd+C/V (nothing here sends real clipboard keys), the wheel
+  in a webview, font and theme changes, maximise, the status bar click, the context menu.
+- On this machine `ps` also lists `--session devc terminal session control …`: that is the user's
+  own viewer of the live session, not the extension's. Do not count it in the `ps` check.
+
+### Deviations and decisions
+
+- **`layout.export` is wrapped:** the result is `{"type":"layout_export","layout":{…}}`, and pane
+  nodes also carry `cwd`. The contract above shows it flat. `parseLayoutExport` takes the real shape.
+- Unknown tab: `layout.export` errors with `layout_not_found`, treated as closed.
+- A re-export whose split tree is unchanged is **dropped**, not reloaded: `layout.updated` also fires
+  on focus changes, and reloading would reset splitter drags and maximise on every focus move. So
+  a drag is reset by the next real change to the tree, not by every event.
+- Besides the listed events, a re-export follows `events_lost` and any snapshot whose panes for the
+  tab differ from those on screen.
+- Frame messages also carry `cols`, `rows`: a tile that does not own the pane's size follows the
+  frame's size, as devc web does.
+- **A second tile joining a controller gets its repaint from a same-size `terminal.resize`**
+  (measured: any `terminal.resize` gives a `full:true` frame), so one spawn is enough. devc web
+  restarts the controller instead.
+- `terminal.release` makes the process exit by itself; the stdin end 2 s later is the backstop. On
+  deactivate stdin ends immediately after the release.
+- Other `terminal.closed` reasons get *Disconnected: <reason>.* with **Reconnect**. Measured:
+  `terminal <id> exited` when the app exits, `terminal attach ended: terminal <id> not found` when
+  the pane is closed. Those overlays last until the re-export removes the tile (about 200 ms).
+- A session that stops being connected tears the tiles down (*Connecting to …*) and rebuilds them
+  on reconnect, one path with restore. No content is lost: xterm has `scrollback: 0`, herdr owns
+  it. "Keep their scrollback" in the Validation list therefore means the tile keeps its terminal
+  and screen; scrolling back asks herdr.
+- Wheel: "3 lines per notch" with pixel deltas: one notch per 3 cell heights of accumulated `deltaY`,
+  so a trackpad is proportional. One command may carry several notches, capped at 30 lines.
+- Tile close: the tab's own X is hidden by CSS, since each stack has one tile and the stack's X
+  already means that tile. Middle-click on a tile tab does nothing. Clicking a header focuses
+  the tile.
+- A shell pane's dot is a dim square; the status table has no shell entry for a CSS dot.
+- Additions: Ctrl+Shift+C/V off the Mac via `vscode.env.clipboard` (plain Ctrl+C/V belong to the app,
+  and VS Code stops the browser's own paste); `TileProbe`/`probe` messages used only by the live
+  suite; `SessionModel.onDidEvent` for raw events; terminal colors from `--vscode-terminal-*`, following
+  theme changes.
+- Removed with Attach in Terminal: `attachCommand`, `sshTerminalCommand`,
+  `containerTerminalCommand`, `hostShellWord`, and the `sshPath`, `dockerPath`, `sshControlDir` getters
+  on `Environments`.
+- `src/webview/` has its own `tsconfig.json` (DOM lib, bundler resolution); `npm run compile` runs
+  both. The root config excludes only `tiles.ts`, so tests can import `webview/input.ts`.
+- Packages: `npm install` pruned `@esbuild/darwin-x64` as warned; it was restored from `npm pack` at
+  0.28.2 with no lockfile change. The lockfile still lists every esbuild platform.
+- `sideEffects: false` in golden-layout's `package.json` did **not** make esbuild drop its CSS import;
+  the base CSS is in `dist/webview/tiles.css`.
+
+### For herdr-layout-tabs and herdr-pane-context
+
+- `PaneViewer` in `src/streams.ts` is a panel, and it may hold **one tile per pane**: the webview's
+  terminal map is keyed by paneKey. A Layout panel fits as is, so long as a pane appears once in it.
+  The stream manager already shares a pane between panels of the window and handles the size owner.
+- `MirrorPanel` mixes generic webview plumbing (messages, streams, focus, ready replay) with mirror
+  logic (export, sync). Layout tabs will want the first half split into a base class. `TilesPanels`
+  and `deserializeWebviewPanel` assume `kind: "mirror"`; extend the `init` state union.
+- The webview applies whatever `layout` config it is sent, but `interceptClose` always posts
+  `closePane`, and the `.lm_close_tab` CSS assumes one tile per stack. Layout panels need different
+  close semantics, tab X's, and `reorderEnabled: true`; hang those on a class on `<body>`.
+- `loadLayout` focus restoring, the terminal map, and `tileClose` for panes missing from the new
+  config are in `applyLayout`; a Layout tab's `stateChanged` saving is not wired.
+- `pane.moved`'s event data was not measured (no way to trigger it here was tried); it always
+  re-exports. Layout tabs' "pane-move follow-up" should measure it.
+- Pane Context: `FocusTracker.onDidChangeLastFocused` fires the paneKey, `lastFocused` reads it.
+  `MirrorPanel.reveal(paneId)` / `TilesPanels.revealPane` reveal a tile. Terminal links need a link
+  provider on the `Terminal` in `createTile` in `src/webview/tiles.ts`, plus a new message; CSP has
+  no `connect-src`, so all file access goes through the host.
+- Live testing: `probe` messages read a tile's buffer, rectangles and overlay, and can press a key or
+  click close. With Xvfb's `-fbdir`, the framebuffer can be read as XWD for a screenshot.
+- Inside a herdr pane, always strip `HERDR_*` and use an isolated `HOME` for test sessions. Live
+  suites inherit the shell's `HERDR_SESSION`; `LocalShell` strips it, a bare `herdr` CLI does not.

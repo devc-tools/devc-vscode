@@ -50,6 +50,6 @@
 | 12 | [devc-web-shared-server.md](implemented/devc-web-shared-server.md) | One shared devc web for every window on a fixed port, stopped when none uses it | ✅ Done |
 | 13 | [herdr-vscode-scaffold.md](implemented/herdr-vscode-scaffold.md) | devc-vscode moved to `devc-vscode/`; empty herdr-vscode extension in `herdr-vscode/` | ✅ Done |
 | 14 | [herdr-sidebar.md](implemented/herdr-sidebar.md) | herdr-vscode Sessions / Spaces / Agents views over remote-api-bridge (depends on phase 13) | ✅ Done (SSH not tested live, deferred) |
-| 15 | [herdr-mirrored-tabs.md](herdr-mirrored-tabs.md) | herdr tab as an editor tab of live pane tiles, synced with herdr (depends on phase 14) | |
+| 15 | [herdr-mirrored-tabs.md](herdr-mirrored-tabs.md) | herdr tab as an editor tab of live pane tiles, synced with herdr (depends on phase 14) | implemented, manual checks pending |
 | 16 | [herdr-layout-tabs.md](herdr-layout-tabs.md) | User-built Layout tabs of any panes; `herdr.openPaneIn` (depends on phase 15) | |
 | 17 | [herdr-pane-context.md](herdr-pane-context.md) | Pane Context view: repo, changes, files of the followed pane; terminal links (depends on phase 15) | |

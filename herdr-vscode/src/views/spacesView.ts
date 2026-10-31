@@ -10,6 +10,7 @@ export interface PaneRef {
 }
 
 export const FOCUS_PANE_COMMAND = 'herdr.focusPane';
+export const OPEN_TAB_COMMAND = 'herdr.openTab';
 
 export interface SpaceNode {
 	type: 'space';
@@ -27,6 +28,8 @@ export interface TabNode {
 	id: string;
 	label: string;
 	focused: boolean;
+	sessionKey: string;
+	tabId: string;
 	children: PaneNode[];
 }
 
@@ -59,6 +62,8 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string): SpaceNode[]
 					id: `${sessionKey}|tab|${t.tab_id}`,
 					label: `tab · ${t.label}`,
 					focused: t.focused,
+					sessionKey,
+					tabId: t.tab_id,
 					children: snapshot.panes
 						.filter((p) => p.tab_id === t.tab_id)
 						.map(
@@ -104,6 +109,7 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			const item = new vscode.TreeItem(node.label, expand(node.focused));
 			item.id = node.id;
 			item.contextValue = 'herdr.tab';
+			item.command = { command: OPEN_TAB_COMMAND, title: 'Open herdr Tab', arguments: [node.sessionKey, node.tabId] };
 			return item;
 		}
 		case 'pane':

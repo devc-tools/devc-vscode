@@ -102,3 +102,105 @@ when its session stops and when its environment goes away.
   `circle-outline`; panes without an agent `terminal`. Sessions and spaces show their worst
   status.
 - **Agents** filter is stored in workspace state and in the context key `herdr.agentsFilter`.
+- **Spaces** tab rows run `herdr.openTab`. Pane and agent rows run `herdr.focusPane` on click and
+  have `herdr.openPaneTab` in their context menu. Session rows have no inline action.
+
+## Mirrored tabs
+
+One editor tab (`WebviewPanel`, view type `herdr.tiles`, `src/tilesPanel.ts`) mirrors one herdr tab.
+The webview (`src/webview/tiles.ts`, bundled with its CSS into `dist/webview/`; Golden Layout and
+xterm load from there, no CDN) gets its layout, frames and tile headers from the extension host and
+sends back fits, input and actions; the messages are typed in `src/tilesProtocol.ts`.
+
+### Layout mapping
+
+`layout.export` with `{"tab_id":…}` answers `{"type":"layout_export","layout":{"tab_id",
+"workspace_id","focused_pane_id","zoomed","root"}}`, where `root` is `{"type":"pane","pane_id",…}`
+or `{"type":"split","direction":"right"|"down","ratio","first","second"}`. `src/layoutMapping.ts`
+turns that into a Golden Layout config, 1:1: `right` → `row`, `down` → `column`, sizes
+`<ratio>%` and `<1−ratio>%`, a pane → a stack of one `pane` component. Same-direction splits stay
+nested.
+
+A re-export follows, debounced 100 ms, when the session emits `layout.updated`, `pane.created`,
+`pane.closed`, `pane.moved`, `pane.exited` or `tab.renamed` for this tab; an event names its tab
+directly (`tab_id`, `layout.tab_id`, `pane.tab_id`) or only a pane (`pane_id`), looked up in the
+latest snapshot. It also follows whenever a snapshot's panes for the tab differ from those on
+screen, and after `events_lost`. `layout.updated` fires for focus changes too, so a re-export whose
+split tree is unchanged is dropped, which keeps local splitter drags and maximise until the tree
+really changes.
+
+`loadLayout` destroys every component. Each panel holds one xterm `Terminal` per pane in a map, in
+an element that is moved into the new component, and restores the keyboard focus afterwards. A
+pane no longer in the layout has its terminal disposed and its stream closed.
+
+A session that is not connected shows *Connecting to …*; after 10 s, or when the session has no
+such tab (`tab.closed`, a snapshot without it, `layout_not_found`), the panel shows *This herdr tab
+was closed.* with every terminal gone and its streams released. If the session or tab comes back,
+so does the layout. This one path also serves restoring after a reload: the webview keeps
+`{"kind":"mirror","sessionKey","tabId"}` with `setState`, and the serializer hands that to a new
+panel.
+
+### Pane streams
+
+`src/streams.ts` keeps one controller per pane key (`<sessionKey>|<paneId>`) for the window, shared
+by every tile showing the pane:
+
+```
+herdr --session <S> terminal session control <pane_id> --takeover --cols <C> --rows <R>
+```
+
+run with `RemoteShell.spawn` (never a pty) through the wrapper above. A tile announces itself
+(`tileOpen`) once it has a real size, since the command needs one.
+
+- Stdout: `terminal.frame` (`full`, `width`, `height`, base64 `bytes`) and `terminal.closed`
+  (`reason`). The first frame and every frame after a `terminal.resize` is `full:true`, **even a
+  resize to the same size**, which is how a second tile joining a running controller gets a
+  complete screen without a new process.
+- Stdin: `terminal.input`, `terminal.resize` (from the most recently focused tile showing the
+  pane; 100 ms after its fit changes), `terminal.scroll`, and `terminal.release` when the last tile
+  goes, with stdin ended 2 s later (the process normally exits by itself on release). On deactivate
+  stdin ends straight after the release.
+- `terminal attach taken over`: another controller took the pane (a second window). The tile says
+  *Opened in another viewer.*, and **Reconnect** starts a new `--takeover` controller. Anything
+  else (`terminal <id> exited` when the app exits, `terminal attach ended: terminal <id> not found`
+  when the pane is closed, a process that just ended) shows *Disconnected: …*, also with
+  **Reconnect**; a pane that exited also drops out at the next re-export.
+- `terminal.resize` changes the pane's real pty size, and it persists after release.
+
+Frames go to the webview as they came, with their size: a tile that does not own the pane's size
+shows the size the pane really has. A `full` frame resets the terminal before it is written.
+
+### Input
+
+Frames are herdr's redraw, not the app's output, so xterm never learns the app's terminal modes
+(application cursor keys, bracketed paste, mouse tracking) and `terminal.input` reaches the app
+raw. Handling matches devc web's (`devc/web/static/renderer.js`, `tiles.js`):
+
+- Keys: xterm's `onData`, as is. Arrow keys always go as `ESC[A` and the like, whatever the app
+  asked for; vim, less, readline and the agent TUIs accept both forms.
+- Paste: taken before xterm sees it. A paste with a newline has `\r\n` and `\n` normalized to
+  `\r` and is wrapped in `ESC[200~`…`ESC[201~`, since the page cannot know whether the app enabled
+  bracketed paste; a single line goes as is.
+- Wheel: `terminal.scroll`, 3 lines per notch. Chromium reports notches and trackpad travel alike
+  as pixels, so a notch is 3 cell heights of accumulated `deltaY`; the remainder carries until the
+  direction reverses. xterm has no scrollback of its own (`scrollback: 0`): herdr owns it, and
+  scrolling repaints through frames.
+- Mouse clicks are not forwarded. A drag makes xterm's local selection.
+
+VS Code specifics: xterm stops the propagation of every key it turns into input, so those never
+reach VS Code's keybindings (`Ctrl+P` goes to the app, as in a terminal). Keys it does not handle,
+such as `Cmd+P`, bubble up and work. On the Mac `Cmd+C/V` reach the workbench, which sends copy
+and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, so the webview takes
+`Ctrl+Shift+C/V` itself and goes through `vscode.env.clipboard`.
+
+### Tiles and toolbar
+
+- A tile's header is the Golden Layout tab plus two elements of ours: the status dot (as in the
+  status table; square for a shell) and the faded terminal title. They follow the session model
+  with no re-layout.
+- Golden Layout's close controls are intercepted in the capture phase: its own handlers would
+  remove the tile before the user answers. The tile goes when herdr says the pane closed.
+- **Split Right** / **Split Down** call `pane.split` on the panel's focused tile, else herdr's
+  focused pane if it is in this tab, with `focus:false` and the pane's `foreground_cwd ?? cwd`.
+- The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last
+  focused pane, fires `onDidChangeLastFocused`, and shows it in the status bar.
