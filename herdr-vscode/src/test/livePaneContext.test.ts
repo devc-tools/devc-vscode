@@ -4,12 +4,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { BaselineStore, memoryMemento } from '../baselines';
 import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
 import { GitHeadContentProvider, parseGitHeadUri } from '../git';
 import { LayoutState, LayoutStore } from '../layouts';
-import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, RootNode } from '../paneContext';
+import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, RootNode, SinceNode } from '../paneContext';
 import { EnvironmentPaths } from '../paths';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
@@ -54,6 +55,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	let panels: TilesPanels;
 	let paths: EnvironmentPaths;
 	let view: PaneContextView;
+	let baselines: BaselineStore;
 	let tree: vscode.TreeView<PaneContextNode>;
 	let panel: LayoutPanel;
 	let repo: string;
@@ -117,7 +119,9 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await waitFor('panes in snapshot', 5000, () => model.connection(key)?.snapshot?.panes.filter((p) => p.tab_id === tabId).length === 2);
 
 		const noSelectionChange = new vscode.EventEmitter<void>();
+		baselines = new BaselineStore(memoryMemento());
 		view = new PaneContextView({
+			baselines,
 			model,
 			focus,
 			sessions: { selected: key, onDidChangeSelected: noSelectionChange.event },
@@ -173,6 +177,20 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		assert.strictEqual(changes[0].uri.fsPath, path.join(repo, 'src', 'auth', 'middleware.ts'));
 		const others = await view.getChildren(await group('panes'));
 		assert.deepStrictEqual(others.map((n) => n.type === 'pane' && n.ref.paneId), [p2]);
+	});
+
+	test('following the pane recorded a baseline; a change from before is only in All Changes', async () => {
+		const baseline = baselines.get(pk(p1), repo);
+		assert.ok(baseline, baselines.keys().join(', '));
+		assert.strictEqual(baseline.head, git('rev-parse', 'HEAD').trim());
+		const since = (await group('since'))!;
+		assert.match(String(since.description), /^since \d\d:\d\d$/);
+		assert.deepStrictEqual(
+			(await view.getChildren(since)).map((n) => (n as { label: string }).label),
+			[`No changes ${since.description}`],
+		);
+		const all = (await view.getChildren(await group('changes'))) as ChangeNode[];
+		assert.deepStrictEqual(all.map((c) => c.label), ['middleware.ts']);
 	});
 
 	// `Show Pane` runs the extension's own command, whose model discovers nothing here: so what it runs.
@@ -255,6 +273,22 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		assert.ok(find(exported.layout.root as never), JSON.stringify(exported.layout.root));
 		assert.strictEqual(model.connection(key)?.snapshot?.focusedPaneId !== fresh.pane_id, true, 'focus: false');
 		await req('pane.close', { pane_id: fresh.pane_id });
+	});
+
+	test('a file written from the pane is in Changed in This Pane within a poll; the earlier change is not', async () => {
+		await waitFor('p1 painted', 15000, async () => (await tileOf(p1))?.text.length);
+		const start = Date.now();
+		say(p1, `printf 'from pane\\n' > ${repo}/from-pane.txt`);
+		const rows = await waitFor('the since row', 8000, async () => {
+			const r = (await view.getChildren(await group('since'))) as SinceNode[];
+			return r.some((n) => n.label === 'from-pane.txt') && r;
+		});
+		console.log(`[live-pane-context] file from pane to Changed in This Pane: ${Date.now() - start} ms`);
+		assert.ok(!rows.some((n) => n.label === 'middleware.ts'), 'changed before following');
+		assert.strictEqual(rows.find((n) => n.label === 'from-pane.txt')?.status, 'A');
+		assert.strictEqual(fs.readFileSync(path.join(repo, 'from-pane.txt'), 'utf8'), 'from pane\n');
+		const all = (await view.getChildren(await group('changes'))) as ChangeNode[];
+		assert.ok(all.some((c) => c.label === 'middleware.ts'));
 	});
 
 	suite('links printed in a real tile', () => {

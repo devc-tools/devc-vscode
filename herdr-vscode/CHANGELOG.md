@@ -4,6 +4,15 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Pane Context: **Changed in This Pane · since 10:31**, every change in the pane's worktree since you first
+  followed it there (kept across reloads; **Reset Baseline**; commits since counted), above the repo's whole
+  status, now **All Changes** (collapsed). **Open Changes** on both.
+- Git markers (`M`, `A`, `U`, `D`, …) in Git's colours on Pane Context's Files rows and on editors of the followed
+  repo, for container and SSH files too; local repos VS Code's Git has open keep only Git's.
+- Container and SSH editors are titled `devc: <container> › /path` and `ssh: <alias> › /path`.
+- **Open in Source Control** and **Terminal Here** on Pane Context's repo row.
+- Other Panes in This Space say `same worktree` / `other worktree`.
+
 - Agents: a derived **done** state (an agent that went from working to idle, until you click into its
   tile, click its row, or herdr's focus moves to it), time in state on every row (`blocked 2m`), an
   **all sessions** / **this session** scope switch, and **Filter Agents…** (All, Blocked, Working, Done, with

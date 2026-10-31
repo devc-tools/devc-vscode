@@ -107,11 +107,25 @@ no tile in this window shows it, which **Show Pane** on the repo row fixes.
 
 - **Repo row:** the repo (or directory, outside a repo), branch, changed count, ahead and behind.
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
-  the action is there only for local paths. **Split Pane Here** makes a herdr pane below, in that folder.
-- **Changes:** click to open; **Open Changes** shows a `HEAD ↔ working tree` diff.
-- **Files:** the tree; click to open. **New File…**, **New Folder…**, **Rename…** and **Delete…** are on the
-  rows. Delete is permanent.
-- **Other Panes in This Space:** as in Spaces.
+  the action is there only for local paths. **Open in Source Control** (local repos) has VS Code's Git open the
+  repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.
+  **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area; elsewhere,
+  **Split Pane Here** makes a herdr pane below, in that folder.
+- **Changed in This Pane · since 10:31:** every file that changed in the pane's worktree since you first
+  followed the pane there, with `A`, `M` or `D` and ` · 2 commits` when HEAD moved on. Git cannot say which
+  process changed a file, so this is everything changed in that worktree since then, **whoever changed it**: two
+  agents in one worktree see each other's edits. The time is kept across reloads, per pane and repo, until the pane
+  closes or a week passes. **Reset Baseline** starts it again from now. Click to open; **Open Changes** shows a
+  `since 10:31 ↔ working tree` diff. Taking the baseline writes git objects into the repo (unreferenced, so `git gc`
+  prunes them) and never touches its index, working tree or refs.
+- **All Changes** (collapsed): the repo's whole `git status`. Click to open; **Open Changes** shows a
+  `HEAD ↔ working tree` diff.
+- **Files:** the tree; click to open. Git markers (`M`, `A`, `U`, `D`, `R`, `!`) in Git's colours, and a dot on
+  folders holding changes; the same badges show on editor tabs of those files. For a local repo that VS Code's own
+  Git has open (a workspace folder, or after **Open in Source Control**), Git's badges are shown instead of a second
+  set. **New File…**, **New Folder…**, **Rename…** and **Delete…** are on the rows. Delete is permanent.
+- **Other Panes in This Space:** as in Spaces, with `same worktree` or `other worktree` (another worktree of
+  the same repo) before the description.
 - **Paths printed in a tile are links.** `src/auth/middleware.ts:19`, `./x/y.md`, `~/n.txt` and `README.md`
   are underlined on hover, and resolved where the pane runs, against its directory. Clicking opens the file
   beside the tile at that line, reveals a directory in Files, and does nothing for a path that does not exist.
@@ -121,8 +135,12 @@ Everything it can reach is editable:
 | Where the file is | How it opens | What you get |
 | --- | --- | --- |
 | This machine; a container path on a bind mount | a plain `file:` URI | everything: language servers, Source Control, search |
-| A container path outside the mounts | `herdr-container://<id>/<path>` | edit and save, as the container's remote user, keeping owner and mode |
+| A container path outside the mounts | `herdr-container://<id>/<path>?{"label":"<container>"}` | edit and save, as the container's remote user, keeping owner and mode |
 | An SSH host | `herdr-ssh://<alias>/<path>` | edit and save |
+
+Their editors' titles and tab hovers read `devc: <container> › /path` and `ssh: <alias> › /path`. Breadcrumbs
+show only the path segments (VS Code does not label those). A container editor restored from before this
+version reads `devc:  › /path` until opened again from the view.
 
 The last two have no language servers, Source Control or search, since those need local files. They need GNU
 coreutils and findutils there (BusyBox, as on Alpine, is not supported). A save overwrites in place and is not atomic.

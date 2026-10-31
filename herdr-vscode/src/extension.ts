@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import { AgentStates } from './agentState';
+import { BaselineStore } from './baselines';
+import { PaneDecorations } from './decorations';
 import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
-import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView } from './paneContext';
+import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView, SinceNode } from './paneContext';
 import { CANCEL_PLACEMENT_COMMAND, PaneDragController, paneRowRef } from './paneDrag';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
@@ -121,6 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		() => environments.containersSettled(),
 	);
 	const sshFs = new SshFileSystemProvider((alias) => environments.find(sshKey(alias))?.shell);
+	const decorations = new PaneDecorations();
 	const paneContext = new PaneContextView({
 		model: m,
 		focus,
@@ -133,10 +136,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				dragAndDropController: new PaneDragController<PaneContextNode>(panels.placement, paneRowRef, connectedSnapshot),
 			}),
 		log,
+		baselines: new BaselineStore(context.workspaceState),
+		decorations,
 	});
 	context.subscriptions.push(
 		paths,
 		paneContext,
+		decorations,
+		vscode.window.registerFileDecorationProvider(decorations),
 		vscode.workspace.registerFileSystemProvider(CONTAINER_SCHEME, containerFs, { isCaseSensitive: true }),
 		vscode.workspace.registerFileSystemProvider(SSH_SCHEME, sshFs, { isCaseSensitive: true }),
 		new ChangePoller(
@@ -357,7 +364,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('herdr.paneContext.addToWorkspace', () => paneContext.addToWorkspace()),
 		vscode.commands.registerCommand('herdr.paneContext.splitPane', () => paneContext.splitPane()),
 		vscode.commands.registerCommand('herdr.paneContext.showPane', () => paneContext.showPane()),
-		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode) => paneContext.openChanges(node)),
+		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode | SinceNode) => paneContext.openChanges(node)),
+		vscode.commands.registerCommand('herdr.paneContext.resetBaseline', () => paneContext.resetBaseline()),
+		vscode.commands.registerCommand('herdr.paneContext.openSourceControl', () => paneContext.openSourceControl()),
+		vscode.commands.registerCommand('herdr.paneContext.openTerminal', () => paneContext.openTerminal()),
 		vscode.commands.registerCommand('herdr.paneContext.newFile', (node?: PaneContextNode) => paneContext.promptNew(node, 'file')),
 		vscode.commands.registerCommand('herdr.paneContext.newFolder', (node?: PaneContextNode) => paneContext.promptNew(node, 'folder')),
 		vscode.commands.registerCommand('herdr.paneContext.rename', (node?: PaneContextNode) => paneContext.promptRename(node)),

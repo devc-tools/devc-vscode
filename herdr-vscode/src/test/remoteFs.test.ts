@@ -27,7 +27,8 @@ class RecordingShell implements RemoteShell {
 }
 
 const ID = 'abcdefabcdef';
-const uri = (p: string, authority = ID) => vscode.Uri.from({ scheme: 'herdr-container', authority, path: p });
+/** As `environmentUri` makes them: with the container's label as a JSON query, which the providers ignore. */
+const uri = (p: string, authority = ID) => vscode.Uri.from({ scheme: 'herdr-container', authority, path: p, query: JSON.stringify({ label: 'app' }) });
 
 const missing = (argv: string[]): Partial<ShellResult> =>
 	argv[0] === 'stat' ? { exitCode: 1, stderr: Buffer.from(`stat: cannot statx '${argv[argv.length - 1]}': No such file or directory`) } : {};
@@ -406,7 +407,7 @@ suite('change polling', () => {
 		fs.writeFileSync(file, 'one\n');
 		const poller = new ChangePoller(new Map([[scheme, p]]), undefined, undefined, undefined, 3600000);
 		try {
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.from({ scheme, authority: ID, path: file }));
+			const doc = await vscode.workspace.openTextDocument(vscode.Uri.from({ scheme, authority: ID, path: file, query: JSON.stringify({ label: 'app' }) }));
 			const editor = await vscode.window.showTextDocument(doc);
 			assert.strictEqual(doc.getText(), 'one\n');
 			await poller.poll();

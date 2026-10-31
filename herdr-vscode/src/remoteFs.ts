@@ -313,7 +313,8 @@ export abstract class CoreutilsFileSystemProvider
  * Files inside a running dev container, through `docker exec`, as the
  * container's remote user.
  *
- * URI shape: herdr-container://<first 12 chars of the id>/<absolute path>
+ * URI shape: herdr-container://<first 12 chars of the id>/<absolute path>?{"label":"<container>"}
+ * (the query is for `resourceLabelFormatters` only and is ignored here).
  *
  * Any URI of this scheme reaches this provider, from anywhere, so an authority
  * that is not a current dev container is refused before anything is spawned.

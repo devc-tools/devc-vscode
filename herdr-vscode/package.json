@@ -219,6 +219,24 @@
         "icon": "$(diff)"
       },
       {
+        "command": "herdr.paneContext.resetBaseline",
+        "title": "Reset Baseline",
+        "category": "herdr",
+        "icon": "$(history)"
+      },
+      {
+        "command": "herdr.paneContext.openSourceControl",
+        "title": "Open in Source Control",
+        "category": "herdr",
+        "icon": "$(source-control)"
+      },
+      {
+        "command": "herdr.paneContext.openTerminal",
+        "title": "Terminal Here",
+        "category": "herdr",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "herdr.paneContext.newFile",
         "title": "New File…",
         "category": "herdr",
@@ -382,18 +400,33 @@
           "group": "inline@1"
         },
         {
+          "command": "herdr.paneContext.openSourceControl",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* scm/",
+          "group": "inline@2"
+        },
+        {
+          "command": "herdr.paneContext.openTerminal",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* terminal/",
+          "group": "inline@3"
+        },
+        {
           "command": "herdr.paneContext.splitPane",
           "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root/",
-          "group": "inline@2"
+          "group": "inline@4"
         },
         {
           "command": "herdr.paneContext.showPane",
           "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* showable/",
-          "group": "inline@3"
+          "group": "inline@5"
+        },
+        {
+          "command": "herdr.paneContext.resetBaseline",
+          "when": "view == herdr.paneContext && viewItem == herdr.paneContext.since",
+          "group": "inline@1"
         },
         {
           "command": "herdr.paneContext.openChanges",
-          "when": "view == herdr.paneContext && viewItem == herdr.paneContext.change",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(change|sinceChange)$/",
           "group": "inline@1"
         },
         {
@@ -461,6 +494,18 @@
           "when": "false"
         },
         {
+          "command": "herdr.paneContext.resetBaseline",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.openSourceControl",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.openTerminal",
+          "when": "false"
+        },
+        {
           "command": "herdr.paneContext.newFile",
           "when": "false"
         },
@@ -506,6 +551,22 @@
         }
       ]
     },
+    "resourceLabelFormatters": [
+      {
+        "scheme": "herdr-container",
+        "formatting": {
+          "label": "devc: ${query.label} › ${path}",
+          "separator": "/"
+        }
+      },
+      {
+        "scheme": "herdr-ssh",
+        "formatting": {
+          "label": "ssh: ${authority} › ${path}",
+          "separator": "/"
+        }
+      }
+    ],
     "keybindings": [
       {
         "command": "herdr.cancelPlacement",

@@ -53,8 +53,17 @@ export function hostPathOf(containerPath: string, mounts: readonly BindMount[]):
 	return `${holder.source.replace(/\/+$/, '')}${rest}` || '/';
 }
 
-/** A path in an environment as a URI VS Code can open: a plain file wherever one exists. */
-export function environmentUri(env: Pick<Environment, 'kind' | 'alias' | 'containerId'>, file: string, mounts: readonly BindMount[] = []): vscode.Uri {
+/** What {@link environmentUri} needs of an environment. */
+export type UriEnvironment = Pick<Environment, 'kind' | 'alias' | 'containerId' | 'label'>;
+
+/**
+ * A path in an environment as a URI VS Code can open: a plain file wherever one
+ * exists. A container URI carries the container's label as a JSON query,
+ * `?{"label":"<label>"}`, for `resourceLabelFormatters` (`devc: <label> › <path>`);
+ * its providers ignore the query. Two URIs differing only in query are two
+ * documents, so every container URI must come from here.
+ */
+export function environmentUri(env: UriEnvironment, file: string, mounts: readonly BindMount[] = []): vscode.Uri {
 	switch (env.kind) {
 		case 'host':
 			return vscode.Uri.file(file);
@@ -62,7 +71,7 @@ export function environmentUri(env: Pick<Environment, 'kind' | 'alias' | 'contai
 			return vscode.Uri.from({ scheme: SSH_SCHEME, authority: env.alias, path: file });
 		case 'container': {
 			const host = hostPathOf(file, mounts);
-			return host !== undefined ? vscode.Uri.file(host) : vscode.Uri.from({ scheme: CONTAINER_SCHEME, authority: env.containerId!.slice(0, 12), path: file });
+			return host !== undefined ? vscode.Uri.file(host) : vscode.Uri.from({ scheme: CONTAINER_SCHEME, authority: env.containerId!.slice(0, 12), path: file, query: JSON.stringify({ label: env.label }) });
 		}
 	}
 }
@@ -148,7 +157,7 @@ export class EnvironmentPaths implements vscode.Disposable {
 		return mounts ?? [];
 	}
 
-	async uriFor(env: Pick<Environment, 'kind' | 'alias' | 'containerId'>, file: string): Promise<vscode.Uri> {
+	async uriFor(env: UriEnvironment, file: string): Promise<vscode.Uri> {
 		return environmentUri(env, file, await this.mounts(env));
 	}
 

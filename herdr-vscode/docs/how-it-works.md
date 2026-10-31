@@ -440,15 +440,97 @@ branch)` or `## No commits yet on <branch>`. A rename or copy, in **either** sta
 `git add -N`), has its original path as the next record, which is skipped. An untracked directory is one path ending
 in `/`, with nothing to open. A deleted path opens as HEAD has it.
 
-The left side of **Open Changes** is `herdr-git://<env key>/<toplevel>/<path>?HEAD#<length of toplevel>`:
-the fragment says where the toplevel ends, and survives a window reload. An unknown environment gets an empty document, with nothing run.
+The left side of **Open Changes** is `herdr-git://<env key>/<toplevel>/<path>?<revision>#<length of toplevel>`:
+the revision is `HEAD` (All Changes) or the baseline's tree SHA (Changed in This Pane); the provider runs
+`git -C <toplevel> show <revision>:<path>`. The query reaches argv, so anything but `HEAD` or 40–64 hex digits gets an
+empty document with nothing run, as does an unknown environment. The fragment says where the toplevel ends, and
+survives a window reload.
+
+### Baselines: changed in this pane
+
+`src/baselines.ts`, `src/git.ts`. Git cannot say which process changed a file, so "changed in this pane" is every
+change in the pane's worktree since a **baseline**: `{tree, head, at}`, the tree of the whole working state (tracked and
+untracked, not ignored), HEAD's SHA (`""` before the first commit), and the time. It is taken when the view loads a
+(pane, toplevel) it has none for, and by **Reset Baseline**. Not on agent status changes: that would snapshot every pane of
+every session.
+
+The snapshot is one round trip (`sh -c <script> sh <toplevel>`, the toplevel as `$1`):
+
+```sh
+set -e
+top=$1
+d=$(mktemp -d "${TMPDIR:-/tmp}/herdr-vscode.XXXXXX")
+trap 'rm -rf "$d"' EXIT
+gi=$(git -C "$top" rev-parse --git-path index)
+case $gi in /*) ;; *) gi=$top/$gi ;; esac
+if [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
+GIT_INDEX_FILE=$d/index git -C "$top" add -A
+GIT_INDEX_FILE=$d/index git -C "$top" write-tree
+git -C "$top" rev-parse -q --verify HEAD || true
+```
+
+- **A temporary index**, never the user's: their index, working tree, refs and stash are untouched. It writes blobs and
+  trees into `.git/objects`, unreferenced, which `git gc` prunes after `gc.pruneExpire` (two weeks by default). Clean
+  filters (Git LFS) run on changed files, as on any `git add`.
+- **A copy of the real index**, so its stat cache is valid and `add -A` hashes only files that changed; an empty index
+  would hash the whole repo every poll. A fresh `git init` has no index: `git` makes one. `--git-path index` is relative in
+  a plain repo and absolute in a linked worktree.
+- **`touch -r`** keeps the copy's mtime. Git judges a "racily clean" entry, a file written in the same second as the index
+  (an agent's edit right after a commit), against the index file's mtime; with the copy's fresh mtime it would trust a stale
+  stat and record the old content. Measured live: without it, a same-size edit made just after a commit was missing from the
+  baseline and later showed as changed since.
+
+What changed is `git diff-tree -r -z --no-renames --name-status <baseline tree> <current tree>` (`T` shown as `M`),
+skipped when the tree is the baseline's or the last one diffed. Committed changes are in it, since the current tree is
+the working state. When HEAD moved, `git rev-list --count <baseline head>..HEAD` (`HEAD` alone from no commits) gives
+` · <n> commits`; a failure omits it. A `diff-tree` failure means `git gc` pruned the baseline tree: a new baseline is
+taken and logged. Snapshots run one at a time, on load, on the 5 s poll after git status, and on the watcher's reload.
+
+The store is `workspaceState` `herdr.paneContext.baselines`, `{"<pane key>\n<toplevel>": {tree, head, at}}`. On every model
+change it drops entries older than 7 days and every entry of a pane whose session is connected and lacks it; a disconnected
+session keeps its entries. `pane.moved` moves a pane's entries to its new key. herdr ids are not reused while a server runs,
+but a restarted server numbers new workspaces from the highest restored one, so a closed workspace's pane ids come back:
+dropping entries on absence is what keeps a reused id from inheriting an old baseline, as long as this window saw the pane go.
+
+### Git markers
+
+`src/decorations.ts`, a `FileDecorationProvider` for the followed repo only: each status path's URI
+(`environmentUri(env, <toplevel>/<path>)`) gets its porcelain `XY` as a badge, first match: a conflict pair `!`, `??` `U`, a
+`D` in either column `D`, `R` `R`, `A` or `C` `A`, else `M`, with the `gitDecoration.*` colour and `propagate: true` (folders get
+the colour and a dot). An untracked directory (`dir/`) decorates itself and anything under it. Changed in This Pane rows'
+URIs carry the fragment `herdr-since` and get the since-letter (`propagate: false`), so they show `A` where Files shows `U`.
+
+Every change fires the explicit array of old ∪ new URIs, never `undefined`: VS Code asks only about URIs it has been told of,
+and a collapsed folder's colour comes from its children's URIs having been fired. Plain `file:` URIs (no fragment) are left to
+VS Code's Git when its API (`vscode.git`, `getAPI(1)`, used only if already active and enabled; never activated for this)
+has a repository for them, re-fired on its `onDidOpenRepository`, `onDidCloseRepository` and `onDidChangeState`
+(`getRepository` is `null` for everything before `initialized`). Container and SSH URIs are always ours.
+
+### Repo-row actions
+
+The Repo row's `contextValue` is `herdr.paneContext.root` plus ` addable`, ` showable`, ` scm` (a `file:` repo) and
+` terminal` (this machine). **Open in Source Control** activates `vscode.git` if needed, then `getRepository(root) ??
+openRepository(root)` and `workbench.view.scm`. Git keeps a repo outside the workspace only for this window session; a
+bind-mounted repo of another uid trips `safe.directory` (Git says so; `openRepository` returns `null`). **Terminal Here** is
+`createTerminal({name, cwd, location: Editor})`, on this machine only: a container or SSH root has **Split Pane Here**, a herdr
+pane herdr can see.
+
+### Other panes
+
+For the followed pane's directory and each other pane's: `git -C <dir> rev-parse --show-toplevel --git-common-dir`, the
+common dir resolved against `<dir>` (`../.git` from a subdirectory). Same toplevel: `same worktree`; same common dir:
+`other worktree`; else nothing. Cached per environment and directory until the next load or **Refresh**, and run only when
+the (collapsed) section is expanded.
 
 ### Paths
 
 `src/paths.ts`. Host: `file://<path>`. SSH: `herdr-ssh://<alias><path>`. Container: the bind mounts from
 `docker inspect --format '{{json .Mounts}}' <id>` (`"Type":"bind"`, with Docker Desktop's `/host_mnt` taken off the
 `Source`); under a `Destination`, longest first, a path is `file://<Source><rest>`, otherwise
-`herdr-container://<id12><path>`. Mounts are cached per container until a Docker `start` or `die` event for it, or
+`herdr-container://<id12><path>?{"label":"<container folder name>"}`. The query is for `resourceLabelFormatters`
+(`devc: ${query.label} › ${path}`; SSH: `ssh: ${authority} › ${path}`), which can substitute only the scheme, authority,
+path and JSON query keys, and cannot be registered at run time; the providers ignore it. `Uri.joinPath` keeps it, and
+two URIs differing only in query are two documents, so every container URI comes from `environmentUri`. Mounts are cached per container until a Docker `start` or `die` event for it, or
 until its environment goes. `$HOME` (`printenv HOME`) is cached per environment.
 
 ### Read-write file systems

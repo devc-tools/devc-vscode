@@ -4,7 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { BaselineMemento, BaselineStore, memoryMemento } from '../baselines';
 import { HerdrEvent } from '../bridge';
+import { RepoDecorations } from '../decorations';
 import { Environment } from '../environments';
 import { FocusTracker } from '../focus';
 import { LayoutState, LayoutStore } from '../layouts';
@@ -21,12 +23,14 @@ import {
 	PaneContextNode,
 	PaneContextView,
 	PaneRowNode,
+	markedDescription,
 	repoDescription,
 	RootNode,
 	rootContextValue,
+	SinceNode,
 	sortEntries,
 } from '../paneContext';
-import { LocalShell } from '../remoteShell';
+import { LocalShell, RemoteShell } from '../remoteShell';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { LayoutPanel, TilesPanels } from '../tilesPanel';
@@ -126,6 +130,38 @@ suite('pane context: rules', () => {
 		assert.ok(applies('herdr.paneContext.showPane', 'herdr.paneContext.root showable'));
 		assert.ok(!applies('herdr.paneContext.showPane', 'herdr.paneContext.root addable'));
 		assert.ok(applies('herdr.paneContext.splitPane', 'herdr.paneContext.root'));
+
+		// Open in Source Control on a file: repo; Terminal Here on this machine.
+		assert.strictEqual(rootContextValue({ canAdd: true, showable: false, scm: true, terminal: true }), 'herdr.paneContext.root addable scm terminal');
+		assert.strictEqual(rootContextValue({ canAdd: false, showable: true, scm: false, terminal: true }), 'herdr.paneContext.root showable terminal');
+		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root addable scm terminal'));
+		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root scm'));
+		assert.ok(!applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root showable terminal'));
+		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root scm terminal'));
+		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root terminal'));
+		assert.ok(!applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root addable scm'));
+		assert.ok(applies('herdr.paneContext.openChanges', 'herdr.paneContext.change'));
+		assert.ok(applies('herdr.paneContext.openChanges', 'herdr.paneContext.sinceChange'));
+		assert.ok(!applies('herdr.paneContext.openChanges', 'herdr.paneContext.since'));
+		assert.strictEqual(whens.get('herdr.paneContext.resetBaseline'), 'view == herdr.paneContext && viewItem == herdr.paneContext.since');
+
+		// Inline order on the Repo row, and none of these in the Command Palette.
+		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
+		const groups = new Map(menus['view/item/context'].filter((m) => m.group?.startsWith('inline')).map((m) => [m.command, m.group]));
+		assert.deepStrictEqual(
+			['addToWorkspace', 'openSourceControl', 'openTerminal', 'splitPane', 'showPane'].map((c) => groups.get(`herdr.paneContext.${c}`)),
+			['inline@1', 'inline@2', 'inline@3', 'inline@4', 'inline@5'],
+		);
+		for (const c of ['resetBaseline', 'openSourceControl', 'openTerminal']) {
+			assert.strictEqual(menus.commandPalette.find((m) => m.command === `herdr.paneContext.${c}`)?.when, 'false', c);
+		}
+	});
+
+	test('other panes: the worktree marker before the description', () => {
+		assert.strictEqual(markedDescription('same worktree', '✳ Refactoring auth'), 'same worktree · ✳ Refactoring auth');
+		assert.strictEqual(markedDescription('other worktree', undefined), 'other worktree');
+		assert.strictEqual(markedDescription('other worktree', ''), 'other worktree');
+		assert.strictEqual(markedDescription(undefined, '/x'), '/x');
 	});
 });
 
@@ -219,6 +255,10 @@ suite('pane context: the view over a temp repo', function () {
 	let tiles: vscode.EventEmitter<void>;
 	let links: vscode.EventEmitter<{ paneKey: string; text: string }>;
 	let view: PaneContextView;
+	let memento: BaselineMemento;
+	let decorated: (RepoDecorations | undefined)[];
+	let now: number;
+	let logged: string[];
 
 	const git = (cwd: string, ...args: string[]) => cp.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
 
@@ -239,7 +279,10 @@ suite('pane context: the view over a temp repo', function () {
 				home: async () => other,
 			},
 			createHost: () => host as unknown as PaneContextHost,
-			log: () => undefined,
+			log: (line) => logged.push(line),
+			baselines: new BaselineStore(memento),
+			decorations: { set: (repo) => decorated.push(repo) },
+			now: () => now,
 		});
 	}
 
@@ -277,6 +320,10 @@ suite('pane context: the view over a temp repo', function () {
 		shown = new Set();
 		tiles = new vscode.EventEmitter<void>();
 		links = new vscode.EventEmitter<{ paneKey: string; text: string }>();
+		memento = memoryMemento();
+		decorated = [];
+		logged = [];
+		now = new Date(2026, 9, 31, 10, 31).getTime();
 	});
 
 	teardown(async () => {
@@ -300,7 +347,7 @@ suite('pane context: the view over a temp repo', function () {
 		await rootIs(path.basename(dir));
 		const root = await rootRow();
 		assert.strictEqual(root.description, '⎇ main · ● 4');
-		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable showable');
+		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable showable scm terminal');
 		assert.deepStrictEqual((paneContextItem(root).iconPath as vscode.ThemeIcon).id, 'repo');
 
 		const changes = (await view.getChildren(await group('changes'))) as ChangeNode[];
@@ -557,6 +604,232 @@ suite('pane context: the view over a temp repo', function () {
 		assert.ok(await view.deleteEntry(vscode.Uri.file(path.join(dir, 'made-dir'))));
 		assert.ok(!fs.existsSync(path.join(dir, 'renamed.txt')));
 		assert.ok(!fs.existsSync(path.join(dir, 'made-dir')));
+	});
+
+	// ── Pane changes: since a baseline, markers, repo actions ─────────────────
+
+	const sinceRows = async () => view.getChildren(await group('since'));
+	const store = () => new BaselineStore(memento);
+	const P1 = makePaneKey(S, 'w2:p1');
+
+	test('sections in order; a baseline on first follow; nothing changed since; All Changes collapsed', async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const top = await roots();
+		assert.deepStrictEqual(
+			top.map((n) => (n.type === 'group' ? n.label : n.type)),
+			['root', 'Changed in This Pane', 'All Changes', 'Files', 'Other Panes in This Space'],
+		);
+		const since = (await group('since'))!;
+		assert.strictEqual(since.description, 'since 10:31');
+		assert.strictEqual(paneContextItem(since).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+		assert.strictEqual(paneContextItem(since).contextValue, 'herdr.paneContext.since');
+		const rows = await view.getChildren(since);
+		assert.deepStrictEqual(rows.map((r) => [r.type, (r as { label: string }).label]), [['note', 'No changes since 10:31']]);
+		assert.strictEqual(paneContextItem(rows[0]).iconPath, undefined);
+		assert.strictEqual(paneContextItem(rows[0]).command, undefined);
+		const all = (await group('changes'))!;
+		assert.strictEqual(all.description, '4');
+		assert.strictEqual(paneContextItem(all).description, '4');
+		assert.strictEqual(paneContextItem(all).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+		assert.strictEqual(paneContextItem(all).contextValue, 'herdr.paneContext.changes');
+		const stored = store().get(P1, dir)!;
+		assert.strictEqual(stored.at, now);
+		assert.strictEqual(stored.head, git(dir, 'rev-parse', 'HEAD').trim());
+		assert.match(stored.tree, /^[0-9a-f]{40}$/);
+
+		// Outside a repo: no change sections.
+		view.dispose();
+		model.snapshots.set(S, twoPanes(other, dir));
+		view = makeView();
+		await rootIs(path.basename(other));
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Files', 'Other Panes in This Space']);
+		assert.strictEqual(decorated[decorated.length - 1], undefined, 'no markers outside a repo');
+	});
+
+	test('changes after following are in Changed in This Pane, earlier ones are not; commits; markers', async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		fs.writeFileSync(path.join(dir, 'src', 'later.ts'), 'x');
+		fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
+		fs.rmSync(path.join(dir, 'new.txt')); // untracked at the baseline
+		await view.poll();
+		const rows = (await sinceRows()) as SinceNode[];
+		assert.deepStrictEqual(
+			rows.map((r) => [r.label, r.description, r.status]),
+			[
+				['README.md', undefined, 'M'],
+				['new.txt', undefined, 'D'],
+				['later.ts', 'src', 'A'],
+			],
+		);
+		assert.ok(!rows.some((r) => r.label === 'a.ts'), 'changed before following: only in All Changes');
+		const later = rows[2];
+		const item = paneContextItem(later);
+		assert.strictEqual((item.resourceUri as vscode.Uri).fragment, 'herdr-since');
+		assert.strictEqual((item.resourceUri as vscode.Uri).with({ fragment: '' }).fsPath, path.join(dir, 'src', 'later.ts'));
+		assert.strictEqual(item.contextValue, 'herdr.paneContext.sinceChange');
+		assert.strictEqual(item.command?.command, 'vscode.open');
+		const opened = item.command!.arguments![0] as vscode.Uri;
+		assert.strictEqual(opened.toString(), vscode.Uri.file(path.join(dir, 'src', 'later.ts')).toString(), 'the plain URI, no fragment');
+		assert.strictEqual(item.tooltip, `${dir}/src/later.ts · Added since 10:31`);
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, vscode.ThemeIcon.File.id);
+		const gone = paneContextItem(rows[1]).command!.arguments![0] as vscode.Uri;
+		assert.strictEqual(gone.scheme, 'herdr-git', 'a deleted row opens the baseline version');
+		assert.strictEqual(gone.query, store().get(P1, dir)!.tree);
+		assert.strictEqual((await group('since'))!.description, 'since 10:31');
+
+		const last = decorated[decorated.length - 1]!;
+		assert.ok(last.status.some((c) => c.uri.fsPath === path.join(dir, 'src', 'a.ts') && c.xy === ' M'));
+		assert.deepStrictEqual(last.untrackedDirs.map((u) => u.fsPath), [path.join(dir, 'fresh')]);
+		assert.deepStrictEqual(
+			last.since.map((c) => [path.basename(c.uri.path), c.status, c.uri.fragment]),
+			[
+				['README.md', 'M', 'herdr-since'],
+				['new.txt', 'D', 'herdr-since'],
+				['later.ts', 'A', 'herdr-since'],
+			],
+		);
+		assert.strictEqual(last.sinceTime, '10:31');
+
+		git(dir, 'add', 'src/later.ts');
+		git(dir, 'commit', '-q', '-m', 'two');
+		await view.poll();
+		assert.strictEqual((await group('since'))!.description, 'since 10:31 · 1 commit');
+		assert.ok(((await sinceRows()) as SinceNode[]).some((r) => r.label === 'later.ts'), 'committed changes are still changes since');
+		git(dir, 'commit', '-q', '--allow-empty', '-m', 'three');
+		await view.poll();
+		assert.strictEqual((await group('since'))!.description, 'since 10:31 · 2 commits');
+	});
+
+	test('the baseline survives a reload (a new view on the same memento); Reset Baseline replaces it', async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		fs.writeFileSync(path.join(dir, 'later.txt'), 'x');
+		view.dispose();
+		now += 60 * 60 * 1000;
+		view = makeView();
+		await rootIs(path.basename(dir));
+		assert.strictEqual((await group('since'))!.description, 'since 10:31');
+		assert.deepStrictEqual(((await sinceRows()) as SinceNode[]).map((r) => r.label), ['later.txt']);
+		const before = store().get(P1, dir)!;
+		await view.resetBaseline();
+		assert.strictEqual((await group('since'))!.description, 'since 11:31');
+		assert.deepStrictEqual((await sinceRows()).map((r) => (r as { label: string }).label), ['No changes since 11:31']);
+		const after = store().get(P1, dir)!;
+		assert.strictEqual(after.at, now);
+		assert.notStrictEqual(after.tree, before.tree);
+		assert.deepStrictEqual(store().keys(), [`${P1}\n${dir}`]);
+	});
+
+	test('a baseline git has pruned is replaced by a new one, and says so', async () => {
+		await store().set(P1, dir, { tree: 'f'.repeat(40), head: '', at: now - 1000 });
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const stored = store().get(P1, dir)!;
+		assert.notStrictEqual(stored.tree, 'f'.repeat(40));
+		assert.strictEqual(stored.at, now);
+		assert.ok(logged.includes(`pane context: baseline for ${dir} was lost; recorded a new one`), logged.join('\n'));
+		assert.deepStrictEqual((await sinceRows()).map((r) => (r as { label: string }).label), ['No changes since 10:31']);
+	});
+
+	test('a snapshot that fails: one warning row', async () => {
+		const local = new LocalShell();
+		const failing: RemoteShell = {
+			run: (argv, o) => (argv[0] === 'sh' ? Promise.resolve({ exitCode: 1, stdout: Buffer.from(''), stderr: Buffer.from('\nfatal: boom\nmore\n') }) : local.run(argv, o)),
+			spawn: () => local.spawn([]),
+		};
+		(model as unknown as { env: Environment }).env = { ...model.env, shell: failing };
+		view = makeView();
+		await rootIs(path.basename(dir));
+		assert.strictEqual((await group('since'))!.description, undefined);
+		const rows = await sinceRows();
+		assert.deepStrictEqual(rows.map((r) => (r as { label: string }).label), ['Could not record a baseline: fatal: boom']);
+		assert.strictEqual((paneContextItem(rows[0]).iconPath as vscode.ThemeIcon).id, 'warning');
+		assert.deepStrictEqual(store().keys(), []);
+	});
+
+	test('Open Changes on a since row: the baseline against the working tree', async () => {
+		const provider = vscode.workspace.registerTextDocumentContentProvider('herdr-ctx-since', { provideTextDocumentContent: () => 'working\n' });
+		view = makeView();
+		await rootIs(path.basename(dir));
+		fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'again\n');
+		await view.poll();
+		const a = ((await sinceRows()) as SinceNode[]).find((r) => r.label === 'a.ts')!;
+		assert.strictEqual(a.status, 'M');
+		assert.strictEqual(a.baseUri.query, store().get(P1, dir)!.tree);
+		await view.openChanges({ ...a, baseUri: a.baseUri.with({ scheme: 'herdr-ctx-since' }) });
+		const tab = await waitFor('the diff tab', () => vscode.window.tabGroups.activeTabGroup.activeTab);
+		assert.strictEqual(tab.label, 'a.ts (since 10:31 ↔ working tree)');
+		assert.ok(tab.input instanceof vscode.TabInputTextDiff);
+		assert.strictEqual((tab.input as vscode.TabInputTextDiff).modified.toString(), vscode.Uri.file(path.join(dir, 'src', 'a.ts')).toString());
+		provider.dispose();
+	});
+
+	test('pane.moved moves the baselines; a closed pane loses them while its session is connected', async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const baseline = store().get(P1, dir);
+		model.events.fire({ sessionKey: S, event: { event: 'pane.moved', data: { previous_pane_id: 'w2:p1', pane: { pane_id: 'w9:p1' } } } as HerdrEvent });
+		await sleep(10);
+		assert.deepStrictEqual(store().get(makePaneKey(S, 'w9:p1'), dir), baseline);
+		const without = twoPanes(dir, other);
+		without.panes.splice(0, 1);
+		model.snapshots.set(S, without);
+		model.changed.fire();
+		await sleep(10);
+		assert.deepStrictEqual(store().keys(), [], 'neither w2:p1 nor w9:p1 is in the snapshot');
+	});
+
+	test('Terminal Here: a terminal editor in the root, named after it', async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const terminal = view.openTerminal()!;
+		try {
+			const options = terminal.creationOptions as vscode.TerminalOptions;
+			assert.strictEqual(options.name, path.basename(dir));
+			assert.strictEqual(options.cwd, dir);
+			assert.strictEqual(options.location, vscode.TerminalLocation.Editor);
+		} finally {
+			terminal.dispose();
+		}
+	});
+
+	test("Open in Source Control: VS Code's Git has the temp repo afterwards", async () => {
+		const ext = vscode.extensions.getExtension<{ getAPI(v: 1): { getRepository(uri: vscode.Uri): unknown } }>('vscode.git');
+		assert.ok(ext, 'the test host has vscode.git');
+		view = makeView();
+		await rootIs(path.basename(dir));
+		await view.openSourceControl();
+		const api = (ext.isActive ? ext.exports : await ext.activate()).getAPI(1);
+		assert.ok(api.getRepository(vscode.Uri.file(dir)));
+		assert.ok(api.getRepository(vscode.Uri.file(path.join(dir, 'src', 'a.ts'))));
+	});
+
+	test('Other Panes: same worktree, other worktree, none', async () => {
+		model.snapshots.set(S, twoPanes(dir, path.join(dir, 'src')));
+		view = makeView();
+		await rootIs(path.basename(dir));
+		let panes = (await view.getChildren(await group('panes'))) as PaneRowNode[];
+		assert.strictEqual(panes[0].description, `same worktree · ${path.join(dir, 'src')}`);
+		view.dispose();
+
+		const linked = path.join(other, 'linked');
+		git(dir, 'worktree', 'add', '-q', linked);
+		model.snapshots.set(S, twoPanes(dir, linked));
+		view = makeView();
+		await rootIs(path.basename(dir));
+		panes = (await view.getChildren(await group('panes'))) as PaneRowNode[];
+		assert.strictEqual(panes[0].description, `other worktree · ${linked}`);
+		view.dispose();
+
+		const plain = path.join(other, 'plain');
+		fs.mkdirSync(plain);
+		model.snapshots.set(S, twoPanes(dir, plain));
+		view = makeView();
+		await rootIs(path.basename(dir));
+		panes = (await view.getChildren(await group('panes'))) as PaneRowNode[];
+		assert.strictEqual(panes[0].description, plain, 'not comparable: unchanged');
 	});
 
 	suite('links', () => {

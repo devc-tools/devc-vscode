@@ -11,7 +11,7 @@ suite('paths', () => {
 		{ source: '/Users/me/cache', destination: '/workspaces/app/.cache' },
 		{ source: '/Users/me/.ssh', destination: '/home/vscode/.ssh' },
 	];
-	const container = { kind: 'container', containerId: 'abcdefabcdef0123' } as const;
+	const container = { kind: 'container', containerId: 'abcdefabcdef0123', label: 'deephaven-mcp' } as const;
 
 	test('docker inspect output: bind mounts only, and Docker Desktop prefix dropped', () => {
 		assert.deepStrictEqual(
@@ -44,16 +44,32 @@ suite('paths', () => {
 	});
 
 	test('URIs per environment', () => {
-		assert.strictEqual(environmentUri({ kind: 'host' }, '/a b/c.ts').toString(true), 'file:///a b/c.ts');
+		assert.strictEqual(environmentUri({ kind: 'host', label: 'this machine' }, '/a b/c.ts').toString(true), 'file:///a b/c.ts');
 		const mapped = environmentUri(container, '/workspaces/app/a.ts', MOUNTS);
 		assert.strictEqual(mapped.scheme, 'file');
 		assert.strictEqual(mapped.path, '/Users/me/code/app/a.ts');
 		const unmapped = environmentUri(container, '/home/vscode/n.txt', MOUNTS);
-		assert.strictEqual(unmapped.toString(), 'herdr-container://abcdefabcdef/home/vscode/n.txt');
-		const ssh = environmentUri({ kind: 'ssh', alias: 'Agent-VM' }, '/srv/x');
+		assert.strictEqual(unmapped.toString(true), 'herdr-container://abcdefabcdef/home/vscode/n.txt?{"label":"deephaven-mcp"}');
+		assert.strictEqual(unmapped.authority, 'abcdefabcdef');
+		assert.strictEqual(unmapped.path, '/home/vscode/n.txt');
+		assert.deepStrictEqual(JSON.parse(unmapped.query), { label: 'deephaven-mcp' });
+		assert.strictEqual(vscode.Uri.parse(unmapped.toString()).query, '{"label":"deephaven-mcp"}', 'percent-encoded in the string, decoded back');
+		const child = vscode.Uri.joinPath(unmapped, '..', 'sub', 'm.md');
+		assert.strictEqual(child.path, '/home/vscode/sub/m.md');
+		assert.strictEqual(child.query, unmapped.query, 'joinPath keeps the label');
+		const ssh = environmentUri({ kind: 'ssh', alias: 'Agent-VM', label: 'Agent-VM' }, '/srv/x');
 		assert.strictEqual(ssh.scheme, 'herdr-ssh');
 		assert.strictEqual(ssh.authority, 'Agent-VM');
 		assert.strictEqual(ssh.path, '/srv/x');
+		assert.strictEqual(ssh.query, '', 'ssh URIs carry no query');
+	});
+
+	test('resourceLabelFormatters: devc and ssh labels', () => {
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
+		assert.deepStrictEqual(ext.packageJSON.contributes.resourceLabelFormatters, [
+			{ scheme: 'herdr-container', formatting: { label: 'devc: ${query.label} › ${path}', separator: '/' } },
+			{ scheme: 'herdr-ssh', formatting: { label: 'ssh: ${authority} › ${path}', separator: '/' } },
+		]);
 	});
 
 	test('mounts are cached per container until it starts or dies again', async () => {

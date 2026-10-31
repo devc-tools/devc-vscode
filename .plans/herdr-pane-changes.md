@@ -21,19 +21,19 @@ Depends on [herdr-pane-context](herdr-pane-context.md) (phase 17: read its Contr
 
 ## Checklist
 
-- [ ] 1. Baseline snapshot in the environment (temporary index, never the user's), `since` diff, commit count
-- [ ] 2. Baseline store: recorded on first follow, persisted in `workspaceState`, pruned, moved on `pane.moved`;
+- [x] 1. Baseline snapshot in the environment (temporary index, never the user's), `since` diff, commit count
+- [x] 2. Baseline store: recorded on first follow, persisted in `workspaceState`, pruned, moved on `pane.moved`;
       **Reset Baseline**
-- [ ] 3. Sections: **Changed in This Pane** (new, expanded) and **All Changes** (the old Changes, collapsed);
+- [x] 3. Sections: **Changed in This Pane** (new, expanded) and **All Changes** (the old Changes, collapsed);
       `herdr-git` URIs take a tree revision; **Open Changes** on both
-- [ ] 4. `FileDecorationProvider` for the followed repo's status, yielding to VS Code's Git on repos it has open;
+- [x] 4. `FileDecorationProvider` for the followed repo's status, yielding to VS Code's Git on repos it has open;
       since-letters on Changed in This Pane rows
-- [ ] 5. Container URIs carry `?{"label":…}`; `resourceLabelFormatters` for `herdr-container` and `herdr-ssh`
-- [ ] 6. Repo row: **Open in Source Control** (`file:` repos) and **Terminal Here** (this machine only)
-- [ ] 7. Other Panes rows: `same worktree` / `other worktree`
-- [ ] 8. Live measurement on throwaway `hv-test`: are pane ids reused (record under Implementation notes)
-- [ ] 9. Tests (list under Validation)
-- [ ] 10. README, CHANGELOG, `docs/how-it-works.md`
+- [x] 5. Container URIs carry `?{"label":…}`; `resourceLabelFormatters` for `herdr-container` and `herdr-ssh`
+- [x] 6. Repo row: **Open in Source Control** (`file:` repos) and **Terminal Here** (this machine only)
+- [x] 7. Other Panes rows: `same worktree` / `other worktree`
+- [x] 8. Live measurement on throwaway `hv-test`: are pane ids reused (record under Implementation notes)
+- [x] 9. Tests (list under Validation)
+- [x] 10. README, CHANGELOG, `docs/how-it-works.md`
 
 ## Contracts
 
@@ -62,7 +62,7 @@ d=$(mktemp -d "${TMPDIR:-/tmp}/herdr-vscode.XXXXXX")
 trap 'rm -rf "$d"' EXIT
 gi=$(git -C "$top" rev-parse --git-path index)
 case $gi in /*) ;; *) gi=$top/$gi ;; esac
-if [ -f "$gi" ]; then cp "$gi" "$d/index"; fi
+if [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
 GIT_INDEX_FILE=$d/index git -C "$top" add -A
 GIT_INDEX_FILE=$d/index git -C "$top" write-tree
 git -C "$top" rev-parse -q --verify HEAD || true
@@ -71,6 +71,7 @@ git -C "$top" rev-parse -q --verify HEAD || true
 - stdout: line 1 the tree SHA (40 hex, or 64 in a SHA-256 repo), line 2 HEAD's SHA or empty. Parse with
   `/^([0-9a-f]{40,64})\n([0-9a-f]{40,64})?\n?$/`; anything else is a failure. Non-zero exit is a failure; its
   message is the first non-empty stderr line.
+- `touch -r` was added during implementation (racily clean entries; see Implementation notes).
 - Copying the real index first is what keeps it cheap: its stat cache is valid, so `add -A` hashes only files
   that changed. Starting from an empty index would hash the whole repo every poll.
 - `rev-parse --git-path index` prints a path relative to `$top` in a plain repo (`.git/index`) and an
@@ -280,43 +281,43 @@ machine, `env.kind === 'host'`). Inline order: Add to Workspace `@1`, Open in So
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, with new or updated unit
+- [x] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, with new or updated unit
       tests (real `git` in temp repos through `LocalShell`, as `git.test.ts` does) for:
-  - [ ] snapshot: parses tree and HEAD; the real index is untouched (`git ls-files -s --debug` output and
+  - [x] snapshot: parses tree and HEAD; the real index is untouched (`git ls-files -s --debug` output and
         `git status --porcelain=v1` identical before and after, with a staged change and an untracked file
         present); works in a linked worktree (absolute `--git-path`), in a repo with no commits (empty head) and
         in a fresh `git init` with no index; leaves no `herdr-vscode.*` dir in `$TMPDIR`; failure message is the
         first stderr line
-  - [ ] since: modify, add, delete an untracked-at-baseline file, and commit → exactly `M`, `A`, `D` rows
+  - [x] since: modify, add, delete an untracked-at-baseline file, and commit → exactly `M`, `A`, `D` rows
         sorted by path; `T` shows as `M`; commit count `1 commit` / `2 commits` / omitted; a pruned baseline
         (bogus tree SHA) records a new one
-  - [ ] time label: same day `since 09:05`; other day `since Oct 30 09:05` (fixed `now`)
-  - [ ] store (fake `Memento`): baseline taken once per (pane, toplevel) and reused after a new view is built on
+  - [x] time label: same day `since 09:05`; other day `since Oct 30 09:05` (fixed `now`)
+  - [x] store (fake `Memento`): baseline taken once per (pane, toplevel) and reused after a new view is built on
         the same memento (reload); Reset Baseline replaces it; entries > 7 days dropped; a closed pane's entries
         dropped while its session is connected, kept while disconnected; `pane.moved` moves them
-  - [ ] sections: order and labels; Changed in This Pane description with and without commits; `No changes since …`
+  - [x] sections: order and labels; Changed in This Pane description with and without commits; `No changes since …`
         row; warning row on snapshot failure; All Changes collapsed with description `<n>`; since-row
         `resourceUri` has fragment `herdr-since` and its command opens the plain URI
-  - [ ] `herdr-git`: `?<tree sha>` shows the baseline content; an invalid query (`--output=x`, `HEAD~1`) returns
+  - [x] `herdr-git`: `?<tree sha>` shows the baseline content; an invalid query (`--output=x`, `HEAD~1`) returns
         `''` without spawning
-  - [ ] decorations: the XY table, row by row; untracked dir and a child of it; since-row letters; a `file:` URI
+  - [x] decorations: the XY table, row by row; untracked dir and a child of it; since-row letters; a `file:` URI
         yields `undefined` when a fake Git API's `getRepository` returns a repo, and is decorated when it returns
         `null` or Git is absent; `herdr-container:` always decorated; a status change fires the explicit
         old ∪ new URI array (never `undefined`)
-  - [ ] container URIs: `environmentUri` gives `herdr-container://<id12><path>` with query `{"label":"<label>"}`;
+  - [x] container URIs: `environmentUri` gives `herdr-container://<id12><path>` with query `{"label":"<label>"}`;
         `Uri.joinPath` children keep it; providers still work with it (existing provider tests on a queried URI);
         `package.json` `resourceLabelFormatters` equals the JSON above
-  - [ ] repo row: `rootContextValue` flags (` scm` only for a `file:` repo, ` terminal` only on host); the `when`
+  - [x] repo row: `rootContextValue` flags (` scm` only for a `file:` repo, ` terminal` only on host); the `when`
         regexes match/not-match as data; **Terminal Here** creates a terminal whose `creationOptions` have the root
         `cwd` and name; **Open in Source Control** on a temp repo makes the built-in Git API's `getRepository` return
         it (the test host has `vscode.git`)
-  - [ ] other panes: same toplevel → `same worktree`; linked worktree → `other worktree`; other repo and non-repo →
+  - [x] other panes: same toplevel → `same worktree`; linked worktree → `other worktree`; other repo and non-repo →
         no marker; subdirectory relative common dir resolved; description format
-- [ ] With `HERDR_VSCODE_LIVE_HOME` on throwaway `hv-test` (as phase 17's `livePaneContext.test.ts`): following a
+- [x] With `HERDR_VSCODE_LIVE_HOME` on throwaway `hv-test` (as phase 17's `livePaneContext.test.ts`): following a
       pane in a temp repo records a baseline; a file written from the pane afterwards appears in Changed in This
       Pane within one poll; a file changed before following does not (it is in All Changes)
-- [ ] Checklist 8 result written under Implementation notes; `hv-test` stopped and deleted afterwards
-- [ ] `git diff --stat -- devc-vscode` is empty
+- [x] Checklist 8 result written under Implementation notes; `hv-test` stopped and deleted afterwards
+- [x] `git diff --stat -- devc-vscode` is empty
 - [ ] Manual: follow an agent pane, let it edit; **Changed in This Pane** lists only files changed since you
       first followed, heading `since HH:MM`; **Reset Baseline** empties it; reload the window and the time is kept
 - [ ] Manual: Files shows `M` / `U` / `A` badges in Git colours on changed files of a container path outside the
@@ -353,3 +354,86 @@ machine, `env.kind === 'host'`). Inline order: Add to Workspace `@1`, Open in So
 - `herdr-vscode/docs/how-it-works.md` (Pane Context › Git: the snapshot script and why a temp index; baselines;
   decorations and yielding to Git; Paths: the container query)
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Status (2026-10-31)
+
+Implemented. Everything but the six Manual items was run and passes; those need a person in a VS Code window (and a
+dev container or SSH host for two of them), so they stay unticked and the plan stays out of `implemented/`. No Docker and
+no SSH host here: container and SSH URIs, labels and markers have unit tests only.
+
+### Measured (herdr 0.9.5, throwaway `hv-test` in an isolated `HOME` under `/tmp/hvt`)
+
+- **Pane ids (Checklist 8).** While a server runs, ids are never reused: closing `w1:p2` then splitting gave `w1:p4`;
+  closing the highest pane `w1:p4` then splitting gave `w1:p5`; closing workspace `w2` (the highest) then creating one gave
+  `w3`. Across a **server restart** (workspaces restored from `session.json`), the per-workspace pane counter is kept
+  (`w3` had `p1` left, the next split was `w3:p4`) but the **workspace counter restarts at the highest restored one + 1**:
+  with `w4`, `w5` closed and only `w3` left, the next workspace after the restart was `w4` again, so `w4:p1` came back.
+  Pruning on absence (a connected session whose snapshot lacks the pane) covers it when this window saw the pane go; a pane
+  that closed while no window watched, followed by a restart and a new workspace, could inherit an old baseline (until
+  7 days, or **Reset Baseline**). Accepted, as the plan expected.
+- Live, from `src/test/livePaneContext.test.ts`: following a pane in a temp repo recorded a baseline (HEAD's SHA, `No changes
+  since HH:MM`), with the change made before following only in All Changes; a file written from the pane by `printf` showed in
+  Changed in This Pane (`A`) after 25–666 ms (the host root's `FileSystemWatcher` reload beats the 5 s poll).
+- **Racily clean entries (deviation, found live).** One live run showed `middleware.ts`, edited *before* following, as changed
+  since. The suite commits and then rewrites that file with content of the same size in the same second, so the real index
+  entry is "racily clean"; git checks such an entry's content only when its mtime is not older than the **index file's**
+  mtime, and `cp` gave the copy a fresh mtime, so `add -A` trusted the stale stat and the baseline recorded HEAD's content.
+  Reproduced in a scratch repo (`core.trustctime=false`, mtimes set to one second): the plan's script records `aaaa`, the fixed
+  one `bbbb`. Fix: `cp "$gi" "$d/index"; touch -r "$gi" "$d/index"` (POSIX, BusyBox has it), with a unit test for it.
+  Every other line of the script is as written.
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 271 passing, 50 pending (opt-in live suites); before this phase
+  238 / 48. No dependencies added. `git diff --stat -- devc-vscode` empty.
+- New unit tests: `git.test.ts` (snapshot: index and status byte-identical before and after with a staged change and an
+  untracked file, linked worktree, no commits, no index, no `herdr-vscode.*` left in a private `TMPDIR`, failure message, racy
+  entry; since: `M`/`A`/`D` by path, `T`→`M`, commit counts, pruned tree; `herdr-git` at a tree and invalid queries spawning
+  nothing; worktree ids and markers; the XY table), `baselines.test.ts` (time labels with a fixed `now`, store, prune, move),
+  `decorations.test.ts` (table, untracked dir and children, since letters, yielding to a fake Git API and re-firing on its events,
+  old ∪ new URI arrays), `paneContext.test.ts` (sections and labels, descriptions with commits, `No changes since`, warning row,
+  All Changes collapsed, since-row URIs and commands, reload on the same memento, Reset Baseline, lost baseline logged, `pane.moved`
+  and close pruning through the view, Open Changes title, Terminal Here's `creationOptions`, Open in Source Control making the
+  **real** `vscode.git` API's `getRepository` return the temp repo, other-pane markers with a real linked worktree, the `when`
+  regexes, inline order and Command Palette hiding), `paths.test.ts` (container query, `joinPath`, the formatters JSON) and
+  `remoteFs.test.ts` (every provider test now on a URI with the label query).
+- Live (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`), four full runs and three of the Pane Context suite alone: after the `touch -r` fix,
+  two full runs 316 and 314 passing, 4 pending, and 16/16 three times alone. Every full run fails the pre-existing `live model … lists
+  only the isolated session` (the home lists `default` and `hv-ctl`). Intermittent: `liveTiles` "tile headers follow the model"
+  (known flaky) and, once, `livePaneContext` "a pinned pane follows a real move to another workspace" (timed out waiting for the
+  new key; it passed in the other five runs that reached it, including all three alone, and the pin code path is unchanged apart
+  from also moving baselines first). `hv-test` and `hv-ctl` were stopped and deleted and `/tmp/hvt` removed.
+- Not run: anything in a real VS Code window (badges and colours as rendered, folder dots, one badge vs two on a workspace repo,
+  editor titles and hovers with the labels, the inline icons, the Source Control view listing the repo, the terminal editor tab).
+
+### Deviations and decisions
+
+- `touch -r` in the snapshot script (above).
+- Snapshots run through one queue per view (load, poll, Reset Baseline), so two loads of the same (pane, toplevel) never both take
+  a first baseline. The plan's "under the poll's existing guard" alone would not cover loads.
+- A failed snapshot shows the warning row even when a baseline exists (a poll that fails later), and Changed in This Pane then
+  has no description; markers for since rows are dropped while it fails.
+- The commit count is re-read only when HEAD changed since the last poll.
+- `herdr-git` URIs keep `parseGitHeadUri` (now for any revision; the revision is `uri.query`); `gitRevisionUri` makes them,
+  `gitHeadUri` is `gitRevisionUri(…, 'HEAD')`. The provider class keeps its name `GitHeadContentProvider`.
+- `environmentUri` and `EnvironmentPaths.uriFor` now need the environment's `label` (type `UriEnvironment`).
+- `rootContextValue` flags are in the order ` addable showable scm terminal`; the `when` regexes do not depend on the order.
+- `PaneDecorations` is one provider for the window, fed by the view (`decorations.set`), cleared when nothing is followed, the root
+  is not a repo, or the view is disposed. Since-row decorations carry the tooltip `Added since HH:MM`.
+- **Open in Source Control** says `herdr: VS Code's Git did not open <fsPath>. See Output › Git.` with the host path (`rootUri.fsPath`).
+- Other Panes' markers are computed in `getChildren` for the section (awaited, so the rows come with their markers), cached per
+  `<env key>\n<dir>` and cleared on every load (which a host root's watcher triggers often) and on Refresh.
+- Dragging a Changed in This Pane row onto an editor group (phase 18's tree drag) carries its `resourceUri`, which has the
+  `#herdr-since` fragment; not checked in a window whether that opens a separate document from the plain file.
+
+### For later phases
+
+- Phase 21 (Ask Agent): the followed pane's repo is `loaded.toplevel` in `PaneContextView`; `herdr-git` URIs now take any
+  `HEAD`/SHA revision through `gitRevisionUri`, and any query outside `/^(?:HEAD|[0-9a-f]{40,64})$/` gives `''` with nothing run.
+  Container URIs from `environmentUri` carry `?{"label":…}`: compare URIs by `toString()` and build container URIs only through
+  `environmentUri` / `EnvironmentPaths.uriFor`, or the same file opens as two documents. Comment threads on a since row's URI
+  would have its `#herdr-since` fragment; use the plain URI (`SinceNode.fileUri`).
+- Phases 22/23: nothing here touches tiles, mirroring or the Spaces/Agents rows. herdr workspace ids come back after a server restart
+  (above), so anything keyed by pane id across restarts should prune on absence too.
