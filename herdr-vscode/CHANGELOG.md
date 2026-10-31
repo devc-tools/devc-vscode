@@ -4,6 +4,12 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Pane Context** view: the repo, branch, changes and file tree of the pane you last clicked into, or
+  herdr's focused pane until you have. **Pin** / **Unpin**, **Add to Workspace**, **Split Pane Here**, **Show Pane**,
+  **Open Changes**, and **New File…**, **New Folder…**, **Rename…**, **Delete…** on its Files rows.
+- Paths printed in a tile are links: they open the file beside the tile at `:line[:col]`.
+- `herdr-container:` and `herdr-ssh:` read-write file systems for files with no local path (container paths
+  outside the bind mounts, SSH hosts), which notice outside changes to open files within about 5 s.
 - Layout tabs: named editor tabs holding any panes from any session, arranged freely with stacks,
   drag and maximise, and saved per workspace. **New Layout**, **Open Layout…**, **Rename Layout…**,
   **Delete Layout…**, **Add to Layout**, and **Copy as Layout** on a mirrored tab's toolbar. They never

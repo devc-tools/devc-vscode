@@ -21,19 +21,19 @@ under `herdr-vscode/`.
 
 ## Checklist
 
-- [ ] 1. Followed-pane rule, pin state, and the view header
-- [ ] 2. Environment paths → VS Code URIs: host `file:`, container bind mounts → host `file:`,
+- [x] 1. Followed-pane rule, pin state, and the view header
+- [x] 2. Environment paths → VS Code URIs: host `file:`, container bind mounts → host `file:`,
       other container paths → `herdr-container:`, SSH → `herdr-ssh:`
-- [ ] 3. Port devc-vscode's read-write providers (`CoreutilsFileSystemProvider` and its container
+- [x] 3. Port devc-vscode's read-write providers (`CoreutilsFileSystemProvider` and its container
       and SSH subclasses) as `herdr-container` and `herdr-ssh`, with authority checks and
       change polling for open documents
-- [ ] 4. Git in the environment: toplevel, branch, ahead/behind, changed files
-- [ ] 5. `herdr.paneContext` view: Repo row, Changes, Files, Other Panes in This Space
-- [ ] 6. Actions: Add to Workspace, Split Pane Here, Show Pane, Open Changes, Pin / Unpin
-- [ ] 7. Terminal links in tiles (webview link provider → resolve in the environment → open beside)
-- [ ] 8. Refresh rules
-- [ ] 9. Tests (list under Validation)
-- [ ] 10. README, CHANGELOG, `docs/how-it-works.md`
+- [x] 4. Git in the environment: toplevel, branch, ahead/behind, changed files
+- [x] 5. `herdr.paneContext` view: Repo row, Changes, Files, Other Panes in This Space
+- [x] 6. Actions: Add to Workspace, Split Pane Here, Show Pane, Open Changes, Pin / Unpin
+- [x] 7. Terminal links in tiles (webview link provider → resolve in the environment → open beside)
+- [x] 8. Refresh rules
+- [x] 9. Tests (list under Validation)
+- [x] 10. README, CHANGELOG, `docs/how-it-works.md`
 
 ## Contracts
 
@@ -156,7 +156,7 @@ Added to `views.herdr` after Agents. Rows:
 
 ## Validation
 
-- [ ] `npm test` (in `herdr-vscode/`) passes, including unit tests for: followed-pane rule (TUI focus
+- [x] `npm test` (in `herdr-vscode/`) passes, including unit tests for: followed-pane rule (TUI focus
       used before any tile focus, ignored after; pinned ignores both); bind-mount mapping
       (longest destination wins; unmapped → `herdr-container:`); porcelain parsing (branch with
       upstream ahead/behind, detached, no upstream, rename record skipping, `??` untracked);
@@ -208,3 +208,80 @@ Added to `views.herdr` after Agents. Rows:
 - `herdr-vscode/src/test/*.test.ts`
 - `herdr-vscode/README.md`, `CHANGELOG.md`, `docs/how-it-works.md`
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Status (2026-10-30)
+
+Implemented; none of the Manual items above were run, because they need a person in VS Code, so they stay
+unticked and the plan stays out of `implemented/`. No Docker and no SSH host here: the container and SSH
+paths have unit tests only, with no live evidence at all. In particular **no real `docker inspect` output and no real
+container or ssh save was seen**; the argv are checked, and the same commands really ran on local temp directories.
+
+### Measured (herdr 0.9.5, on throwaway `hv-test`)
+
+- **A `cd` emits no event at all**, and `pane rename` no `pane.updated`, with `pane.updated` subscribed. The snapshot
+  follows only events, so `foreground_cwd` in it goes stale. The contract's "on `pane.updated`" alone would
+  never see a `cd`. So, besides that, the 5 s pass asks `pane.get` (`{"type":"pane_info","pane":{…,"foreground_cwd"}}`), and has
+  the session re-take its snapshot when the directory differs. Live: `cd` to the view in 2.9–3.3 s.
+- `pane.focused` data: `{"pane_id","workspace_id","type":"pane_focused"}`. `session.snapshot` has `focused_pane_id`, and it moves
+  with `pane.focus`. Live: herdr focus to the view in 230–350 ms, through the snapshot.
+- Real `git status --porcelain=v1 -z --branch` in temp repos: `## main`, upstream with `[ahead N]`, `## HEAD (no branch)`,
+  and `## No commits yet on <b>` (not in the contract). **A rename can be in the second column** (` R`, after `git add -N`),
+  and has an original-path record as well, so skipping on `X` alone would misparse: both columns are checked. A
+  wholly untracked directory is one path ending in `/`.
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 176 passing, 43 pending (opt-in live suites). `npx vsce ls`
+  lists no `node_modules` and nothing new is needed. `git diff --stat -- devc-vscode` is empty. `node_modules/@esbuild/`
+  has both platforms; nothing was installed.
+- With `HERDR_VSCODE_LIVE_HOME` on throwaway `hv-test` in an isolated `HOME`: 215 passing, 4 pending (`live.test.ts`, which
+  needs `HERDR_VSCODE_LIVE_SESSION`, and `HERDR_VSCODE_LIVE_STOP`). New `src/test/livePaneContext.test.ts`, on a real tree view
+  (`createTreeView`), real herdr, a real webview and temp repos, covers, as evidence for the Manual items but not a replacement:
+  herdr focus followed before a tile and ignored after; the header's text; switching tiles; Pin and Unpin; real status counts;
+  a `cd`; an outside change showing in the count; opening a Files row by its item's command, editing and saving to disk; `pane.split` really
+  below in the root with focus kept; printed paths in a real tile, hovered and clicked with synthetic mouse events through xterm's
+  linkifier, opening beside with the selection (relative with `:line:col`, `~/` against the environment's `$HOME`), a missing path opening nothing, and a
+  directory selected in the real tree; a real cross-workspace `pane move` with the pin and `lastFocused` following.
+- The default run (`paneContext.test.ts`, `git.test.ts`, `remoteFs.test.ts`), real but local and in temp directories only: provider
+  operations with real coreutils; a real editor on a provider over a test scheme, reloading after an outside change with one poll, and saving
+  through the provider in place (inode and mode kept); a read-only file giving `NoPermissions`; a stand-in `docker` script showing
+  `exec -i -u vscode <id> cat -- /x`; `vscode.diff`'s real tab and its title; the registered providers refusing unknown authorities through
+  `workspace.fs`; `isWritableFileSystem` true.
+
+Not exercised at all, each needing a person or a real environment:
+
+- Everything against a real container or SSH host, including Source Control and language features on mapped `file:` paths,
+  and a real permission error under `/etc`.
+- A real click in the tree, inline action icons and their `when` clauses in a real window (the `when` regexes are tested as data).
+  **Add to Workspace** was never run (adding the first folder restarts the extension host); only `canAddToWorkspace` is tested. The prompts of New, Rename and
+  Delete (input box, modal; the test host refuses modals); `createEntry`, `renameEntry` and `deleteEntry` behind them are tested on a temp repo.
+- **Show Pane**: it runs the extension's own command, whose model discovers nothing under test; `paneClickCommand` is tested.
+- Real mouse and pixels: nobody looked at the underline, and no screenshot was taken of this view.
+
+### Deviations and decisions
+
+- **Link regex.** As written it does not meet its own Validation: `~/n.txt` needs two segments, so only `n.txt` matched; and it does match
+  `/x.y/z` inside `http://x.y/z`, and all of `1.2.3`. So there is a first alternative for `~/x`, `./x`, `../x`, and `findPathLinks` drops a match in a
+  token with `://` and all-digit names, and strips a trailing full stop (`see src/a.ts.`, which agents print all the time).
+- `git --no-optional-locks -C <toplevel> status …` rather than the contract's argv: it runs every 5 s in a repo an agent works in, and a plain
+  `git status` can take `index.lock` and make the agent's `git add` fail.
+- `herdr-git` URIs add a **fragment**, the length of the toplevel: nothing else says where `<toplevel>` ends in `<toplevel>/<path>`, and it must survive a reload.
+- **Create, rename, delete in Files** are in the Manual list but not in the contract's actions. Added `herdr.paneContext.newFile`, `newFolder`, `rename`, `delete`
+  through `workspace.fs`, for local and remote alike. Delete asks, and is permanent (`useTrash: false`); New does not overwrite.
+- Docker Desktop's `/host_mnt` prefix is dropped from `Source`, as devc-vscode's `parseBindMounts` does; otherwise no mapped path would exist on a Mac.
+- "Re-read when the container restarts": `Environments.onDidContainerEvent` from the `docker events` lines, since a quick restart can fall inside the 500 ms debounce and
+  never change the environment list.
+- `herdr-ssh` authorities are looked up ignoring case (`Environments.find`), since `Uri.toString()` lower-cases them; the shell gets the alias from settings. An authority
+  check that happens before discovery is done would fail every restored editor after a reload, so the container provider awaits `containersSettled()` first (`whenKnown`).
+- A pane key changes on a cross-workspace move: `FocusTracker` moves `lastFocused` itself on `pane.moved`, whatever the tile did, and the view moves the pin.
+- Other Panes' rows also have the pane context menu of Spaces. Their section refreshes alone when its rows change (`emitter.fire(group)`): terminal titles change all the
+  time and Files may be remote.
+- A deleted change row opens as HEAD has it, for click and Open Changes both (there is no working file); an untracked-directory row (`dir/`) has no click and no actions.
+- A pin on a pane that is gone says *The pinned pane is not available. Unpin to follow panes again.* rather than "Click into a pane".
+- A directory that cannot be read gives one warning row with the error, rather than an empty section. `.git` is listed in Files: the contract filters nothing.
+- A hidden view does not load or poll, and catches up when shown, except that a link to a directory loads first, to reveal.
+- `TilesPanels` gained `showsPane`, `onDidChangeTiles`, `onDidRequestLink`. `SnapshotPane`'s snapshot gained `focusedPaneId`.
+- The webview's probe gained `hoverCell`, `clickCell`, `overLink`, for tests. xterm puts `xterm-cursor-pointer` on `.xterm-screen`, not on `.xterm`.
+- `remoteFs.ts` keeps the two-space format of the code it was ported from, as `remoteShell.ts` does.

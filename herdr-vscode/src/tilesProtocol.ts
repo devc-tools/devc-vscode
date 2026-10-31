@@ -70,6 +70,10 @@ export type ProbeAction =
 	/** The X on a tile's own tab. */
 	| { kind: 'clickTabClose'; paneKey: string }
 	| { kind: 'clickRemove'; paneKey: string }
+	/** Moves the mouse over a cell (0-based) with synthetic events. */
+	| { kind: 'hoverCell'; paneKey: string; col: number; row: number }
+	/** A press and release where the mouse is, as a click on a link needs. */
+	| { kind: 'clickCell'; paneKey: string; col: number; row: number }
 	/** Drags a tile's tab to the right edge of the tile area with synthetic pointer events. */
 	| { kind: 'dragToRightEdge'; paneKey: string };
 
@@ -86,6 +90,8 @@ export interface TileProbe {
 	y: number;
 	title: string;
 	overlay: string;
+	/** Whether the terminal shows the pointer cursor, as it does over a link. */
+	overLink: boolean;
 }
 
 export type WebviewMessage =
@@ -106,4 +112,6 @@ export type WebviewMessage =
 	| { type: 'reconnect'; paneKey: string }
 	| { type: 'clipboardPaste'; paneKey: string }
 	| { type: 'clipboardCopy'; text: string }
+	/** A path printed in a tile was clicked: `text` is the link, with any `:line[:col]`. */
+	| { type: 'openLink'; paneKey: string; text: string }
 	| { type: 'probeResult'; id: number; tiles: TileProbe[]; breadcrumb: string; message: string; config: StoredLayoutConfig };

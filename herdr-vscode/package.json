@@ -17,6 +17,10 @@
     "onView:herdr.sessions",
     "onView:herdr.spaces",
     "onView:herdr.agents",
+    "onView:herdr.paneContext",
+    "onFileSystem:herdr-container",
+    "onFileSystem:herdr-ssh",
+    "onFileSystem:herdr-git",
     "onStartupFinished",
     "onWebviewPanel:herdr.tiles"
   ],
@@ -44,6 +48,10 @@
         {
           "id": "herdr.agents",
           "name": "Agents"
+        },
+        {
+          "id": "herdr.paneContext",
+          "name": "Pane Context"
         }
       ]
     },
@@ -138,6 +146,70 @@
         "title": "Show Working",
         "category": "herdr",
         "icon": "$(sync)"
+      },
+      {
+        "command": "herdr.paneContext.pin",
+        "title": "Pin",
+        "category": "herdr",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "herdr.paneContext.unpin",
+        "title": "Unpin",
+        "category": "herdr",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "herdr.paneContext.refresh",
+        "title": "Refresh",
+        "category": "herdr",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "herdr.paneContext.addToWorkspace",
+        "title": "Add to Workspace",
+        "category": "herdr",
+        "icon": "$(root-folder-opened)"
+      },
+      {
+        "command": "herdr.paneContext.splitPane",
+        "title": "Split Pane Here",
+        "category": "herdr",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "herdr.paneContext.showPane",
+        "title": "Show Pane",
+        "category": "herdr",
+        "icon": "$(window)"
+      },
+      {
+        "command": "herdr.paneContext.openChanges",
+        "title": "Open Changes",
+        "category": "herdr",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "herdr.paneContext.newFile",
+        "title": "New File…",
+        "category": "herdr",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "herdr.paneContext.newFolder",
+        "title": "New Folder…",
+        "category": "herdr",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "herdr.paneContext.rename",
+        "title": "Rename…",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.paneContext.delete",
+        "title": "Delete…",
+        "category": "herdr"
       }
     ],
     "menus": {
@@ -166,23 +238,88 @@
           "command": "herdr.agents.showWorking",
           "when": "view == herdr.agents",
           "group": "navigation@3"
+        },
+        {
+          "command": "herdr.paneContext.pin",
+          "when": "view == herdr.paneContext && !herdr.paneContextPinned",
+          "group": "navigation@1"
+        },
+        {
+          "command": "herdr.paneContext.unpin",
+          "when": "view == herdr.paneContext && herdr.paneContextPinned",
+          "group": "navigation@1"
+        },
+        {
+          "command": "herdr.paneContext.refresh",
+          "when": "view == herdr.paneContext",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "herdr.addToLayout",
-          "when": "view =~ /^herdr\\.(spaces|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "navigation@1"
         },
         {
           "command": "herdr.openPaneTab",
-          "when": "view =~ /^herdr\\.(spaces|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "navigation@2"
         },
         {
           "command": "herdr.focusPane",
-          "when": "view =~ /^herdr\\.(spaces|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "navigation@3"
+        },
+        {
+          "command": "herdr.paneContext.addToWorkspace",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* addable/",
+          "group": "inline@1"
+        },
+        {
+          "command": "herdr.paneContext.splitPane",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root/",
+          "group": "inline@2"
+        },
+        {
+          "command": "herdr.paneContext.showPane",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* showable/",
+          "group": "inline@3"
+        },
+        {
+          "command": "herdr.paneContext.openChanges",
+          "when": "view == herdr.paneContext && viewItem == herdr.paneContext.change",
+          "group": "inline@1"
+        },
+        {
+          "command": "herdr.paneContext.newFile",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(files|folder)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "herdr.paneContext.newFolder",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(files|folder)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "herdr.paneContext.newFile",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(file|folder)$/",
+          "group": "1_new@1"
+        },
+        {
+          "command": "herdr.paneContext.newFolder",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(file|folder)$/",
+          "group": "1_new@2"
+        },
+        {
+          "command": "herdr.paneContext.rename",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(file|folder)$/",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "herdr.paneContext.delete",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(file|folder)$/",
+          "group": "2_edit@2"
         }
       ],
       "commandPalette": [
@@ -200,6 +337,38 @@
         },
         {
           "command": "herdr.addToLayout",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.addToWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.splitPane",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.showPane",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.openChanges",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.newFile",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.newFolder",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.rename",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.delete",
           "when": "false"
         }
       ]

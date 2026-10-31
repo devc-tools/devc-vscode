@@ -8,6 +8,7 @@ import { componentStates, PaneComponentState, StoredLayoutConfig } from '../layo
 import { addPaneAtRoot, addPlacement, layoutPaneKeys, rewritePane } from '../layouts';
 import { HostMessage, makePaneKey, PanelState, ProbeAction, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
 import { createWheelAccumulator, wrapPaste } from './input';
+import { findPathLinks } from './links';
 
 /**
  * The `herdr.tiles` webview: a toolbar, and a Golden Layout area of xterm tiles,
@@ -134,6 +135,37 @@ function createTile(paneKey: string): Tile {
 	tile.observer.observe(host);
 
 	term.onData((text) => post({ type: 'input', paneKey, text }));
+
+	term.registerLinkProvider({
+		provideLinks(y, callback) {
+			const line = term.buffer.active.getLine(y - 1);
+			if (!line) {
+				callback(undefined);
+				return;
+			}
+			// Text and, per UTF-16 unit of it, its cell: a wide character takes two cells and one unit.
+			let text = '';
+			const cells: number[] = [];
+			for (let x = 0; x < line.length; x++) {
+				const cell = line.getCell(x);
+				if (cell && cell.getWidth() === 0) {
+					continue;
+				}
+				const chars = cell?.getChars() || ' ';
+				text += chars;
+				cells.push(...Array.from({ length: chars.length }, () => x));
+			}
+			const links = findPathLinks(text).map((link) => ({
+				text: link.text,
+				range: {
+					start: { x: cells[link.start] + 1, y },
+					end: { x: cells[link.start + link.text.length - 1] + 1, y },
+				},
+				activate: () => post({ type: 'openLink', paneKey, text: link.text }),
+			}));
+			callback(links.length ? links : undefined);
+		},
+	});
 
 	const wheelToScroll = createWheelAccumulator();
 	term.attachCustomWheelEventHandler((ev) => {
@@ -580,6 +612,7 @@ function probeTile(tile: Tile): TileProbe {
 		y: Math.round(box.y),
 		title: tabs.get(tile.paneKey)?.textContent ?? '',
 		overlay: tile.overlay.hidden ? '' : (tile.overlay.textContent ?? ''),
+		overLink: tile.termEl.querySelector('.xterm-cursor-pointer') !== null,
 	};
 }
 
@@ -594,6 +627,19 @@ function runProbeAction(action: ProbeAction): void {
 		tabs.get(action.paneKey)?.querySelector<HTMLElement>('.lm_close_tab')?.click();
 	} else if (action.kind === 'clickRemove') {
 		tile?.overlay.querySelector('button')?.click();
+	} else if (action.kind === 'hoverCell' || action.kind === 'clickCell') {
+		const screen = tile?.termEl.querySelector('.xterm-screen');
+		if (tile && screen) {
+			const box = screen.getBoundingClientRect();
+			const at = { clientX: box.x + ((action.col + 0.5) * box.width) / tile.term.cols, clientY: box.y + ((action.row + 0.5) * box.height) / tile.term.rows };
+			const mouse = (type: string) => screen.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, ...at }));
+			if (action.kind === 'hoverCell') {
+				mouse('mousemove');
+			} else {
+				mouse('mousedown');
+				mouse('mouseup');
+			}
+		}
 	} else {
 		dragToRightEdge(action.paneKey);
 	}

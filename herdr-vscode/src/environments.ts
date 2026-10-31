@@ -87,6 +87,9 @@ export class Environments implements vscode.Disposable {
 	private readonly envs = new Map<string, Environment>();
 	private readonly changed = new vscode.EventEmitter<EnvironmentsChange>();
 	readonly onDidChange = this.changed.event;
+	private readonly containerEvents = new vscode.EventEmitter<string>();
+	/** A container started or died (a restart can be too quick for `onDidChange` to see it), by its id. */
+	readonly onDidContainerEvent = this.containerEvents.event;
 
 	private settings = readSettings();
 	private readonly controlDir = ensureControlDir();
@@ -133,6 +136,17 @@ export class Environments implements vscode.Disposable {
 
 	get(key: string): Environment | undefined {
 		return this.envs.get(key);
+	}
+
+	/** The environment with this key, ignoring case: `Uri.toString()` lower-cases an authority. */
+	find(key: string): Environment | undefined {
+		const lower = key.toLowerCase();
+		return this.envs.get(key) ?? [...this.envs.values()].find((e) => e.key.toLowerCase() === lower);
+	}
+
+	/** Settles when the container pass under way, if any, is done. */
+	containersSettled(): Promise<void> {
+		return this.containerRun;
 	}
 
 	/** First discovery, and the Docker events watcher. */
@@ -268,6 +282,7 @@ export class Environments implements vscode.Disposable {
 		if (child.stdout) {
 			readline.createInterface({ input: child.stdout }).on('line', (line) => {
 				if (line.trim()) {
+					this.containerEvents.fire(line.trim());
 					this.scheduleContainers();
 				}
 			});
@@ -295,5 +310,6 @@ export class Environments implements vscode.Disposable {
 		this.dockerEvents?.kill();
 		this.configListener.dispose();
 		this.changed.dispose();
+		this.containerEvents.dispose();
 	}
 }

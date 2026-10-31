@@ -274,3 +274,72 @@ The mirrored panel's webview posts its `saveLayout()`; `asLayoutConfig` turns on
 **and on each component**. Golden Layout's tab takes a component's `reorderEnabled` before the
 settings', and a component without one resolves to `true`, so a mirrored tab's components carry
 `reorderEnabled: false` themselves.
+
+## Pane Context
+
+`src/paneContext.ts`. The followed pane is the pinned pane, else `FocusTracker.lastFocused`, else, while
+no tile has been focused in this window, the selected session's `focused_pane_id`. The snapshot is what
+carries that: `pane.focused` (`{"pane_id","workspace_id"}`) re-takes it like any event. `pane.moved` to another
+workspace changes a pane's id, so the pin and `lastFocused` move to the new key. A followed pane that is gone,
+or whose session is not connected, shows no rows; a pin stays until **Unpin**. Pin is not persisted.
+
+### Refreshing
+
+- A new followed pane or directory (`foreground_cwd ?? cwd`) reloads. So do **Refresh**, `pane.updated`, and
+  for a `file:` root, a `FileSystemWatcher` on the root, debounced 500 ms.
+- While the view is visible, every 5 s: `pane.get` for the pane's directory, and git status. **herdr 0.9.5 emits
+  no event for a `cd`, nor `pane.updated` for a rename**, and the snapshot follows only events: when `pane.get`
+  says something new, the session re-takes its snapshot. The tree refreshes only when the status changed.
+- A hidden view does not load or poll, and catches up when it is shown. Other Panes refreshes alone when its rows change,
+  since terminal titles change all the time and Files may be remote.
+
+### Git
+
+`src/git.ts`, run in the pane's environment:
+
+```
+git -C <dir> rev-parse --show-toplevel                                  # non-zero: not a repo
+git --no-optional-locks -C <toplevel> status --porcelain=v1 -z --branch
+git -C <toplevel> rev-parse --short HEAD                                # detached only
+git -C <toplevel> show HEAD:<path>                                      # Open Changes; empty on failure
+```
+
+`--no-optional-locks`, because this runs every 5 s in a repo an agent is working in, and must not take
+`index.lock` from under it. The first record is `## <branch>[...<upstream>][ [ahead N][, behind M]]`, `## HEAD (no
+branch)` or `## No commits yet on <branch>`. A rename or copy, in **either** status column (` R` comes from
+`git add -N`), has its original path as the next record, which is skipped. An untracked directory is one path ending
+in `/`, with nothing to open. A deleted path opens as HEAD has it.
+
+The left side of **Open Changes** is `herdr-git://<env key>/<toplevel>/<path>?HEAD#<length of toplevel>`:
+the fragment says where the toplevel ends, and survives a window reload. An unknown environment gets an empty document, with nothing run.
+
+### Paths
+
+`src/paths.ts`. Host: `file://<path>`. SSH: `herdr-ssh://<alias><path>`. Container: the bind mounts from
+`docker inspect --format '{{json .Mounts}}' <id>` (`"Type":"bind"`, with Docker Desktop's `/host_mnt` taken off the
+`Source`); under a `Destination`, longest first, a path is `file://<Source><rest>`, otherwise
+`herdr-container://<id12><path>`. Mounts are cached per container until a Docker `start` or `die` event for it, or
+until its environment goes. `$HOME` (`printenv HOME`) is cached per environment.
+
+### Read-write file systems
+
+`src/remoteFs.ts`, ported from devc-vscode's `devcontainerFs.ts` and `sshFs.ts`: stat, find, cat, `sh -c 'cat > "$1"'`,
+mkdir, rmdir, `rm -rf`, mv, over `DockerShell` as the remote user or `SshShell`. Any URI of these schemes reaches
+the providers from anywhere, so the authority is checked before anything is spawned: a 12-char id of a
+discovered dev container, or a host in `herdr.sshHosts` (ignoring case: `Uri.toString()` lower-cases authorities).
+Otherwise `FileSystemError.Unavailable`. An editor restored by a reload asks before discovery is done, so the container
+provider waits for the discovery pass under way before judging.
+
+`watch` is a no-op. `ChangePoller` stats each open text document of these schemes every 5 s, and on open for
+the baseline; a different `mtime` or `size` fires `Changed`, so a clean editor reloads and a dirty one prompts
+on save. `stat -c %Y` has 1 s resolution: a same-size change within the second is missed. A document stops being
+polled when it closes. Saving one fires `Changed` twice, harmlessly: once from the save, once from the poll.
+
+### Terminal links
+
+`src/webview/links.ts`, in an xterm link provider on every tile. The link text is posted as `openLink`; `TilesPanels`
+raises `onDidRequestLink`, and the view resolves it in the pane's environment (absolute; `~/…` against `$HOME`; otherwise
+against the pane's directory), checks `test -e`, then `test -d`. A file opens through `vscode.open` in `ViewColumn.Beside`
+with the selection at `line:col`; a directory is revealed in Files when under the root.
+Besides the regex itself, a match in a token with `://` is dropped, as is a number like `1.2.3`, and a trailing full stop
+is not part of the path. Cell positions come from `getCell`, since a wide character is two cells and one string unit.

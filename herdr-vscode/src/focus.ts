@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { parsePaneMoved } from './layouts';
 import { Snapshot, paneLabel, hasAgent, SessionModel } from './sessions';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 
@@ -32,7 +33,7 @@ export class FocusTracker implements vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<string | undefined>();
 	/** The last focused pane's key, whenever it changes. */
 	readonly onDidChangeLastFocused = this.emitter.event;
-	private readonly listener: vscode.Disposable;
+	private readonly listeners: vscode.Disposable[];
 	private last: string | undefined;
 
 	constructor(
@@ -41,11 +42,27 @@ export class FocusTracker implements vscode.Disposable {
 	) {
 		this.item.name = 'herdr focused pane';
 		this.item.command = REVEAL_FOCUSED_COMMAND;
-		this.listener = model.onDidChange(() => this.update());
+		this.listeners = [
+			model.onDidChange(() => this.update()),
+			model.onDidEvent((e) => {
+				const moved = e.event.event === 'pane.moved' ? parsePaneMoved(e.event.data) : undefined;
+				if (moved && this.last === makePaneKey(e.sessionKey, moved.from)) {
+					this.set(e.sessionKey, moved.to);
+				}
+			}),
+		];
 	}
 
 	get lastFocused(): string | undefined {
 		return this.last;
+	}
+
+	/**
+	 * The pane herdr's own focus is on in a session, from its latest snapshot:
+	 * `pane.focused` takes a new snapshot like any event.
+	 */
+	herdrFocused(sessionKey: string): string | undefined {
+		return this.model.connection(sessionKey)?.snapshot?.focusedPaneId;
 	}
 
 	set(sessionKey: string, paneId: string): void {
@@ -71,7 +88,9 @@ export class FocusTracker implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.listener.dispose();
+		for (const listener of this.listeners) {
+			listener.dispose();
+		}
 		this.emitter.dispose();
 		this.item.dispose();
 	}

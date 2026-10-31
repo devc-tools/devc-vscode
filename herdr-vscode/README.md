@@ -1,7 +1,7 @@
 # herdr-vscode
 
 herdr sessions, spaces, agents and panes in VS Code, for people who already use
-[herdr](https://herdr.dev). The **herdr** activity-bar container has three views:
+[herdr](https://herdr.dev). The **herdr** activity-bar container has four views:
 
 - **Sessions**: every herdr session on this machine, on the SSH hosts in `herdr.sshHosts`, and
   in every running dev container. Each running session shows its agents' counts
@@ -13,6 +13,7 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   for a pane in Spaces. The title bar filters to blocked or working agents. The number of blocked agents shows as a badge on the
   herdr icon and as a `<n> blocked` warning in the status bar; clicking the status bar item
   shows the blocked agents.
+- **Pane Context**: the repo, changes and files of the pane you are working with (below).
 
 ## herdr tabs in the editor area
 
@@ -59,6 +60,37 @@ arrangement belongs to VS Code: it never changes herdr's tabs or splits.
   A pane that no longer exists says *This pane is gone.*, with **Remove**. A pane moved to another
   space in herdr stays in the tile, while VS Code is running to see the move.
 
+## Pane Context
+
+The **Pane Context** view shows the repo, changes and file tree of the pane you last clicked into, so
+VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
+herdr's own focus in the selected session; after that only tiles count. Clicking into a file editor or
+another view changes nothing, and **Pin** stops it following. The header says which pane it is, and when
+no tile in this window shows it, which **Show Pane** on the repo row fixes.
+
+- **Repo row:** the repo (or directory, outside a repo), branch, changed count, ahead and behind.
+  **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
+  the action is there only for local paths. **Split Pane Here** makes a herdr pane below, in that folder.
+- **Changes:** click to open; **Open Changes** shows a `HEAD ↔ working tree` diff.
+- **Files:** the tree; click to open. **New File…**, **New Folder…**, **Rename…** and **Delete…** are on the
+  rows. Delete is permanent.
+- **Other Panes in This Space:** as in Spaces.
+- **Paths printed in a tile are links.** `src/auth/middleware.ts:19`, `./x/y.md`, `~/n.txt` and `README.md`
+  are underlined on hover, and resolved where the pane runs, against its directory. Clicking opens the file
+  beside the tile at that line, reveals a directory in Files, and does nothing for a path that does not exist.
+
+Everything it can reach is editable:
+
+| Where the file is | How it opens | What you get |
+| --- | --- | --- |
+| This machine; a container path on a bind mount | a plain `file:` URI | everything: language servers, Source Control, search |
+| A container path outside the mounts | `herdr-container://<id>/<path>` | edit and save, as the container's remote user, keeping owner and mode |
+| An SSH host | `herdr-ssh://<alias>/<path>` | edit and save |
+
+The last two have no language servers, Source Control or search, since those need local files. They need GNU
+coreutils and findutils there (BusyBox, as on Alpine, is not supported). A save overwrites in place and is not atomic.
+An open editor of such a file notices outside changes within about 5 s (`mtime`, at 1 s resolution, or size).
+
 ## Requirements
 
 - herdr **0.9.5 or later** in each environment, on `PATH` or in `~/.local/bin`. Older herdr
@@ -99,7 +131,8 @@ npm run package:dev   # build a .vsix and install it into `code`
 
 `npm test` never discovers the machine's herdr sessions (`.vscode-test.mjs` sets
 `HERDR_VSCODE_NO_DISCOVERY=1`). `src/test/layoutPanels.test.ts` opens real webviews over a made-up
-model, so it needs the build, and reaches no herdr. Opt-in suites run against a throwaway session:
+model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.ts`, `git.test.ts` and
+`remoteFs.test.ts` run real `git` and coreutils, only in temp directories. Opt-in suites run against a throwaway session:
 
 - `HERDR_VSCODE_LIVE_SESSION=<name>`: connects to that running session on this machine (it
   needs one workspace), splits a pane and reports agent states in it.
@@ -107,7 +140,7 @@ model, so it needs the build, and reaches no herdr. Opt-in suites run against a 
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, Layout tabs, and it stops and restarts that session's server. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
+  takeover, restore, Layout tabs, Pane Context, and it stops and restarts that session's server. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
   bytes).
 
 Open `herdr-vscode/` as the folder in VS Code and press <kbd>F5</kbd> (**Run Extension**) to build

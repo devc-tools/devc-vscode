@@ -19,7 +19,7 @@ suite('herdr-vscode', () => {
 		const views = ext.packageJSON.contributes.views.herdr as { id: string }[];
 		assert.deepStrictEqual(
 			views.map((v) => v.id),
-			['herdr.sessions', 'herdr.spaces', 'herdr.agents'],
+			['herdr.sessions', 'herdr.spaces', 'herdr.agents', 'herdr.paneContext'],
 		);
 		await ext.activate();
 		// Opening a view resolves its registered provider; an unregistered view would fail to focus.
@@ -74,7 +74,7 @@ suite('herdr-vscode', () => {
 		}
 		const menus = ext.packageJSON.contributes.menus;
 		assert.deepStrictEqual(
-			(menus['view/item/context'] as { command: string }[]).map((m) => m.command),
+			(menus['view/item/context'] as { command: string }[]).map((m) => m.command).filter((c) => !c.startsWith('herdr.paneContext.')),
 			['herdr.addToLayout', 'herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (ext.packageJSON.contributes.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
@@ -82,5 +82,39 @@ suite('herdr-vscode', () => {
 		await vscode.workspace.fs.stat(vscode.Uri.joinPath(ext.extensionUri, 'resources', 'layout.svg'));
 		// Without the session connected (the test host discovers nothing) nothing opens.
 		await vscode.commands.executeCommand('herdr.addToLayout', 'host/none', 'w1:p1');
+	});
+
+	test('pane context: the title bar, the actions, and the schemes', async () => {
+		const ext = extension();
+		await ext.activate();
+		const contributed = ext.packageJSON.contributes;
+		const icon = (c: string) => (contributed.commands as { command: string; icon?: string }[]).find((x) => x.command === c)?.icon;
+		assert.strictEqual(icon('herdr.paneContext.pin'), '$(pin)');
+		assert.strictEqual(icon('herdr.paneContext.unpin'), '$(pinned)');
+		assert.strictEqual(icon('herdr.paneContext.refresh'), '$(refresh)');
+		assert.strictEqual(icon('herdr.paneContext.addToWorkspace'), '$(root-folder-opened)');
+		assert.strictEqual(icon('herdr.paneContext.splitPane'), '$(split-horizontal)');
+		assert.strictEqual(icon('herdr.paneContext.showPane'), '$(window)');
+		assert.strictEqual(icon('herdr.paneContext.openChanges'), '$(diff)');
+		const title = contributed.menus['view/title'] as { command: string; when: string }[];
+		assert.match(title.find((m) => m.command === 'herdr.paneContext.pin')!.when, /!herdr\.paneContextPinned/);
+		assert.match(title.find((m) => m.command === 'herdr.paneContext.unpin')!.when, /(^|\s)herdr\.paneContextPinned/);
+		for (const event of ['onFileSystem:herdr-container', 'onFileSystem:herdr-ssh']) {
+			assert.ok((ext.packageJSON.activationEvents as string[]).includes(event), event);
+		}
+		await vscode.commands.executeCommand('herdr.paneContext.focus');
+		await vscode.commands.executeCommand('herdr.paneContext.refresh');
+		// Nothing is followed in the test host: the actions have nothing to do.
+		await vscode.commands.executeCommand('herdr.paneContext.pin');
+		await vscode.commands.executeCommand('herdr.paneContext.unpin');
+		await vscode.commands.executeCommand('herdr.paneContext.splitPane');
+		await vscode.commands.executeCommand('herdr.paneContext.showPane');
+		// The real providers are registered, and turn away what discovery has not found.
+		await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.parse('herdr-container://abcdefabcdef/etc/hosts'))), /Not a known dev container/);
+		await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.parse('herdr-ssh://nohost/etc/hosts'))), /SSH host is not in herdr.sshHosts/);
+		assert.strictEqual(vscode.workspace.fs.isWritableFileSystem('herdr-ssh'), true);
+		assert.strictEqual(vscode.workspace.fs.isWritableFileSystem('herdr-container'), true);
+		const left = await vscode.workspace.openTextDocument(vscode.Uri.parse('herdr-git://container:gone/r/a.ts?HEAD#2'));
+		assert.strictEqual(left.getText(), '');
 	});
 });

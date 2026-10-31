@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
-import { Environments } from './environments';
+import { containerKey, Environments, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
+import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
+import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView } from './paneContext';
+import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
+import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { SessionModel } from './sessions';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND } from './status';
 import { PaneStreams } from './streams';
@@ -57,6 +61,35 @@ export function activate(context: vscode.ExtensionContext): void {
 	const layouts = new LayoutStore(context.workspaceState);
 	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, layouts, rowLabel, log });
 	context.subscriptions.push(focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
+
+	const paths = new EnvironmentPaths(environments);
+	const containerFs = new ContainerFileSystemProvider(
+		(id) => environments.find(containerKey(id))?.shell,
+		() => environments.containersSettled(),
+	);
+	const sshFs = new SshFileSystemProvider((alias) => environments.find(sshKey(alias))?.shell);
+	const paneContext = new PaneContextView({
+		model: m,
+		focus,
+		sessions,
+		panels,
+		paths,
+		createHost: (treeDataProvider) => vscode.window.createTreeView(PANE_CONTEXT_VIEW, { treeDataProvider }),
+		log,
+	});
+	context.subscriptions.push(
+		paths,
+		paneContext,
+		vscode.workspace.registerFileSystemProvider(CONTAINER_SCHEME, containerFs, { isCaseSensitive: true }),
+		vscode.workspace.registerFileSystemProvider(SSH_SCHEME, sshFs, { isCaseSensitive: true }),
+		new ChangePoller(
+			new Map<string, PolledProvider>([
+				[CONTAINER_SCHEME, containerFs],
+				[SSH_SCHEME, sshFs],
+			]),
+		),
+		vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitHeadContentProvider((key) => environments.find(key))),
+	);
 
 	const pickLayout = async (placeHolder: string): Promise<SavedLayout | undefined> => {
 		const saved = layouts.list();
@@ -155,6 +188,17 @@ export function activate(context: vscode.ExtensionContext): void {
 				panels.revealPane(sessionKey, paneId);
 			}
 		}),
+		vscode.commands.registerCommand('herdr.paneContext.pin', () => paneContext.pin()),
+		vscode.commands.registerCommand('herdr.paneContext.unpin', () => paneContext.unpin()),
+		vscode.commands.registerCommand('herdr.paneContext.refresh', () => paneContext.refresh()),
+		vscode.commands.registerCommand('herdr.paneContext.addToWorkspace', () => paneContext.addToWorkspace()),
+		vscode.commands.registerCommand('herdr.paneContext.splitPane', () => paneContext.splitPane()),
+		vscode.commands.registerCommand('herdr.paneContext.showPane', () => paneContext.showPane()),
+		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode) => paneContext.openChanges(node)),
+		vscode.commands.registerCommand('herdr.paneContext.newFile', (node?: PaneContextNode) => paneContext.promptNew(node, 'file')),
+		vscode.commands.registerCommand('herdr.paneContext.newFolder', (node?: PaneContextNode) => paneContext.promptNew(node, 'folder')),
+		vscode.commands.registerCommand('herdr.paneContext.rename', (node?: PaneContextNode) => paneContext.promptRename(node)),
+		vscode.commands.registerCommand('herdr.paneContext.delete', (node?: PaneContextNode) => paneContext.promptDelete(node)),
 		vscode.commands.registerCommand('herdr.agents.showAll', () => agents.setFilter('all')),
 		vscode.commands.registerCommand('herdr.agents.showBlocked', () => agents.setFilter('blocked')),
 		vscode.commands.registerCommand('herdr.agents.showWorking', () => agents.setFilter('working')),

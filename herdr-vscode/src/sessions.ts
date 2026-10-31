@@ -101,6 +101,8 @@ export interface Snapshot {
 	panes: SnapshotPane[];
 	/** `name` from `agents[]`, by pane id, where it is a string. */
 	agentNames: Map<string, string>;
+	/** The pane herdr itself has focused, whatever VS Code's tiles are doing. */
+	focusedPaneId?: string;
 	version?: string;
 }
 
@@ -177,7 +179,7 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 			agentNames.set(id, name);
 		}
 	}
-	return { workspaces, tabs, panes, agentNames, version: str(s.version) };
+	return { workspaces, tabs, panes, agentNames, focusedPaneId: str(s.focused_pane_id), version: str(s.version) };
 }
 
 /** Whether a pane runs an agent. */

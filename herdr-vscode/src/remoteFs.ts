@@ -1,0 +1,474 @@
+// Ported from devc-vscode src/devcontainerFs.ts and src/sshFs.ts at 19cefc3; maintained separately.
+// (`CoreutilsFileSystemProvider` and the two subclasses; the authority checks, `whenKnown` and `ChangePoller` are new.)
+
+import * as vscode from 'vscode';
+import { RemoteShell, ShellResult, sshFailure } from './remoteShell';
+
+/**
+ * A FileSystemProvider over coreutils run in an environment by a
+ * RemoteShell. Subclasses say which shell a URI's authority names and how
+ * that shell's own failures read; the commands are the same everywhere.
+ *
+ * Requires GNU coreutils/findutils in the environment (stat, find, cat,
+ * mkdir, rm, mv, rmdir) — true for Debian/Ubuntu based images and VMs.
+ * BusyBox (Alpine) is not supported.
+ */
+export abstract class CoreutilsFileSystemProvider
+  implements vscode.FileSystemProvider
+{
+  /** The shell the URI's authority names; throws a FileSystemError if none. */
+  protected abstract shellFor(uri: vscode.Uri): RemoteShell;
+  /** What a rename across two authorities is refused with. */
+  protected abstract readonly crossAuthorityMessage: string;
+  /** Shown when a command fails with nothing on stderr. */
+  protected abstract readonly execFailedMessage: string;
+
+  /**
+   * Settles when the authorities that exist are known: an editor restored
+   * after a reload reads its file before the first discovery has finished.
+   */
+  protected whenKnown(): Promise<unknown> {
+    return Promise.resolve();
+  }
+
+  // --- file metadata
+
+  async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
+    // %F = type string, %s = size, %Y = mtime (epoch s), %W = birth time (epoch s, 0/- if unknown)
+    const stdout = await this.exec(uri, [
+      'stat',
+      '-L',
+      '-c',
+      '%F\n%s\n%Y\n%W',
+      '--',
+      this.pathOf(uri),
+    ]);
+    const lines = stdout.toString('utf8').split('\n');
+
+    const mtime = (Number(lines[2]) || 0) * 1000;
+    const btime = Number(lines[3]) || 0;
+
+    let type: vscode.FileType;
+    switch ((lines[0] ?? '').trim()) {
+      case 'directory':
+        type = vscode.FileType.Directory;
+        break;
+      case 'regular file':
+      case 'regular empty file':
+        type = vscode.FileType.File;
+        break;
+      case 'symbolic link':
+        type = vscode.FileType.SymbolicLink;
+        break;
+      default:
+        type = vscode.FileType.Unknown;
+    }
+
+    return {
+      type,
+      ctime: btime > 0 ? btime * 1000 : mtime,
+      mtime,
+      size: type === vscode.FileType.Directory ? 0 : Number(lines[1]) || 0,
+    };
+  }
+
+  async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+    // NUL-delimited "<name>\0<type-char>\0" pairs so names with spaces/newlines survive.
+    // -L dereferences symlinks so %y reports the target's type.
+    // NB: the format string must contain the two characters \0 (which find
+    // interprets as NUL) — a literal NUL in argv is rejected by spawn().
+    const stdout = await this.exec(uri, [
+      'find',
+      '-L',
+      this.pathOf(uri),
+      '-mindepth',
+      '1',
+      '-maxdepth',
+      '1',
+      '-printf',
+      '%f\\0%y\\0',
+    ]);
+
+    const parts = stdout.toString('utf8').split('\0');
+    const result: [string, vscode.FileType][] = [];
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const name = parts[i];
+      if (!name) {
+        continue;
+      }
+      let type: vscode.FileType;
+      switch (parts[i + 1]) {
+        case 'd':
+          type = vscode.FileType.Directory;
+          break;
+        case 'f':
+          type = vscode.FileType.File;
+          break;
+        case 'l':
+          type = vscode.FileType.SymbolicLink;
+          break;
+        default:
+          type = vscode.FileType.Unknown;
+      }
+      result.push([name, type]);
+    }
+    return result;
+  }
+
+  // --- file contents
+
+  async readFile(uri: vscode.Uri): Promise<Uint8Array> {
+    return this.exec(uri, ['cat', '--', this.pathOf(uri)]);
+  }
+
+  async writeFile(
+    uri: vscode.Uri,
+    content: Uint8Array,
+    options: { create: boolean; overwrite: boolean }
+  ): Promise<void> {
+    const existing = await this.tryStat(uri);
+    if (existing && existing.type === vscode.FileType.Directory) {
+      throw vscode.FileSystemError.FileIsADirectory(uri);
+    }
+    if (!existing && !options.create) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    if (existing && options.create && !options.overwrite) {
+      throw vscode.FileSystemError.FileExists(uri);
+    }
+    // sh redirection (not tee) so the content isn't echoed back to stdout.
+    // The path travels via argv ($1), never interpolated into the script.
+    await this.exec(
+      uri,
+      ['sh', '-c', 'cat > "$1"', 'sh', this.pathOf(uri)],
+      content
+    );
+    this._fireSoon({
+      type: existing
+        ? vscode.FileChangeType.Changed
+        : vscode.FileChangeType.Created,
+      uri,
+    });
+  }
+
+  // --- files/folders
+
+  async createDirectory(uri: vscode.Uri): Promise<void> {
+    if (await this.tryStat(uri)) {
+      throw vscode.FileSystemError.FileExists(uri);
+    }
+    // No -p: a missing parent must surface as FileNotFound per provider contract.
+    await this.exec(uri, ['mkdir', '--', this.pathOf(uri)]);
+    this._fireSoon({ type: vscode.FileChangeType.Created, uri });
+  }
+
+  async delete(
+    uri: vscode.Uri,
+    options: { recursive: boolean; useTrash?: boolean }
+  ): Promise<void> {
+    const existing = await this.tryStat(uri);
+    if (!existing) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    if (existing.type === vscode.FileType.Directory && !options.recursive) {
+      await this.exec(uri, ['rmdir', '--', this.pathOf(uri)]);
+    } else {
+      await this.exec(uri, ['rm', '-rf', '--', this.pathOf(uri)]);
+    }
+    this._fireSoon({ type: vscode.FileChangeType.Deleted, uri });
+  }
+
+  async rename(
+    oldUri: vscode.Uri,
+    newUri: vscode.Uri,
+    options: { overwrite: boolean }
+  ): Promise<void> {
+    if (oldUri.authority !== newUri.authority) {
+      throw vscode.FileSystemError.NoPermissions(this.crossAuthorityMessage);
+    }
+    if (!(await this.tryStat(oldUri))) {
+      throw vscode.FileSystemError.FileNotFound(oldUri);
+    }
+    if (!options.overwrite && (await this.tryStat(newUri))) {
+      throw vscode.FileSystemError.FileExists(newUri);
+    }
+    await this.exec(oldUri, [
+      'mv',
+      '--',
+      this.pathOf(oldUri),
+      this.pathOf(newUri),
+    ]);
+    this._fireSoon(
+      { type: vscode.FileChangeType.Deleted, uri: oldUri },
+      { type: vscode.FileChangeType.Created, uri: newUri }
+    );
+  }
+
+  // --- watching (not supported; explorer gets explicit change events)
+
+  watch(_resource: vscode.Uri): vscode.Disposable {
+    return new vscode.Disposable(() => {});
+  }
+
+  /** Fire a change event so VS Code re-reads the given path (used by the refresh command). */
+  refresh(uri: vscode.Uri): void {
+    this._fireSoon({ type: vscode.FileChangeType.Changed, uri });
+  }
+
+  // --- shell plumbing
+
+  private pathOf(uri: vscode.Uri): string {
+    const path = uri.path;
+    return path === '' ? '/' : path;
+  }
+
+  private async exec(
+    uri: vscode.Uri,
+    command: string[],
+    input?: Uint8Array
+  ): Promise<Buffer> {
+    await this.whenKnown();
+    const shell = this.shellFor(uri);
+    let result: ShellResult;
+    try {
+      result = await shell.run(command, { input, interactive: true });
+    } catch (err) {
+      if (err instanceof vscode.FileSystemError) {
+        throw err;
+      }
+      throw vscode.FileSystemError.Unavailable(
+        `${uri.toString()}: ${(err as Error).message}`
+      );
+    }
+    if (result.exitCode !== 0) {
+      throw this.toFsError(uri, result);
+    }
+    return result.stdout;
+  }
+
+  private async tryStat(uri: vscode.Uri): Promise<vscode.FileStat | undefined> {
+    try {
+      return await this.stat(uri);
+    } catch (err) {
+      if (
+        err instanceof vscode.FileSystemError &&
+        err.code === 'FileNotFound'
+      ) {
+        return undefined;
+      }
+      throw err;
+    }
+  }
+
+  /** Map a failed command's stderr to the FileSystemError it means. */
+  protected toFsError(uri: vscode.Uri, result: ShellResult): Error {
+    const msg = result.stderr.toString('utf8').trim() || this.execFailedMessage;
+    if (/no such file or directory/i.test(msg)) {
+      return vscode.FileSystemError.FileNotFound(uri);
+    }
+    if (/permission denied/i.test(msg)) {
+      return vscode.FileSystemError.NoPermissions(uri);
+    }
+    if (/not a directory/i.test(msg)) {
+      return vscode.FileSystemError.FileNotADirectory(uri);
+    }
+    if (/is a directory/i.test(msg)) {
+      return vscode.FileSystemError.FileIsADirectory(uri);
+    }
+    if (/file exists/i.test(msg)) {
+      return vscode.FileSystemError.FileExists(uri);
+    }
+    if (/is not running|no such container/i.test(msg)) {
+      return vscode.FileSystemError.Unavailable(uri);
+    }
+    return new Error(msg);
+  }
+
+  // --- file events
+
+  private readonly _emitter = new vscode.EventEmitter<
+    vscode.FileChangeEvent[]
+  >();
+  private _bufferedEvents: vscode.FileChangeEvent[] = [];
+  private _fireSoonHandle?: ReturnType<typeof setTimeout>;
+
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
+    this._emitter.event;
+
+  private _fireSoon(...events: vscode.FileChangeEvent[]): void {
+    this._bufferedEvents.push(...events);
+
+    if (this._fireSoonHandle) {
+      clearTimeout(this._fireSoonHandle);
+    }
+
+    this._fireSoonHandle = setTimeout(() => {
+      this._emitter.fire(this._bufferedEvents);
+      this._bufferedEvents.length = 0;
+    }, 5);
+  }
+}
+
+/**
+ * Files inside a running dev container, through `docker exec`, as the
+ * container's remote user.
+ *
+ * URI shape: herdr-container://<first 12 chars of the id>/<absolute path>
+ *
+ * Any URI of this scheme reaches this provider, from anywhere, so an authority
+ * that is not a current dev container is refused before anything is spawned.
+ */
+export class ContainerFileSystemProvider extends CoreutilsFileSystemProvider {
+  protected readonly crossAuthorityMessage = 'Cannot rename across containers';
+  protected readonly execFailedMessage = 'docker exec failed';
+
+  constructor(
+    /** The shell of a running dev container, by its 12-char id. */
+    private readonly shells: (id: string) => RemoteShell | undefined,
+    private readonly known: () => Promise<unknown> = () => Promise.resolve()
+  ) {
+    super();
+  }
+
+  protected whenKnown(): Promise<unknown> {
+    return this.known();
+  }
+
+  protected shellFor(uri: vscode.Uri): RemoteShell {
+    const shell =
+      uri.authority.length === 12 ? this.shells(uri.authority) : undefined;
+    if (!shell) {
+      throw vscode.FileSystemError.Unavailable('Not a known dev container');
+    }
+    return shell;
+  }
+}
+
+/**
+ * Files on an SSH host, through `ssh <host> <coreutils>`.
+ *
+ * URI shape: herdr-ssh://<ssh config alias>/<absolute remote path>
+ *
+ * The authority would become an ssh argument, and any URI of this scheme
+ * reaches this provider, so a host that is not in herdr.sshHosts is refused
+ * before anything is spawned. `Uri.toString()` lower-cases authorities, so the
+ * lookup behind `shells` ignores case.
+ */
+export class SshFileSystemProvider extends CoreutilsFileSystemProvider {
+  protected readonly crossAuthorityMessage = 'Cannot rename across SSH hosts';
+  protected readonly execFailedMessage = 'ssh command failed';
+
+  constructor(
+    /** The shell of a host in herdr.sshHosts. */
+    private readonly shells: (host: string) => RemoteShell | undefined
+  ) {
+    super();
+  }
+
+  protected shellFor(uri: vscode.Uri): RemoteShell {
+    const shell = uri.authority ? this.shells(uri.authority) : undefined;
+    if (!shell) {
+      throw vscode.FileSystemError.Unavailable(
+        'SSH host is not in herdr.sshHosts'
+      );
+    }
+    return shell;
+  }
+
+  protected toFsError(uri: vscode.Uri, result: ShellResult): Error {
+    const failure = sshFailure(uri.authority, result);
+    return failure
+      ? vscode.FileSystemError.Unavailable(failure)
+      : super.toFsError(uri, result);
+  }
+}
+
+// ── Change polling ──────────────────────────────────────────────────────────
+
+export const CHANGE_POLL_MS = 5000;
+
+/** What polling needs from a provider. */
+export type PolledProvider = Pick<
+  CoreutilsFileSystemProvider,
+  'stat' | 'refresh'
+>;
+
+/**
+ * Agents edit these files while they are open, and `watch` is a no-op, so every
+ * 5 s each open document of a polled scheme is `stat`ed; an `mtime` or `size`
+ * that differs from the last seen one fires `Changed`, and VS Code reloads a
+ * clean editor (a dirty one gets its usual conflict prompt on save).
+ * `mtime` has the 1 s resolution of `stat -c %Y`.
+ */
+export class ChangePoller implements vscode.Disposable {
+  private readonly seen = new Map<string, { mtime: number; size: number }>();
+  private readonly timer: NodeJS.Timeout;
+  private readonly listeners: vscode.Disposable[];
+  private polling = false;
+
+  constructor(
+    private readonly providers: ReadonlyMap<string, PolledProvider>,
+    /** Injected for tests. */
+    private readonly documents: () => readonly vscode.Uri[] = () =>
+      vscode.workspace.textDocuments.map(d => d.uri),
+    onDidOpen: vscode.Event<vscode.Uri> = listener =>
+      vscode.workspace.onDidOpenTextDocument(d => listener(d.uri)),
+    onDidClose: vscode.Event<vscode.Uri> = listener =>
+      vscode.workspace.onDidCloseTextDocument(d => listener(d.uri)),
+    intervalMs = CHANGE_POLL_MS
+  ) {
+    this.timer = setInterval(() => void this.poll(), intervalMs);
+    this.listeners = [
+      // The first stat is what later ones compare with: as early as possible.
+      onDidOpen(uri => {
+        if (this.providers.has(uri.scheme)) {
+          void this.poll();
+        }
+      }),
+      onDidClose(uri => this.seen.delete(uri.toString())),
+    ];
+  }
+
+  /** One pass over the open documents; a pass during another does nothing. */
+  async poll(): Promise<void> {
+    if (this.polling) {
+      return;
+    }
+    this.polling = true;
+    try {
+      await Promise.all(
+        this.documents()
+          .filter(uri => this.providers.has(uri.scheme))
+          .map(uri => this.pollOne(uri))
+      );
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async pollOne(uri: vscode.Uri): Promise<void> {
+    const provider = this.providers.get(uri.scheme);
+    const key = uri.toString();
+    let stat: vscode.FileStat;
+    try {
+      stat = await provider!.stat(uri);
+    } catch {
+      return; // Gone or unreachable for now: the next pass looks again.
+    }
+    if (!this.documents().some(open => open.toString() === key)) {
+      return; // It closed during the stat.
+    }
+    const last = this.seen.get(key);
+    this.seen.set(key, { mtime: stat.mtime, size: stat.size });
+    if (last && (last.mtime !== stat.mtime || last.size !== stat.size)) {
+      provider!.refresh(uri);
+    }
+  }
+
+  dispose(): void {
+    clearInterval(this.timer);
+    for (const listener of this.listeners) {
+      listener.dispose();
+    }
+  }
+}

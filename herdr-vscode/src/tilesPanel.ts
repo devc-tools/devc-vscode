@@ -166,6 +166,10 @@ export interface TilesDeps {
 	layouts: LayoutStore;
 	rowLabel(sessionKey: string): string | undefined;
 	log(line: string): void;
+	/** Which panes the tiles show may have changed. Set by {@link TilesPanels}. */
+	tilesChanged?(): void;
+	/** A path printed in a tile was clicked. Set by {@link TilesPanels}. */
+	openLink?(paneKey: string, text: string): void;
 }
 
 /** Which panel last had a tile focused, across every panel of the window. */
@@ -321,6 +325,9 @@ abstract class TilesPanel implements PaneViewer {
 			case 'clipboardCopy':
 				void vscode.env.clipboard.writeText(msg.text);
 				break;
+			case 'openLink':
+				this.deps.openLink?.(msg.paneKey, msg.text);
+				break;
 			case 'probeResult':
 				this.probes.get(msg.id)?.(msg);
 				this.probes.delete(msg.id);
@@ -413,6 +420,7 @@ export class MirrorPanel extends TilesPanel {
 		this.exportTimer = undefined;
 		this.shape = undefined;
 		this.paneIds = new Set();
+		this.deps.tilesChanged?.();
 		this.focusedPane = undefined;
 		if (this.view?.type !== 'empty' || this.view.text !== text) {
 			this.setView({ type: 'empty', text });
@@ -530,6 +538,7 @@ export class MirrorPanel extends TilesPanel {
 		this.tabClosed = false;
 		this.herdrFocusedPane = layout.focused_pane_id;
 		this.paneIds = new Set(layoutPaneIds(layout.root));
+		this.deps.tilesChanged?.();
 		const shape = layoutShape(layout.root);
 		if (shape === this.shape) {
 			return; // Nothing moved: keep local splitter drags and maximise.
@@ -685,6 +694,7 @@ export class LayoutPanel extends TilesPanel {
 	addPane(sessionKey: string, paneId: string, title: string): void {
 		const add = { type: 'addTile', sessionKey, paneId, title } as const;
 		this.paneKeys.add(makePaneKey(sessionKey, paneId));
+		this.deps.tilesChanged?.();
 		if (this.ready) {
 			this.sync();
 			this.post(add);
@@ -697,6 +707,7 @@ export class LayoutPanel extends TilesPanel {
 	paneMoved(sessionKey: string, from: string, to: string): void {
 		if (this.paneKeys.delete(makePaneKey(sessionKey, from))) {
 			this.paneKeys.add(makePaneKey(sessionKey, to));
+			this.deps.tilesChanged?.();
 			const saved = this.deps.layouts.get(this.layoutId);
 			if (saved) {
 				this.view = { type: 'layout', config: saved.config };
@@ -807,6 +818,7 @@ export class LayoutPanel extends TilesPanel {
 			case 'layoutChanged':
 				this.deps.layouts.setConfig(this.layoutId, msg.config);
 				this.paneKeys = new Set(layoutPaneKeys(msg.config));
+				this.deps.tilesChanged?.();
 				this.sync();
 				break;
 			case 'renameLayout':
@@ -823,9 +835,23 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 	/** Open Layout panels, most recently active first. */
 	private recentLayouts: string[] = [];
 	private readonly disposables: vscode.Disposable[] = [];
+	private readonly deps: TilesDeps;
+	private readonly tilesEmitter = new vscode.EventEmitter<void>();
+	/** Which panes the tiles of this window show may have changed. */
+	readonly onDidChangeTiles = this.tilesEmitter.event;
+	private readonly linkEmitter = new vscode.EventEmitter<{ paneKey: string; text: string }>();
+	/** A path printed in a tile was clicked. */
+	readonly onDidRequestLink = this.linkEmitter.event;
 
-	constructor(private readonly deps: TilesDeps) {
+	constructor(deps: TilesDeps) {
+		this.deps = {
+			...deps,
+			tilesChanged: () => this.tilesEmitter.fire(),
+			openLink: (paneKey, text) => this.linkEmitter.fire({ paneKey, text }),
+		};
 		this.disposables.push(
+			this.tilesEmitter,
+			this.linkEmitter,
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if (e.affectsConfiguration('terminal.integrated') || e.affectsConfiguration('editor.fontFamily') || e.affectsConfiguration('editor.fontSize')) {
 					for (const panel of this.allPanels()) {
@@ -857,6 +883,7 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 		mirror.onDidDispose(() => {
 			if (this.panels.get(key) === mirror) {
 				this.panels.delete(key);
+				this.tilesEmitter.fire();
 			}
 		});
 		return mirror;
@@ -878,6 +905,7 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 			if (this.layoutPanels.get(layoutId) === layoutPanel) {
 				this.layoutPanels.delete(layoutId);
 				this.recentLayouts = this.recentLayouts.filter((id) => id !== layoutId);
+				this.tilesEmitter.fire();
 			}
 		});
 		return layoutPanel;
@@ -889,6 +917,11 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 
 	private createPanel(title: string): vscode.WebviewPanel {
 		return vscode.window.createWebviewPanel(TILES_VIEW_TYPE, title, vscode.ViewColumn.Active, WEBVIEW_OPTIONS(this.deps.extensionUri));
+	}
+
+	/** Whether any tile of this window shows the pane. */
+	showsPane(sessionKey: string, paneId: string): boolean {
+		return this.allPanels().some((p) => p.showsPane(sessionKey, paneId));
 	}
 
 	/** Reveals the panel showing (session, tab), else creates one in the active column. */
@@ -1013,11 +1046,11 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 	}
 
 	dispose(): void {
-		for (const d of this.disposables) {
-			d.dispose();
-		}
 		for (const panel of this.allPanels()) {
 			panel.dispose();
+		}
+		for (const d of this.disposables) {
+			d.dispose();
 		}
 	}
 }
