@@ -4,7 +4,7 @@ The herdr activity bar sidebar from mockup board A
 (https://claude.ai/artifact/QJAeVX6smvE4aQ2YrHrrAP): every herdr session on this machine, on
 configured SSH hosts and in running dev containers; the spaces → tabs → panes of the selected
 session; and every agent across all sessions, blocked first. Read-only plus attach and focus: no
-pane rendering yet (that is [herdr-mirrored-tabs](herdr-mirrored-tabs.md)).
+pane rendering yet (that is [herdr-mirrored-tabs](../herdr-mirrored-tabs.md)).
 
 Depends on [herdr-vscode-scaffold](herdr-vscode-scaffold.md). All code is in `herdr-vscode/` unless a
 path says otherwise.
@@ -271,6 +271,21 @@ background `statusBarItem.warningBackground`; click runs `herdr.agents.showBlock
 - `.plans/PLAN.md`
 
 ## Implementation notes
+
+### Sign-off (2026-10-30)
+
+Closed by the user on a look at the running extension: the UI looks fine and Sessions shows the
+dev container's herdr session. Stopping and starting a dev container updates Sessions without a
+Refresh (user-confirmed; the 5 s limit was not timed). Quitting VS Code ended the extension's
+bridge inside the container, the one `ps` shows as bare `herdr --session devc remote-api-bridge`;
+bridges shown with an absolute path are devc web's (`herdrExec` in devc-tools'
+`devc/web/herdr_bridge.ts`), so that check must not count them. Host-side cleanup was not checked,
+and the other unticked manual items above were not each run. SSH is deliberately deferred;
+`SSH · <alias>` and `unreachable` have only unit-tested argv behind them.
+
+**Attach in Terminal** works but is not what the user wants: panes belong in the editor area, not
+an integrated terminal running the herdr TUI. It stays until
+[herdr-mirrored-tabs](../herdr-mirrored-tabs.md) replaces it, and that plan removes it.
 
 ### Verified (2026-10-30)
 

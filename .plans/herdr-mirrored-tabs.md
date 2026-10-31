@@ -8,7 +8,7 @@ terminal tile. One VS Code editor tab = one herdr tab; the space and session are
 This plan also builds what [herdr-layout-tabs](herdr-layout-tabs.md) reuses: the webview bundle
 (Golden Layout + xterm), the pane stream manager, and focus tracking.
 
-Depends on [herdr-sidebar](herdr-sidebar.md). Paths are under `herdr-vscode/`.
+Depends on [herdr-sidebar](implemented/herdr-sidebar.md). Paths are under `herdr-vscode/`.
 
 Prior art in devc-tools (`/workspaces/tools/devc-tools`): `.plans/archived/devc-web.md`
 (§ "Terminal streams" and § "Frames are Herdr's own redraw"), `.plans/archived/devc-web-golden-layout.md`,
@@ -32,6 +32,7 @@ Prior art in devc-tools (`/workspaces/tools/devc-tools`): `.plans/archived/devc-
 - [ ] 10. Tests (list under Validation)
 - [ ] 11. README (opening tabs; the pty-size caveat), CHANGELOG, `docs/how-it-works.md`
       (streams, layout mapping, input handling as built)
+- [ ] 12. Remove **Attach in Terminal** (see Terminals live in the editor area)
 
 ## Contracts
 
@@ -67,6 +68,19 @@ web vendors. All are bundled into `dist/webview/tiles.js`; nothing loads from a 
 - Pane and agent row click stays `herdr.focusPane` in this plan.
 - Panel `viewType` `herdr.tiles`; title `<tab label> · <space label>`; icon `resources/herdr.svg`;
   opened in the active editor column.
+
+### Terminals live in the editor area
+
+Decided by the user on 2026-10-30, after trying **Attach in Terminal** from herdr-sidebar: herdr
+panes are shown in editor area tiles only. The extension does not open the herdr TUI in an
+integrated terminal.
+
+- Remove the `herdr.attachSession` command, its menu entries and its test, along with
+  `attachCommand` in `src/extension.ts`, and its mentions in the README. Add a CHANGELOG entry.
+- Remove `sshTerminalCommand` and `containerTerminalCommand` from `src/remoteShell.ts` if nothing
+  else uses them.
+- Session rows then have no inline action. A running row's click still selects it, and tabs open
+  from Spaces. A stopped row has no action (starting a session is not in this plan).
 
 ### Layout mapping
 
@@ -192,6 +206,8 @@ missing → "This herdr tab was closed.".
       the tile
 - [ ] Manual, container and SSH: the above open-and-type check works for a container session and
       an SSH session
+- [ ] `grep -rn attachSession herdr-vscode/src herdr-vscode/package.json` prints nothing; Session
+      rows show no terminal icon
 
 ## Relevant Files
 

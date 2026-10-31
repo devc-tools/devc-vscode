@@ -136,6 +136,11 @@ and devc-vscode nothing under `herdr.*`.
 
 ## Implementation notes
 
+### Sign-off (2026-10-30)
+
+Closed by the user on a look at the running extension. The unticked manual items above were not
+each run.
+
 ### Step 1 baseline (2026-10-30, before any change but the PLAN.md status)
 
 - Environment: `npm test` launches VS Code 1.144.0 (linux-arm64) from `.vscode-test/`. In this
