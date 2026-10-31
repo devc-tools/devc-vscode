@@ -4,6 +4,10 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **New Space**, **New Tab**, **Split Right** and **Split Down** in Spaces.
+- This machine's stopped sessions are always listed, with **Start Session** and **Stop Session**.
+- Clicking a pane always adds it to a Layout tab as a tab. It used to become a split when no tile had
+  focus, as after closing the focused tile or reloading.
 - **Pane Context** view: the repo, branch, changes and file tree of the pane you last clicked into, or
   herdr's focused pane until you have. **Pin** / **Unpin**, **Add to Workspace**, **Split Pane Here**, **Show Pane**,
   **Open Changes**, and **New File…**, **New Folder…**, **Rename…**, **Delete…** on its Files rows.

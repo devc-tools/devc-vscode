@@ -24,6 +24,10 @@ herdr tab, titled `<tab> · <space>`.
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
   Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
+- **New Space** (Spaces title bar), **New Tab** (a space's row), and **Split Right** / **Split Down** (a tab's or
+  pane's row) create them in herdr and open the herdr tab they landed in.
+- **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
+  because every pane in the session closes. A started session has no spaces until you add one.
 - **Split Right** and **Split Down** in the toolbar split the focused tile in herdr; the tile's
   close button closes the pane in herdr, after asking, because its process ends. Changes made in a
   herdr TUI come back within a second. Dragging a splitter or maximising a tile is local to VS
@@ -47,8 +51,9 @@ freely: drag a tile's tab to stack it with others or to an edge to split, and ma
 arrangement belongs to VS Code: it never changes herdr's tabs or splits.
 
 - Clicking a pane or agent row, or **Add to Layout** in its context menu, adds the pane to the active
-  Layout tab, else the most recently active one still open, else a new `Layout <n>`. It goes in the
-  stack of the focused tile, else in a new stack on the right. A pane already there is just focused.
+  Layout tab, else the most recently active one still open, else a new `Layout <n>`. It goes in as a
+  tab in the stack of the focused tile, else the last one focused, else the first; drag its tab to split.
+  A pane already there is just focused.
 - **New Layout** (the new-file icon on the Sessions view's title bar, or the command palette), **Open Layout…**,
   **Rename Layout…** (also on the tab's toolbar) and **Delete Layout…** manage them. Layouts are
   saved per workspace, and come back after a window reload.
@@ -108,7 +113,7 @@ An open editor of such a file notices outside changes within about 5 s (`mtime`,
 | `herdr.sshHosts` | `[]` | ssh aliases from `~/.ssh/config` whose herdr sessions are shown (application scope) |
 | `herdr.sshPath` | `"ssh"` | ssh client (application scope) |
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
-| `herdr.showStoppedSessions` | `false` | list stopped sessions too |
+| `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
 | `herdr.openPaneIn` | `"layout"` | what clicking a pane or agent row does: `layout` adds it to a Layout tab, `herdr` opens its mirrored herdr tab |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).

@@ -1,6 +1,6 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
-import { ComponentContainer, ComponentItem, GoldenLayout, JsonValue, LayoutConfig, ResolvedLayoutConfig, Stack } from 'golden-layout';
+import { ComponentContainer, ComponentItem, ContentItem, GoldenLayout, JsonValue, LayoutConfig, ResolvedLayoutConfig, Stack } from 'golden-layout';
 import 'golden-layout/dist/css/goldenlayout-base.css';
 import '@xterm/xterm/css/xterm.css';
 import './tiles.css';
@@ -49,6 +49,8 @@ const containers = new Map<string, ComponentContainer>();
 const tabs = new Map<string, HTMLElement>();
 const metas = new Map<string, TileMeta>();
 let focusedKey: string | undefined;
+/** The stack that last held the focused tile: it outlives that tile being closed. */
+let lastStack: Stack | undefined;
 let pendingFocus: string | undefined;
 let nextSerial = 0;
 let font: { fontFamily: string; fontSize: number } | undefined;
@@ -261,6 +263,7 @@ function disposeTile(tile: Tile): void {
 
 function setFocused(paneKey: string): void {
 	focusedKey = paneKey;
+	lastStack = focusedStack() ?? lastStack;
 	for (const tile of tiles.values()) {
 		tile.host.classList.toggle('tile-focused', tile.paneKey === paneKey);
 	}
@@ -472,11 +475,25 @@ function focusedStack(): Stack | undefined {
 	return stack instanceof Stack ? stack : undefined;
 }
 
-/** Adds a pane in the focused stack, else in a new stack on the right; a pane already here is only focused. */
+/** Every stack in the layout, in tree order. */
+function allStacks(item: ContentItem | undefined = layout.rootItem): Stack[] {
+	if (!item) {
+		return [];
+	}
+	return item instanceof Stack ? [item] : item.contentItems.flatMap((child) => allStacks(child));
+}
+
+/** Where a new pane goes: the focused stack, else the last one focused, else the first. */
+function targetStack(): Stack | undefined {
+	const stacks = allStacks();
+	return focusedStack() ?? (lastStack && stacks.includes(lastStack) ? lastStack : stacks[0]);
+}
+
+/** Adds a pane as a tab in {@link targetStack}; a split is only ever the user's drag. A pane already here is only focused. */
 function addOrReveal(msg: Extract<HostMessage, { type: 'addTile' }>): void {
 	const state: PaneComponentState = { sessionKey: msg.sessionKey, paneId: msg.paneId };
 	const paneKey = makePaneKey(msg.sessionKey, msg.paneId);
-	const stack = focusedStack();
+	const stack = targetStack();
 	const placement = addPlacement(layout.saveLayout() as unknown as StoredLayoutConfig, state, stack !== undefined);
 	if (placement === 'focusedStack' && stack) {
 		stack.addComponent('pane', state as unknown as JsonValue, msg.title);

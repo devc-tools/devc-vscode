@@ -1,19 +1,20 @@
 import * as vscode from 'vscode';
-import { containerKey, Environments, sshKey } from './environments';
+import { containerKey, Environments, HOST_KEY, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
 import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView } from './paneContext';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
-import { SessionModel } from './sessions';
+import { createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startHostSession, whenTabKnown } from './sessionControl';
+import { SessionModel, sessionKey } from './sessions';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND } from './status';
 import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { AgentSource, AgentsView } from './views/agentsView';
-import { SessionsView } from './views/sessionsView';
-import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpacesView } from './views/spacesView';
+import { SessionRowNode, SessionsView } from './views/sessionsView';
+import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -115,8 +116,106 @@ export function activate(context: vscode.ExtensionContext): void {
 			},
 		});
 
+	const warn = (err: unknown) => void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+	/** Opens a tab that was just created, once the snapshot has it. */
+	const openCreatedTab = async (key: string, result: unknown) => {
+		const tabId = createdTabId(result);
+		if (!tabId || !(await whenTabKnown(m, key, tabId))) {
+			throw new Error('the new tab did not appear.');
+		}
+		panels.openTab(key, tabId);
+	};
+	/** Splits a pane in herdr and shows its tab, where the new tile arrives. */
+	const splitPane = async (key: string, tabId: string, paneId: string | undefined, direction: 'right' | 'down') => {
+		if (!paneId) {
+			return;
+		}
+		const pane = m.connection(key)?.snapshot?.panes.find((p) => p.pane_id === paneId);
+		const cwd = pane?.foreground_cwd ?? pane?.cwd;
+		try {
+			await m.request(key, 'pane.split', { target_pane_id: paneId, direction, ...(cwd ? { cwd } : {}), focus: false });
+			panels.openTab(key, tabId);
+		} catch (err) {
+			warn(err);
+		}
+	};
+	const splitRow = (node: TabNode | PaneNode | undefined, direction: 'right' | 'down') => {
+		if (node?.type === 'tab') {
+			const snapshot = m.connection(node.sessionKey)?.snapshot;
+			return splitPane(node.sessionKey, node.tabId, snapshot && splitTarget(snapshot, node.tabId), direction);
+		}
+		return node && splitPane(node.ref.sessionKey, node.pane.tab_id, node.ref.paneId, direction);
+	};
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
+		vscode.commands.registerCommand('herdr.startSession', async (row?: SessionRowNode) => {
+			const session = row?.session;
+			if (!session || row.envKey !== HOST_KEY) {
+				return;
+			}
+			try {
+				const started = await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, () => startHostSession(m, session));
+				if (started) {
+					sessions.select(sessionKey(HOST_KEY, session));
+				} else {
+					void vscode.window.showWarningMessage(`herdr: session "${session}" did not start. Its herdr-server.log says why.`);
+				}
+			} catch (err) {
+				warn(err);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.stopSession', async (row?: SessionRowNode) => {
+			const session = row?.session;
+			const shell = environments.get(HOST_KEY)?.shell;
+			if (!session || row.envKey !== HOST_KEY || !shell) {
+				return;
+			}
+			const stop = 'Stop Session';
+			const answer = await vscode.window.showWarningMessage(
+				`Stop herdr session "${session}"?`,
+				{ modal: true, detail: 'Every pane in it closes, and the agents and programs running there end.' },
+				stop,
+			);
+			if (answer !== stop) {
+				return;
+			}
+			try {
+				const res = await shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
+				if (res.exitCode !== 0) {
+					throw new Error(res.stderr.toString().trim() || `could not stop session "${session}".`);
+				}
+			} catch (err) {
+				warn(err);
+			}
+			await m.relist(HOST_KEY);
+		}),
+		vscode.commands.registerCommand('herdr.newSpace', async () => {
+			const key = sessions.selected;
+			if (!key) {
+				return;
+			}
+			try {
+				await openCreatedTab(key, await m.request(key, 'workspace.create', { focus: false }));
+			} catch (err) {
+				warn(err);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.newTab', async (node?: SpaceNode) => {
+			if (!node) {
+				return;
+			}
+			const snapshot = m.connection(node.sessionKey)?.snapshot;
+			const cwd = snapshot && spaceCwd(snapshot, node.workspaceId);
+			try {
+				const result = await m.request(node.sessionKey, 'tab.create', { workspace_id: node.workspaceId, ...(cwd ? { cwd } : {}), focus: false });
+				await openCreatedTab(node.sessionKey, result);
+			} catch (err) {
+				warn(err);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.splitRight', (node?: TabNode | PaneNode) => splitRow(node, 'right')),
+		vscode.commands.registerCommand('herdr.splitDown', (node?: TabNode | PaneNode) => splitRow(node, 'down')),
 		vscode.commands.registerCommand(FOCUS_PANE_COMMAND, async (arg?: PaneRef | { ref?: PaneRef }) => {
 			const ref = arg && 'ref' in arg ? arg.ref : (arg as PaneRef | undefined);
 			if (!ref?.sessionKey || !ref.paneId) {

@@ -162,7 +162,20 @@ suite('layout panels in a webview', function () {
 		assert.strictEqual(focus.lastFocused, makePaneKey(A, 'w2:p1'));
 	});
 
-	test('with no focused tile, a pane goes in a new stack on the right', async () => {
+	test('after the focused tile closes, the next pane still goes in its stack', async () => {
+		const panel = track(panels.newLayout('closing'));
+		add(A, 'w2:p1');
+		await tiled(panel, 1);
+		add(A, 'w2:p2');
+		await tiled(panel, 2);
+		await panel.probe({ kind: 'clickTabClose', paneKey: makePaneKey(A, 'w2:p2') });
+		await tiled(panel, 1);
+		add(A, 'w2:p2');
+		const p = await tiled(panel, 2);
+		assert.deepStrictEqual(shape(p.config?.root), ['w2:p1', 'w2:p2']);
+	});
+
+	test('with no focused tile, a pane goes in as a tab, not a new split', async () => {
 		const seeded = store.create('seeded', {
 			settings: { reorderEnabled: true, popoutWholeStack: false, showPopoutIcon: false, showMaximiseIcon: true, showCloseIcon: true },
 			header: { popout: false },
@@ -173,9 +186,7 @@ suite('layout panels in a webview', function () {
 		await tiled(panel, 1);
 		add(A, 'w2:p2');
 		const p = await tiled(panel, 2);
-		assert.deepStrictEqual(shape(p.config?.root), { row: [['w2:p1'], ['w2:p2']] });
-		assert.ok((tile(p.tiles, A, 'w2:p2')?.x ?? 0) > (tile(p.tiles, A, 'w2:p1')?.x ?? 0));
-		assert.ok(Math.abs((tile(p.tiles, A, 'w2:p2')?.width ?? 0) - (tile(p.tiles, A, 'w2:p1')?.width ?? 0)) < 12, 'half each');
+		assert.deepStrictEqual(shape(p.config?.root), ['w2:p1', 'w2:p2']);
 	});
 
 	test('the target: active, else most recent open, never a closed one', async () => {

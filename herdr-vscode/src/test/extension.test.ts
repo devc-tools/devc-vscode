@@ -74,7 +74,9 @@ suite('herdr-vscode', () => {
 		}
 		const menus = ext.packageJSON.contributes.menus;
 		assert.deepStrictEqual(
-			(menus['view/item/context'] as { command: string }[]).map((m) => m.command).filter((c) => !c.startsWith('herdr.paneContext.')),
+			(menus['view/item/context'] as { command: string }[])
+				.map((m) => m.command)
+				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(startSession|stopSession|newTab|splitRight|splitDown)$/.test(c)),
 			['herdr.addToLayout', 'herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (ext.packageJSON.contributes.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');

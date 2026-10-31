@@ -180,7 +180,7 @@ suite('Sessions rows', () => {
 		assert.strictEqual(groupOf(containerEnv).label, 'Dev containers');
 	});
 
-	test('running sessions by connection state; stopped only when asked', () => {
+	test('running sessions by connection state; this machine lists stopped ones too', () => {
 		const state = okHost([
 			{ name: 'a', default: true, running: true },
 			{ name: 'b', default: false, running: true },
@@ -199,12 +199,10 @@ suite('Sessions rows', () => {
 				['a', '1 blocked · 1 working · 1 done', 'herdr.session.running'],
 				['b', 'needs herdr 0.9.5 or later', 'herdr.session.running'],
 				['c', 'disconnected', 'herdr.session.running'],
+				['old', 'stopped', 'herdr.session.stopped'],
 			],
 		);
 		assert.strictEqual(rows[0].tooltip, 'host/a\nherdr 0.9.5');
-		const withStopped = sessionRows(state, (k) => conns[k], true);
-		assert.deepStrictEqual(withStopped[3].description, 'stopped');
-		assert.deepStrictEqual(withStopped[3].contextValue, 'herdr.session.stopped');
 	});
 
 	test('environment rows', () => {

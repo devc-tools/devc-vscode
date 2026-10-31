@@ -105,7 +105,7 @@ async function waitFor(what: string, ms: number, ok: () => boolean): Promise<num
 		const host = model.states().find((s) => s.env.key === 'host')!;
 		assert.deepStrictEqual(
 			sessionRows(host, (k) => model.connection(k), false).map((r) => [r.description, r.contextValue]),
-			[['herdr not running', 'herdr.session.absent']],
+			[['stopped', 'herdr.session.stopped']],
 		);
 	});
 

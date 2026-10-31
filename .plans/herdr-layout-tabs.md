@@ -68,7 +68,9 @@ Closing a Layout panel keeps the layout saved; `herdr.openLayout` brings it back
   open; else a saved layout is **not** reopened — a new layout `Layout <n>` is created.
 - Pane already in the target → reveal the panel and focus that tile.
 - Otherwise → `addComponent` into the stack holding the panel's focused tile (GL's focused
-  stack), else into the root as a new stack on the right. Then focus the new tile.
+  stack), else the stack last focused, else the first; only an empty layout gets a new stack. A
+  click never makes a split (changed 2026-10-31: "a new stack on the right" read as random). Then
+  focus the new tile.
 
 ### Layout panels
 

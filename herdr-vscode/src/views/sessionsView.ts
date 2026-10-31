@@ -84,7 +84,8 @@ export function sessionRows(
 	}
 	const rows: SessionRowNode[] = [];
 	for (const s of state.sessions) {
-		if (!s.running && !showStopped) {
+		// This machine's stopped sessions are always listed: they can be started from here.
+		if (!s.running && !showStopped && env.kind !== 'host') {
 			continue;
 		}
 		const key = sessionKey(env.key, s.name);
@@ -197,6 +198,12 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 		);
 	}
 
+	/** Makes a running session the selected one, as a click on its row does. */
+	select(key: string): void {
+		void this.state.update(SELECTED_SESSION_STATE, key);
+		this.update();
+	}
+
 	/** The row for a session key. */
 	row(key: string): SessionRowNode | undefined {
 		for (const rows of this.rows.values()) {
@@ -267,7 +274,7 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 		const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
 		item.id = `row:${node.key}`;
 		item.description = node.description;
-		item.contextValue = node.contextValue;
+		item.contextValue = node.envKey === HOST_KEY ? `${node.contextValue} host` : node.contextValue;
 		item.tooltip = node.tooltip;
 		item.iconPath = statusIcon(
 			node.snapshot ? worstStatus(node.snapshot.panes.filter(hasAgent).map((p) => p.agent_status)) : undefined,

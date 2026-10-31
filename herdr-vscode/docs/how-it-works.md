@@ -79,6 +79,8 @@ means events were dropped; it is handled like any event.
 - A subscription that ends on its own marks the session *disconnected*. It is retried after
   2 s, 5 s, 10 s, then every 30 s; each retry re-lists the environment first, so a session that
   stopped is dropped instead of retried.
+- **Start Session** runs `herdr --session <S> server` detached in the home directory, so it outlives the
+  window, then re-lists until it runs. **Stop Session** runs `herdr session stop <S>`. This machine only.
 - **Refresh**: rediscover environments, re-list every environment, re-snapshot every connected
   session and reconnect every disconnected or unsupported one.
 
@@ -203,6 +205,8 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   with no re-layout.
 - Golden Layout's close controls are intercepted in the capture phase: its own handlers would
   remove the tile before the user answers. The tile goes when herdr says the pane closed.
+- **New Space** and **New Tab** call `workspace.create` and `tab.create` with `focus:false`, wait for the
+  snapshot to hold the tab, and open it. A new tab starts in the space's focused pane's directory.
 - **Split Right** / **Split Down** call `pane.split` on the panel's focused tile, else herdr's
   focused pane if it is in this tab, with `focus:false` and the pane's `foreground_cwd ?? cwd`.
 - The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last

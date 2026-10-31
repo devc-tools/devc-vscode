@@ -31,6 +31,8 @@ export function paneClickCommand(target: OpenPaneIn, ref: PaneRef): vscode.Comma
 export interface SpaceNode {
 	type: 'space';
 	id: string;
+	sessionKey: string;
+	workspaceId: string;
 	label: string;
 	description?: string;
 	focused: boolean;
@@ -97,6 +99,8 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string): SpaceNode[]
 		return {
 			type: 'space',
 			id: `${sessionKey}|space|${w.workspace_id}`,
+			sessionKey,
+			workspaceId: w.workspace_id,
 			label: w.label,
 			description: w.repoName && w.repoName !== w.label ? w.repoName : undefined,
 			focused: w.focused,
