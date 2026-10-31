@@ -3,7 +3,7 @@ import * as cp from 'child_process';
 import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { LocalShell } from '../remoteShell';
-import { SessionModel } from '../sessions';
+import { parseSnapshot, SessionModel } from '../sessions';
 import { agentRows, blockedCount } from '../views/agentsView';
 import { effectiveSelection, sessionRows } from '../views/sessionsView';
 
@@ -124,6 +124,52 @@ async function waitFor(what: string, ms: number, ok: () => boolean): Promise<num
 		await waitFor('idle', 2000, () => shown()?.raw_status === 'idle');
 		await sleep(400);
 		console.log(`[live-model] blocked → idle shows ${shown()?.agent_status}; agents[]: ${await rawAgent()}`);
+	});
+
+	test('report-metadata tokens reach the snapshot; the events each emits are logged', async () => {
+		await waitFor('connected', 10000, () => model.connection(key)?.state === 'connected');
+		const snap = model.connection(key)!.snapshot!;
+		const ws = snap.workspaces[0].workspace_id;
+		const paneId = snap.panes[0].pane_id;
+		const seen: string[] = [];
+		const sub = model.onDidEvent((e) => {
+			if (e.sessionKey === key) {
+				seen.push(e.event.event);
+			}
+		});
+		try {
+			// herdr 0.9.5 takes the id before the options (`--source hv <id>` fails with `unknown option: hv`).
+			const run = async (args: string[]) => {
+				const res = await shell.run(herdrArgv(['--session', SESSION, ...args]), { timeoutMs: 10000 });
+				assert.strictEqual(res.exitCode, 0, res.stderr.toString());
+			};
+			const value = `x${Date.now() % 1000}`;
+			await run(['workspace', 'report-metadata', ws, '--source', 'hv', '--token', `jj_status=${value}`]);
+			const wsMs = await waitFor('workspace token', 3000, () =>
+				model.connection(key)?.snapshot?.workspaces.find((w) => w.workspace_id === ws)?.tokens?.jj_status === value,
+			);
+			await sleep(500);
+			console.log(`[live-model] workspace report-metadata: token after ${wsMs} ms; events ${JSON.stringify(seen.splice(0))}`);
+			await run(['pane', 'report-metadata', paneId, '--source', 'hv', '--token', 'ticket=DH-1']);
+			let paneMs: number | undefined;
+			try {
+				paneMs = await waitFor('pane token', 3000, () =>
+					model.connection(key)?.snapshot?.panes.find((p) => p.pane_id === paneId)?.tokens?.ticket === 'DH-1',
+				);
+			} catch {
+				// No event: the token shows only in a fresh snapshot.
+			}
+			await sleep(500);
+			console.log(`[live-model] pane report-metadata: token in the model ${paneMs === undefined ? 'not within 3 s' : `after ${paneMs} ms`}; events ${JSON.stringify(seen.splice(0))}`);
+			const raw = (await bridgeRequest(shell, SESSION, 'session.snapshot', {})) as { snapshot?: unknown };
+			const parsed = parseSnapshot(raw.snapshot)!;
+			assert.strictEqual(parsed.workspaces.find((w) => w.workspace_id === ws)?.tokens?.jj_status, value);
+			assert.strictEqual(parsed.panes.find((p) => p.pane_id === paneId)?.tokens?.ticket, 'DH-1');
+			await run(['workspace', 'report-metadata', ws, '--source', 'hv', '--clear-token', 'jj_status']);
+			await run(['pane', 'report-metadata', paneId, '--source', 'hv', '--clear-token', 'ticket']);
+		} finally {
+			sub.dispose();
+		}
 	});
 
 	test('a stopped session is dropped after its subscription ends (HERDR_VSCODE_LIVE_STOP=1)', async function () {

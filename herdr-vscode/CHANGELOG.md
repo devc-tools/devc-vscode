@@ -4,6 +4,12 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Spaces and Agents rows follow the `[ui.sidebar.spaces]` / `[ui.sidebar.agents]` rows (and `rows_by_agent`)
+  in this machine's herdr `config.toml`: herdr's row tokens, `$name` tokens from `report-metadata`
+  included, become the rows' labels, icons and descriptions. Without such rows nothing changes; a mistake in
+  them falls back to the default rows and says why once in the **herdr** output channel. Saved changes apply
+  within about 2 s. Setting `herdr.useHerdrSidebarConfig` (on by default).
+
 - Mirrored tabs mirror both ways: dragging a splitter sets herdr's split ratio, and herdr's ratio
   changes move the splitters in place (no reload, terminals and focus kept); dragging a tile onto
   another swaps the two panes in herdr (herdr cannot move a pane within its tab, so there are no edge

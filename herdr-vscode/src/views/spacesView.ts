@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { formatElapsed } from '../agentState';
 import { hasAgent, paneLabel, Snapshot, SnapshotPane } from '../sessions';
-import { SpaceGit, spaceDirectory } from '../spaceGit';
+import { customToken, renderRow, SidebarRows, SidebarRowsSource } from '../sidebarConfig';
+import { SpaceGit, spaceDirectory, splitGitDescription } from '../spaceGit';
 import { countsDescription, countStatuses, SHELL_ICON, statusIcon, worstStatus } from '../status';
 import { SessionsView } from './sessionsView';
 
@@ -44,6 +45,8 @@ export interface SpaceNode {
 	children: TabNode[];
 	/** The worst agent status in the space, undefined with no agents. */
 	status: ReturnType<typeof worstStatus>;
+	/** Configured rows without `state_icon`: no icon. */
+	noIcon?: boolean;
 }
 
 export interface TabNode {
@@ -102,8 +105,35 @@ export function agentTooltip(pane: SnapshotPane, now = Date.now()): string {
 /** A space's git description by directory, as {@link SpaceGit.description} gives it. */
 export type SpaceGitLookup = (workspaceId: string, directory: string | undefined) => string | undefined;
 
-/** A snapshot as Spaces nodes: spaces by number, tabs by number, panes in snapshot order. */
-export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceGitLookup): SpaceNode[] {
+/** A space row from herdr's configured `[ui.sidebar.spaces] rows`. */
+export function renderSpaceRow(
+	rows: SidebarRows,
+	input: { label: string; status: ReturnType<typeof worstStatus>; git?: string; tokens?: Record<string, string> },
+): { label: string; description?: string; icon: boolean } {
+	const git = input.git ? splitGitDescription(input.git) : undefined;
+	const value = (token: string): string | undefined => {
+		switch (token) {
+			case 'workspace':
+				return input.label;
+			case 'state_text':
+				return input.status === 'unknown' ? undefined : input.status;
+			case 'branch':
+				return git?.branch;
+			case 'git_status':
+				return git?.status;
+			default:
+				return customToken(token, input.tokens);
+		}
+	};
+	return renderRow(rows, 'workspace', value, input.git);
+}
+
+/**
+ * A snapshot as Spaces nodes: spaces by number, tabs by number, panes in
+ * snapshot order. With `rows` (herdr's `[ui.sidebar.spaces] rows`), space rows
+ * are laid out from them.
+ */
+export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceGitLookup, rows?: SidebarRows): SpaceNode[] {
 	const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 	return [...snapshot.workspaces].sort(byNumber).map((w) => {
 		const tabs = snapshot.tabs
@@ -135,19 +165,30 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 		const agents = snapshot.panes.filter((p) => p.workspace_id === w.workspace_id && hasAgent(p)).map((p) => p.agent_status);
 		const directory = spaceDirectory(snapshot, w.workspace_id);
 		const tooltip = [w.label, w.repoName, directory, countsDescription(countStatuses(agents))].filter((x): x is string => !!x);
-		return {
+		const status = worstStatus(agents);
+		const gitText = git?.(w.workspace_id, directory);
+		const node: SpaceNode = {
 			type: 'space',
 			id: `${sessionKey}|space|${w.workspace_id}`,
 			sessionKey,
 			workspaceId: w.workspace_id,
 			label: w.label,
-			description: git?.(w.workspace_id, directory) ?? (w.repoName && w.repoName !== w.label ? w.repoName : undefined),
+			description: gitText ?? (w.repoName && w.repoName !== w.label ? w.repoName : undefined),
 			tooltip: tooltip.join('\n'),
 			directory,
 			focused: w.focused,
 			children: tabs,
-			status: worstStatus(agents),
+			status,
 		};
+		if (rows) {
+			const r = renderSpaceRow(rows, { label: w.label, status, git: gitText, tokens: w.tokens });
+			node.label = r.label;
+			node.description = r.description;
+			if (!r.icon) {
+				node.noIcon = true;
+			}
+		}
+		return node;
 	});
 }
 
@@ -161,7 +202,7 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			item.id = node.id;
 			item.description = node.description;
 			item.tooltip = node.tooltip;
-			item.iconPath = statusIcon(node.status);
+			item.iconPath = node.noIcon ? undefined : statusIcon(node.status);
 			item.contextValue = 'herdr.space';
 			return item;
 		}
@@ -212,6 +253,8 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 		onModelChange: vscode.Event<void>,
 		/** Branch and git status of space rows; none without it. */
 		private readonly git?: SpaceGit,
+		/** herdr's `[ui.sidebar.*]` rows; phase 19's rows without it. */
+		private readonly sidebar?: SidebarRowsSource,
 		dragAndDropController?: vscode.TreeDragAndDropController<SpacesNode>,
 	) {
 		this.treeView = vscode.window.createTreeView('herdr.spaces', { treeDataProvider: this, dragAndDropController });
@@ -222,6 +265,7 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 			this.treeView.onDidChangeVisibility(() => this.update()),
 			sessions.onDidChangeSelected(() => this.update()),
 			...(git ? [git.onDidChange(() => this.update())] : []),
+			...(sidebar ? [sidebar.onDidChange(() => this.update())] : []),
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if (e.affectsConfiguration('herdr.openPaneIn')) {
 					this.emitter.fire();
@@ -237,7 +281,7 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 		const git = this.git;
 		this.git?.update(key, snapshot, this.treeView.visible);
 		this.roots =
-			key && snapshot ? buildSpaces(snapshot, key, git && ((id, dir) => git.description(key, id, dir))) : [];
+			key && snapshot ? buildSpaces(snapshot, key, git && ((id, dir) => git.description(key, id, dir)), this.sidebar?.config?.spaces?.rows) : [];
 		this.treeView.description = key ? this.sessions.row(key)?.label : undefined;
 		if (this.contextSelected !== (key !== undefined)) {
 			this.contextSelected = key !== undefined;

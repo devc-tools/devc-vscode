@@ -75,6 +75,8 @@ export interface SnapshotWorkspace {
 	repoName?: string;
 	/** `worktree.checkout_path`: where the space's checkout is. */
 	checkoutPath?: string;
+	/** `$name` token values reported with `workspace report-metadata` (names without `$`). */
+	tokens?: Record<string, string>;
 }
 
 export interface SnapshotTab {
@@ -104,7 +106,12 @@ export interface SnapshotPane {
 	completion_seq?: number;
 	cwd?: string;
 	foreground_cwd?: string;
+	terminal_title?: string;
 	terminal_title_stripped?: string;
+	/** `$name` token values reported with `pane report-metadata` (names without `$`). */
+	tokens?: Record<string, string>;
+	/** herdr's per-status labels (`state_labels`), string values only. */
+	state_labels?: Record<string, string>;
 	focused: boolean;
 }
 
@@ -132,6 +139,19 @@ function uint(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
+/** An object's string-valued entries; anything else is empty. */
+function stringMap(value: unknown): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+		for (const [k, v] of Object.entries(value)) {
+			if (typeof v === 'string') {
+				out[k] = v;
+			}
+		}
+	}
+	return out;
+}
+
 function num(value: unknown): number {
 	return typeof value === 'number' ? value : Number.MAX_SAFE_INTEGER;
 }
@@ -156,6 +176,7 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 			focused: w.focused === true,
 			repoName: str(worktree?.repo_name),
 			checkoutPath: str(worktree?.checkout_path),
+			tokens: stringMap(w.tokens),
 		});
 	}
 	const tabs: SnapshotTab[] = [];
@@ -202,7 +223,10 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 			raw_status: status,
 			cwd: str(p.cwd),
 			foreground_cwd: str(p.foreground_cwd),
+			terminal_title: str(p.terminal_title),
 			terminal_title_stripped: str(p.terminal_title_stripped),
+			tokens: stringMap(p.tokens),
+			state_labels: stringMap(p.state_labels),
 			focused: p.focused === true,
 		};
 		if (seq?.state !== undefined) {

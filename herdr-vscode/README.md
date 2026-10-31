@@ -186,6 +186,53 @@ approve the write to `/tmp/herdr-vscode/review/…` in the agent's pane. In auto
 With devc-vscode also installed, a container-mounted file's `+` offers both **Agent (devc)** and **Agent (herdr)**;
 each answers in its own threads.
 
+## Rows from herdr's config
+
+If you lay out herdr's own sidebar with `[ui.sidebar.spaces]` and `[ui.sidebar.agents]` rows in herdr's
+`config.toml`, Spaces' space rows and Agents' rows follow the same rows, so both sidebars show the same
+things. Without them (or with `herdr.useHerdrSidebarConfig` off), the rows stay as described above.
+
+```toml
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace", "$jj_status"], ["branch", "git_status"]]
+
+[ui.sidebar.agents]
+rows = [["state_icon", "machine", "workspace", "tab"], ["agent"], ["$ticket"]]
+
+[ui.sidebar.agents.rows_by_agent]
+claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["agent"]]
+```
+
+A tree row has one line, so the rows are read in order as one: `workspace` (space rows) or `agent`
+(agent rows) is the label, `state_icon` the icon (no `state_icon`, no icon), and every other token a part
+of the description, joined with ` · ` (` › ` between `workspace`, `tab` and `pane`):
+
+| Token | Space row | Agent row |
+| --- | --- | --- |
+| `state_icon` | icon of the worst agent status | icon of the agent's status |
+| `workspace` | label | the space's name |
+| `agent` | | label |
+| `state_text` | the worst status (`blocked`, `working`, `done`, `idle`) | herdr's label for the status, else the status |
+| `branch`, `git_status` | `⎇ v3_auth`, `● 4 ↑1` (together: `⎇ v3_auth ● 4 ↑1`) | |
+| `machine` | | the SSH host or dev container; nothing on this machine |
+| `tab`, `pane` | | the tab's and pane's names |
+| `terminal_title`, `terminal_title_stripped` | | the terminal title |
+| `$name` | a token from `herdr workspace report-metadata <id> --token name=value` | a token from `herdr pane report-metadata <id> --token name=value` |
+
+Each token shows once; empty ones are skipped. Agent rows keep their time in state (`2m`) last. Colours,
+`bold`, `dim` and `row_gap` are accepted and ignored. `rows_by_agent` rows apply to agents of exactly that
+id; an agents section with only `rows_by_agent` leaves other agents' rows as they are.
+
+- Only **this machine's** `config.toml` is read, for every session, dev container and SSH host alike:
+  `$HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else `~/.config/herdr/config.toml`
+  (VS Code started from a desktop launcher may not have the variables your shell sets). A container's
+  or SSH host's own config is not read.
+- Saving the file applies it within about 2 s.
+- A mistake in the sidebar rows (`"bogus"`, `fg = "blue"`, …) puts both views back on the default rows
+  and logs `sidebar config: <path>: <reason>; using default rows` once in the **herdr** output channel.
+  herdr itself ignores its whole config when anything in it is wrong, outside the sidebar rows too, so
+  if herdr's sidebar shows its defaults while VS Code follows your rows, run `herdr config check`.
+
 ## Requirements
 
 - herdr **0.9.5 or later** in each environment, on `PATH` or in `~/.local/bin`. Older herdr
@@ -205,6 +252,7 @@ each answers in its own threads.
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
 | `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
 | `herdr.openPaneIn` | `"layout"` | what clicking a pane or agent row does: `layout` adds it to a Layout tab, `herdr` opens its mirrored herdr tab |
+| `herdr.useHerdrSidebarConfig` | `true` | lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).
 

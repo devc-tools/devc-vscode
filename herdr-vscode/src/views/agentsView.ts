@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { formatElapsed } from '../agentState';
+import type { EnvironmentKind } from '../environments';
 import { hasAgent, paneLabel, Snapshot, SnapshotPane } from '../sessions';
+import { customToken, renderRow, SidebarConfig, SidebarRows, SidebarRowsSource } from '../sidebarConfig';
 import { countsDescription, countStatuses, statusRank } from '../status';
 import { PaneRef, paneTreeItem } from './spacesView';
 
@@ -29,7 +31,14 @@ export interface AgentSource {
 	/** The session's row label in Sessions. */
 	rowLabel: string;
 	snapshot: Snapshot;
+	/** The session's environment, for the `machine` token. */
+	envKind?: EnvironmentKind;
+	/** The environment's row label (ssh alias, container folder name). */
+	envLabel?: string;
 }
+
+/** herdr's `[ui.sidebar.agents]` rows. */
+export type AgentRowsConfig = NonNullable<SidebarConfig['agents']>;
 
 export interface AgentRow {
 	id: string;
@@ -39,6 +48,8 @@ export interface AgentRow {
 	ref: PaneRef;
 	rowLabel: string;
 	workspaceNumber: number;
+	/** Configured rows without `state_icon`: no icon. */
+	noIcon?: boolean;
 }
 
 /** `<status>[ <elapsed>]`; undefined for `unknown`. Elapsed only when the state's start was observed. */
@@ -49,8 +60,59 @@ export function stateText(pane: SnapshotPane, now: number): string | undefined {
 	return pane.state_since !== undefined ? `${pane.agent_status} ${formatElapsed(now - pane.state_since)}` : pane.agent_status;
 }
 
-/** Every agent pane across `sources`. */
-export function agentRows(sources: AgentSource[], scope: AgentsScope = 'all', now = Date.now()): AgentRow[] {
+/** The configured rows for an agent pane: `rows_by_agent[agent]`, else `rows`; undefined for phase 19's row. */
+export function agentRowsFor(config: AgentRowsConfig | undefined, pane: SnapshotPane): SidebarRows | undefined {
+	return (pane.agent !== undefined ? config?.rowsByAgent?.[pane.agent] : undefined) ?? config?.rows;
+}
+
+/** An agent row from herdr's configured rows; phase 19's time in state is appended last. */
+export function renderAgentRow(
+	rows: SidebarRows,
+	input: {
+		label: string;
+		pane: SnapshotPane;
+		workspace: string;
+		tab: string;
+		machine?: string;
+	},
+	now: number,
+): { label: string; description?: string; icon: boolean } {
+	const { pane } = input;
+	const value = (token: string): string | undefined => {
+		switch (token) {
+			case 'agent':
+				return input.label;
+			case 'workspace':
+				return input.workspace;
+			case 'tab':
+				return input.tab;
+			case 'pane':
+				return pane.label;
+			case 'machine':
+				return input.machine;
+			case 'state_text':
+				return pane.agent_status === 'unknown' ? undefined : pane.state_labels?.[pane.agent_status]?.trim() || pane.agent_status;
+			case 'terminal_title':
+				return pane.terminal_title;
+			case 'terminal_title_stripped':
+				return pane.terminal_title_stripped;
+			default:
+				return customToken(token, pane.tokens);
+		}
+	};
+	const row = renderRow(rows, 'agent', value);
+	if (pane.state_since !== undefined && pane.agent_status !== 'unknown') {
+		const elapsed = formatElapsed(now - pane.state_since);
+		row.description = row.description ? `${row.description} · ${elapsed}` : elapsed;
+	}
+	return row;
+}
+
+/**
+ * Every agent pane across `sources`. With `config` (herdr's
+ * `[ui.sidebar.agents]`), rows it covers are laid out from it.
+ */
+export function agentRows(sources: AgentSource[], scope: AgentsScope = 'all', now = Date.now(), config?: AgentRowsConfig): AgentRow[] {
 	const rows: AgentRow[] = [];
 	for (const src of sources) {
 		const workspaces = new Map(src.snapshot.workspaces.map((w) => [w.workspace_id, w]));
@@ -61,17 +123,31 @@ export function agentRows(sources: AgentSource[], scope: AgentsScope = 'all', no
 			}
 			const ws = workspaces.get(pane.workspace_id);
 			const space = ws?.label ?? pane.workspace_id;
-			const breadcrumb = scope === 'session' ? `${space} › ${tabs.get(pane.tab_id)?.label ?? pane.tab_id}` : `${src.rowLabel} › ${space}`;
-			const parts = [breadcrumb, stateText(pane, now), pane.terminal_title_stripped].filter((p): p is string => !!p);
-			rows.push({
+			const tab = tabs.get(pane.tab_id)?.label ?? pane.tab_id;
+			const label = paneLabel(pane, src.snapshot);
+			const row: AgentRow = {
 				id: `${src.sessionKey}|agent|${pane.pane_id}`,
-				label: paneLabel(pane, src.snapshot),
-				description: parts.join(' · '),
+				label,
+				description: '',
 				pane,
 				ref: { sessionKey: src.sessionKey, paneId: pane.pane_id },
 				rowLabel: src.rowLabel,
 				workspaceNumber: ws?.number ?? Number.MAX_SAFE_INTEGER,
-			});
+			};
+			const configured = agentRowsFor(config, pane);
+			if (configured) {
+				const machine = src.envKind && src.envKind !== 'host' ? src.envLabel : undefined;
+				const r = renderAgentRow(configured, { label, pane, workspace: space, tab, machine }, now);
+				row.label = r.label;
+				row.description = r.description ?? '';
+				if (!r.icon) {
+					row.noIcon = true;
+				}
+			} else {
+				const breadcrumb = scope === 'session' ? `${space} › ${tab}` : `${src.rowLabel} › ${space}`;
+				row.description = [breadcrumb, stateText(pane, now), pane.terminal_title_stripped].filter((p): p is string => !!p).join(' · ');
+			}
+			rows.push(row);
 		}
 	}
 	return rows;
@@ -159,6 +235,8 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 		onModelChange: vscode.Event<void>,
 		private readonly state: vscode.Memento,
 		private readonly selection: SelectedSession,
+		/** herdr's `[ui.sidebar.*]` rows; phase 19's rows without it. */
+		private readonly sidebar?: SidebarRowsSource,
 		dragAndDropController?: vscode.TreeDragAndDropController<AgentRow>,
 	) {
 		this.filterValue = toFilter(state.get(AGENTS_FILTER_KEY));
@@ -175,6 +253,7 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 				}
 			}),
 			this.treeView.onDidChangeVisibility(() => this.tick()),
+			...(sidebar ? [sidebar.onDidChange(() => this.update())] : []),
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if (e.affectsConfiguration('herdr.openPaneIn')) {
 					this.emitter.fire();
@@ -243,9 +322,12 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 	private update(): void {
 		const sources = this.sources();
 		const now = Date.now();
-		const all = agentRows(sources, 'all', now);
+		const config = this.sidebar?.config?.agents;
+		const all = agentRows(sources, 'all', now, config);
 		this.inScope =
-			this.scopeValue === 'all' ? all : agentRows(scopeSources(sources, this.scopeValue, this.selection.selected), this.scopeValue, now);
+			this.scopeValue === 'all'
+				? all
+				: agentRows(scopeSources(sources, this.scopeValue, this.selection.selected), this.scopeValue, now, config);
 		this.rows = sortAndFilterAgents([...this.inScope], this.filterValue);
 		const blocked = blockedCount(all);
 		this.treeView.badge = blocked > 0 ? { value: blocked, tooltip: `${blocked} agents blocked` } : undefined;
@@ -255,7 +337,11 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 	}
 
 	getTreeItem(row: AgentRow): vscode.TreeItem {
-		return paneTreeItem(row.id, row.label, row.description, row.pane, row.ref);
+		const item = paneTreeItem(row.id, row.label, row.description || undefined, row.pane, row.ref);
+		if (row.noIcon) {
+			item.iconPath = undefined;
+		}
+		return item;
 	}
 
 	getChildren(row?: AgentRow): AgentRow[] {

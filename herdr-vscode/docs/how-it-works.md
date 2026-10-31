@@ -173,6 +173,40 @@ another `v` is ignored.
   **Open in herdr Tab** and **Focus in herdr TUI** (`herdr.focusPane`). Session rows have no inline
   action.
 
+### Rows from herdr's config
+
+`src/sidebarConfig.ts`. With `herdr.useHerdrSidebarConfig` on (default), the extension reads **this
+machine's** herdr config, for every session: `HERDR_CONFIG_PATH` if set and non-empty, else
+`$XDG_CONFIG_HOME/herdr/config.toml`, else `<home>/.config/herdr/config.toml`, resolved once at activation
+from the extension host's environment (nothing on Windows; nothing in the test host, which sets
+`HERDR_VSCODE_NO_DISCOVERY=1`). The file is parsed with `smol-toml` (bundled) and only `ui.sidebar.spaces`
+and `ui.sidebar.agents` are looked at; unknown keys are ignored.
+
+- **Validation** is herdr 0.9.5's: `rows` is an array of arrays of tokens, a token a string or
+  `{ token, fg = "#RGB" | "#RRGGBB", bold, dim }` with no other key; space tokens `state_icon`, `state_text`,
+  `workspace`, `branch`, `git_status`; agent tokens `state_icon`, `state_text`, `machine`, `workspace`, `tab`,
+  `pane`, `agent`, `terminal_title`, `terminal_title_stripped`; custom `$` + `[A-Za-z0-9_-]{1,32}`; `row_gap`
+  an integer ≥ 0; `rows_by_agent` a table of rows (keys not checked). Any error (TOML included) drops the
+  whole sidebar config: both views use their default rows, and `sidebar config: <path>: <reason>; using
+  default rows` is logged once per distinct failure. A missing file is silent; a successful load that
+  changes the result logs `… loaded`.
+- **Configured:** a section's `rows` present; for an agent, also `rows_by_agent.<agent>` (exact `agent`
+  id), which wins over `rows`. Anything not configured keeps the default row, unchanged.
+- **Rendering:** the rows are flattened; the first `workspace` / `agent` is the label (its value even when
+  absent from the rows); `state_icon` anywhere gives the status icon (space rows: worst status), none
+  otherwise; every other token is a description segment, each kind once, trimmed, empty skipped. Segments
+  join with ` · `, or ` › ` from `workspace`/`tab` to `tab`/`pane`; `branch` directly followed by
+  `git_status` renders as the whole git description. `branch` and `git_status` are the two parts of the
+  git description above; `machine` is the environment's label off this machine; `state_text` on agent rows
+  is `state_labels[status]` when non-empty; `$name` reads the workspace's or pane's `tokens` from the
+  snapshot. Agent rows append the time in state (` · 2m`). Tooltips, tab and pane rows, sorting, filters,
+  counts and Ask Agent's picker (whose labels name its threads) are unchanged.
+- **Refresh:** `fs.watchFile(path, { interval: 2000 })` (follows symlinks, sees the file appear and go);
+  a change of `mtimeMs`, `size` or `ino` re-reads it, and the views re-render when the parsed result
+  changes. Turning the setting off stops polling and drops the config. Token values: `workspace
+  report-metadata` emits `workspace.metadata_updated` and `pane report-metadata` emits `pane.updated`
+  (measured, herdr 0.9.5), both subscribed, so a new snapshot carries them.
+
 ## Mirrored tabs
 
 One editor tab (`WebviewPanel`, view type `herdr.tiles`, `src/tilesPanel.ts`) mirrors one herdr tab.

@@ -697,6 +697,12 @@
           "default": "layout",
           "scope": "window",
           "description": "What clicking a pane or agent row does."
+        },
+        "herdr.useHerdrSidebarConfig": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml`. Off: the built-in rows."
         }
       }
     }
@@ -731,6 +737,7 @@
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
-    "golden-layout": "2.6.0"
+    "golden-layout": "2.6.0",
+    "smol-toml": "1.9.1"
   }
 }

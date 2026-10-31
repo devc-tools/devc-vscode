@@ -9,26 +9,27 @@ config), every row stays exactly as phase 19 draws it.
 
 Depends on [herdr-sidebar-triage](herdr-sidebar-triage.md) (phase 19: branch and git status on
 space rows, Done state, time in state, Agents scope). Phase 19's row formats are the defaults
-here and supply the `branch` / `git_status` text; this plan only prescribes how configured rows
+here and supply the `branch` / `git_status` text (`gitDescription(info)` in `src/spaceGit.ts`, split into
+its branch and status parts); this plan only prescribes how configured rows
 override them. Paths are under `herdr-vscode/`.
 
 ## Checklist
 
-- [ ] 1. Add `smol-toml` `1.9.1` (exact) to `dependencies`; lockfile updated
-- [ ] 2. Config path resolution on this machine (`HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, `~/.config`)
-- [ ] 3. Parse and validate `ui.sidebar.spaces` / `ui.sidebar.agents` (incl. `rows_by_agent`) exactly as
+- [x] 1. Add `smol-toml` `1.9.1` (exact) to `dependencies`; lockfile updated
+- [x] 2. Config path resolution on this machine (`HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, `~/.config`)
+- [x] 3. Parse and validate `ui.sidebar.spaces` / `ui.sidebar.agents` (incl. `rows_by_agent`) exactly as
       herdr 0.9.5 accepts them; any sidebar error → whole sidebar config ignored, logged once
-- [ ] 4. Snapshot carries `tokens` (workspaces and panes), `state_labels` and `terminal_title` (panes)
-- [ ] 5. Row renderer: tokens → label / description / icon for space rows and agent rows
-- [ ] 6. Spaces and Agents views use the renderer when their section is configured, phase 19's rows
+- [x] 4. Snapshot carries `tokens` (workspaces and panes), `state_labels` and `terminal_title` (panes)
+- [x] 5. Row renderer: tokens → label / description / icon for space rows and agent rows
+- [x] 6. Spaces and Agents views use the renderer when their section is configured, phase 19's rows
       otherwise; Agents sources carry the environment (for `machine`)
-- [ ] 7. `herdr.useHerdrSidebarConfig` setting
-- [ ] 8. Reload: config file polled every 2 s; setting change; views re-render
-- [ ] 9. Measure (live, throwaway session) whether `pane.report_metadata` and
+- [x] 7. `herdr.useHerdrSidebarConfig` setting
+- [x] 8. Reload: config file polled every 2 s; setting change; views re-render
+- [x] 9. Measure (live, throwaway session) whether `pane.report_metadata` and
       `workspace.report_metadata` emit a subscribed event; add the token re-snapshot fallback only
       if one does not (see Refresh)
-- [ ] 10. Tests (list under Validation)
-- [ ] 11. README, CHANGELOG, `docs/how-it-works.md`
+- [x] 10. Tests (list under Validation)
+- [x] 11. README, CHANGELOG, `docs/how-it-works.md`
 
 ## Contracts
 
@@ -174,8 +175,8 @@ token falls into one of three classes:
 | `workspace` | **label**: workspace label | description: workspace label |
 | `agent` | (invalid) | **label**: today's `paneLabel` (live agent name, `display_agent`, `agent`, …) |
 | `state_text` | description: worst status word (`blocked`, `working`, `done`, `idle`); nothing when the space has no agents or the worst is `unknown` | description: `state_labels[agent_status]` when non-empty, else the status word; nothing for `unknown` |
-| `branch` | description: phase 19's branch part (e.g. `⎇ v3_auth`); nothing when not a repo | (invalid) |
-| `git_status` | description: phase 19's git status part (e.g. `● 4 ↑1`, `clean`); nothing when unknown | (invalid) |
+| `branch` | description: phase 19's branch part of `gitDescription` (e.g. `⎇ v3_auth`); nothing when not a repo | (invalid) |
+| `git_status` | description: phase 19's git status part of `gitDescription` (e.g. `● 4 ↑1`, `clean`); nothing when unknown | (invalid) |
 | `machine` | (invalid) | description: the environment's label (ssh alias, container folder name) when the environment is not `host`; nothing on this machine |
 | `tab` | (invalid) | description: the pane's tab label |
 | `pane` | (invalid) | description: the pane's `label`; nothing when absent (herdr 0.9.5 snapshots carry none) |
@@ -199,10 +200,12 @@ Rules:
     or `pane` (breadcrumb), and
   - when `branch` is immediately followed by `git_status`, the pair is rendered as one segment
     exactly as phase 19 renders branch + git status in its default space description.
-- Phase 19 parts with no herdr token are kept: on agent rows, phase 19's time-in-state text is
+- Phase 19 parts with no herdr token are kept: on agent rows, phase 19's time-in-state text
+  (`formatElapsed(now - pane.state_since)` from `src/agentState.ts`, only when `state_since` is set) is
   appended last, joined with ` · `, whatever the config. Tab rows, pane rows, Spaces' tab
   summaries, tooltips, `contextValue`, click commands, sorting, filtering, the badge and the
-  Agents scope switch are unchanged.
+  Agents scope switch are unchanged (`tabSummary`, `agentTooltip`, `sortAndFilterAgents`,
+  `agentsViewDescription`, `filterPickItems` in `src/views/`).
 - Empty description → `undefined`.
 
 Examples (session on this machine unless stated; phase 19 formats `⎇ v3_auth ● 4 ↑1`):
@@ -265,36 +268,36 @@ above after ` · `.)
 
 ## Validation
 
-- [ ] `npm run build && npm run lint && xvfb-run -a npm test` (in `herdr-vscode/`) passes, with
+- [x] `npm run build && npm run lint && xvfb-run -a npm test` (in `herdr-vscode/`) passes, with
       unit tests for:
-  - [ ] path resolution: `HERDR_CONFIG_PATH` wins; `XDG_CONFIG_HOME` next; empty values ignored;
+  - [x] path resolution: `HERDR_CONFIG_PATH` wins; `XDG_CONFIG_HOME` next; empty values ignored;
         `~/.config/herdr/config.toml` last
-  - [ ] the example fixture parses to exactly the JSON above
-  - [ ] valid: `rows = []`, `rows = [[]]`, styled token with `fg = "#89b4fa"`, `bold`, `dim`;
+  - [x] the example fixture parses to exactly the JSON above
+  - [x] valid: `rows = []`, `rows = [[]]`, styled token with `fg = "#89b4fa"`, `bold`, `dim`;
         `$a-b_9`, `$ABC`, a 32-character custom name; `state_text` in both sections; unknown keys
         `ui.sidebar.foo` and `ui.sidebar.agents.foo` ignored; unrelated `[theme]` keys ignored
-  - [ ] invalid → both sections default and one log line: `agent` / `tab` in spaces; `branch` /
+  - [x] invalid → both sections default and one log line: `agent` / `tab` in spaces; `branch` /
         `git_status` in agents; `bogus`; `$`; `$x.y`; 33-character custom name;
         `{token="agent", italic=true}`; `{fg="#fff"}` without `token`; `fg = "blue"`; `rows = 5`;
         `[ui] sidebar = 3`; `row_gap = "x"`; `row_gap = -1`; unterminated `x = [`; the same
         invalid file polled twice logs once
-  - [ ] missing file → defaults, no log; unreadable path (a directory) → defaults, logged
-  - [ ] `parseSnapshot` keeps workspace/pane `tokens`, pane `state_labels` and `terminal_title`,
+  - [x] missing file → defaults, no log; unreadable path (a directory) → defaults, logged
+  - [x] `parseSnapshot` keeps workspace/pane `tokens`, pane `state_labels` and `terminal_title`,
         dropping non-string values
-  - [ ] renderer: every row of the Examples table (label, description, icon present or absent);
+  - [x] renderer: every row of the Examples table (label, description, icon present or absent);
         `machine` omitted for `host`, shown for an SSH and a container environment; duplicate
         tokens render once; missing `$` value skipped with no doubled separator; `workspace ›
         tab` and `tab › pane` breadcrumbs; label fallback when the rows lack `workspace` /
         `agent`; `rows_by_agent` picks by exact `agent`, others use `rows`; with only
         `rows_by_agent`, a non-matching agent gets phase 19's default row unchanged
-  - [ ] views: Spaces and Agents items equal phase 19's defaults with no config and with
+  - [x] views: Spaces and Agents items equal phase 19's defaults with no config and with
         `herdr.useHerdrSidebarConfig` false; switch to configured rows after a load event
-  - [ ] reload: writing a temp config file (via an explicit path) re-renders the views within
+  - [x] reload: writing a temp config file (via an explicit path) re-renders the views within
         5 s; deleting it returns to defaults; a symlink retargeted to another file is picked up
-- [ ] `npx vsce ls` (in `herdr-vscode/`) lists no `node_modules` (smol-toml is bundled);
+- [x] `npx vsce ls` (in `herdr-vscode/`) lists no `node_modules` (smol-toml is bundled);
       `package.json` has `"smol-toml": "1.9.1"` (no range) and `package-lock.json` resolves 1.9.1
-- [ ] `git diff --stat -- devc-vscode` is empty
-- [ ] Live (opt-in, `HERDR_VSCODE_LIVE_HOME`, throwaway session `hv-test` in an isolated `HOME`):
+- [x] `git diff --stat -- devc-vscode` is empty
+- [x] Live (opt-in, `HERDR_VSCODE_LIVE_HOME`, throwaway session `hv-test` in an isolated `HOME`):
       `herdr workspace report-metadata --source hv --token jj_status=x <ws>` and
       `herdr pane report-metadata --source hv --token ticket=DH-1 <pane>` show up in the parsed
       snapshot's `tokens`; which events each emitted is recorded under Implementation notes
@@ -320,20 +323,98 @@ above after ` · `.)
   renderer)
 - `herdr-vscode/src/sessions.ts` (`parseSnapshot`: `tokens`, `state_labels`, `terminal_title`;
   token re-snapshot fallback only if checklist 9 needs it)
-- `herdr-vscode/src/views/spacesView.ts` (space rows through the renderer when configured)
-- `herdr-vscode/src/views/agentsView.ts` (agent rows through the renderer when configured;
-  `AgentSource` gains the environment kind and label)
+- `herdr-vscode/src/views/spacesView.ts` (`buildSpaces(snapshot, sessionKey, git?)` space rows through the
+  renderer when configured; `SpacesView` takes the config source before its drag controller; `tabSummary`,
+  `agentTooltip` unchanged)
+- `herdr-vscode/src/views/agentsView.ts` (`agentRows(sources, scope, now)` agent rows through the renderer when
+  configured; `stateText` stays the default; `AgentSource` gains the environment kind and label; `AgentsView`
+  takes the config source before its drag controller)
 - `herdr-vscode/src/status.ts` (read only: `statusIcon`, `worstStatus`, as phase 19 leaves them)
-- phase 19's space branch / git status formatter (read only; whichever file
-  `herdr-sidebar-triage.md` puts it in)
+- `herdr-vscode/src/spaceGit.ts` (`gitDescription(info)` unchanged; a splitter into branch and status parts)
+- `herdr-vscode/src/agentState.ts` (read only: `formatElapsed`)
+- `herdr-vscode/src/agentReview.ts` (read only: Ask Agent's picker keeps the default rows)
 - `herdr-vscode/src/extension.ts` (load config, poller lifecycle, `NO_DISCOVERY` skip, pass
   environment to agent sources, re-render on reload)
 - `herdr-vscode/src/test/sidebarConfig.test.ts` (new)
 - `herdr-vscode/src/test/views.test.ts`, `herdr-vscode/src/test/sessions.test.ts`,
-  `herdr-vscode/src/test/fixtures.ts`
+  `herdr-vscode/src/test/fixtures.ts`, `herdr-vscode/src/test/spaceGit.test.ts`
 - `herdr-vscode/src/test/liveModel.test.ts` (opt-in metadata measurement)
 - `herdr-vscode/README.md` (Settings table row; a "Rows from herdr's config" section with the
   token mapping table, this-machine-only note and `herdr config check` advice)
 - `herdr-vscode/CHANGELOG.md`
 - `herdr-vscode/docs/how-it-works.md` (Views: config path, validation, rendering, refresh)
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Status (2026-10-31)
+
+Implemented; the six Manual items need a person in VS Code (and a dev container for the `machine` one), so
+they stay unticked and the plan stays out of `implemented/`.
+
+### Phase 19 names (plan edited before implementing)
+
+The plan predates phase 19 and named its formatter only by description. Relevant Files and Contracts now
+name the real functions: `agentRows(sources, scope, now)` / `stateText` / `sortAndFilterAgents` /
+`agentsViewDescription` / `filterPickItems` in `src/views/agentsView.ts`; `formatElapsed` and
+`SnapshotPane.state_since` (`src/agentState.ts`); `gitDescription(info)` in `src/spaceGit.ts`;
+`buildSpaces(snapshot, sessionKey, git?)`, `tabSummary`, `agentTooltip` in `src/views/spacesView.ts`.
+`src/spaceGit.ts`, `src/agentState.ts`, `src/agentReview.ts` and `src/test/spaceGit.test.ts` were added to
+Relevant Files (`spaceGit.test.ts` ended up untouched: the splitter is tested in `sidebarConfig.test.ts`).
+
+### Measured
+
+- `smol-toml@1.9.1` (published 2026-10-09) installed with `npm install --save-exact` under
+  `min-release-age=3`; `package.json` has `"smol-toml": "1.9.1"`, the lockfile resolves 1.9.1. esbuild
+  bundles it (`dist/extension.js` 285 kB); `npx vsce ls` lists only `dist/`, `resources/`, `package.json`,
+  `README.md`, `CHANGELOG.md`, `LICENSE` (no `.vscodeignore` change).
+- Live (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`, `hv-test`, herdr 0.9.5; `liveModel` "report-metadata tokens reach
+  the snapshot"), two runs: `workspace report-metadata` emitted **`workspace.metadata_updated`** (token in
+  the model after 359 / 209 ms); `pane report-metadata` emitted **`pane.updated`** (token in the model after
+  176 / 194 ms). Both are subscribed, so **no token re-snapshot fallback was added**. Both tokens appear in
+  a parsed `session.snapshot` (`workspaces[].tokens.jj_status`, `panes[].tokens.ticket`); the test clears
+  them afterwards.
+- herdr 0.9.5's CLI wants the id **before** the options: `herdr workspace report-metadata --source hv --token
+  jj_status=x w1` fails with `unknown option: hv` (exit 2), `herdr workspace report-metadata w1 --source hv
+  --token jj_status=x` works. The live test and README use the id-first form; the Manual item's command
+  needs it too.
+- `herdr config check` on temp files (`HERDR_CONFIG_PATH`, isolated `HOME`) agrees with the validator on
+  `bogus`, `rows = [[]]`, `$x.y`, `italic`, `fg = "blue"`, the fixture's agents rows, `row_gap = -1`.
+- `npm run build && npm run lint && xvfb-run -a npm test`: 322 passing, 60 pending (before: 307 / 59; +15
+  unit tests in `src/test/sidebarConfig.test.ts`, +1 opt-in live test). The poll test saw a new file after
+  2018 ms.
+- Live run (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`): 377 passing, 4 pending, 1 failing — the pre-existing
+  `live model … lists only the isolated session` (the home also lists `default` and `hv-ctl`). `hv-test`
+  and `hv-ctl` were stopped and deleted, `/tmp/hvt` removed. The real `~/.config/herdr/config.toml` (a
+  symlink to devc's seed) was never written (target mtime 2026-09-24 13:38:36, md5 unchanged); the test
+  host does not read it (`HERDR_VSCODE_NO_DISCOVERY=1` → no path).
+
+### Deviations and decisions
+
+- **Ask Agent keeps the default rows.** `agentPickItems` and thread titles (`src/agentReview.ts`) call
+  `agentRows` without a config, so they keep phase 19's config-independent strings and threads stay stable
+  when the config changes; `agentReview.test.ts` "candidates carry the environment path" is unchanged and
+  still pins those strings.
+- **Time in state** appended to configured agent rows is `formatElapsed(now - state_since)` alone (`2m`),
+  not phase 19's `stateText` (`blocked 2m`): the status word is `state_text`'s job, and appending
+  `stateText` would repeat it. Nothing is appended without `state_since` or for `unknown`.
+- `branch` / `git_status` come from splitting phase 19's `gitDescription` string (`splitGitDescription` in
+  `src/spaceGit.ts`; a ref name has no spaces), so `SpaceGit` and its cache are unchanged; `branch`
+  immediately followed by `git_status` renders the whole `gitDescription` string.
+- Constructors: `SpacesView(sessions, snapshotOf, onModelChange, spaceGit?, sidebar?, dnd?)` and
+  `AgentsView(sources, onModelChange, memento, selectedSession, sidebar?, dnd?)` — the drag controller stays
+  last. `sidebar` is a `SidebarRowsSource` (`config` + `onDidChange`), implemented by `SidebarConfigSource`.
+- `AgentSource` gained optional `envKind` / `envLabel` (optional so other callers keep compiling; no
+  `machine` without them). `SnapshotWorkspace.tokens`, `SnapshotPane.tokens` / `state_labels` are typed
+  optional but `parseSnapshot` always sets them (empty when absent).
+- smol-toml's types are its ES module's, which TypeScript (module `Node16`) refuses to `import` from a
+  CommonJS file (TS1479); `src/sidebarConfig.ts` loads it with `require('smol-toml')` (its CommonJS build)
+  typed through `import type … with { 'resolution-mode': 'import' }`.
+- An agents section with only `row_gap` (no `rows`, no `rows_by_agent`) is validated and leaves `agents`
+  out of the parsed result, as for an absent section.
+- `fs.watchFile` is started with `persistent: false`.
+- The "views" Validation item is covered at the row-builder level (`buildSpaces` → `spacesTreeItem`,
+  `agentRows` driven by a `SidebarConfigSource` that is enabled, disabled and fires its change event), not
+  by second `SpacesView` / `AgentsView` instances: the activated extension already owns the
+  `herdr.spaces` / `herdr.agents` tree views in the test host. The views' wiring (`sidebar.onDidChange` →
+  `update()`) is left to the Manual items.

@@ -29,6 +29,15 @@ export function gitDescription(info: Pick<GitInfo, 'head' | 'changes' | 'ahead' 
 	);
 }
 
+/**
+ * A {@link gitDescription} as its branch part (`⎇ <head>`) and git status part
+ * (`● 4 ↑1`, `clean ↓2`). A ref name never contains a space.
+ */
+export function splitGitDescription(description: string): { branch: string; status?: string } {
+	const m = /^(⎇ \S+)(?: · | )(.+)$/.exec(description);
+	return m ? { branch: m[1], status: m[2] } : { branch: description };
+}
+
 /** A space's git description, or undefined (not a repo, no git, a timeout). */
 export async function readSpaceGit(shell: RemoteShell, dir: string, read: typeof readStatus = readStatus): Promise<string | undefined> {
 	try {

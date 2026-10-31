@@ -1,3 +1,4 @@
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
@@ -13,6 +14,7 @@ import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { createdTabId, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
 import { SessionModel, sessionKey, Snapshot } from './sessions';
+import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './status';
 import { PaneStreams } from './streams';
@@ -66,24 +68,44 @@ export function activate(context: vscode.ExtensionContext): void {
 		const conn = m.connection(key);
 		return conn?.state === 'connected' ? conn.snapshot : undefined;
 	};
+	// Rows from this machine's herdr config.toml; the test host never reads the real one.
+	const sidebarConfig = new SidebarConfigSource(NO_DISCOVERY ? undefined : sidebarConfigPath(process.env, os.homedir()), log);
+	const useSidebarConfig = () => vscode.workspace.getConfiguration('herdr').get<boolean>('useHerdrSidebarConfig', true);
+	void sidebarConfig.setEnabled(useSidebarConfig());
+	context.subscriptions.push(
+		sidebarConfig,
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			if (e.affectsConfiguration('herdr.useHerdrSidebarConfig')) {
+				void sidebarConfig.setEnabled(useSidebarConfig());
+			}
+		}),
+	);
 	const spaceGit = new SpaceGit((key) => m.connection(key)?.env.shell);
 	const spaces = new SpacesView(
 		sessions,
 		(key) => m.connection(key)?.snapshot,
 		m.onDidChange,
 		spaceGit,
+		sidebarConfig,
 		new PaneDragController<SpacesNode>(panels.placement, paneRowRef, connectedSnapshot),
 	);
 	const agentSources = (): AgentSource[] =>
 		m
 			.connections()
 			.filter((c) => c.state === 'connected' && c.snapshot)
-			.map((c) => ({ sessionKey: c.key, rowLabel: sessions.row(c.key)?.label ?? c.name, snapshot: c.snapshot! }));
+			.map((c) => ({
+				sessionKey: c.key,
+				rowLabel: sessions.row(c.key)?.label ?? c.name,
+				snapshot: c.snapshot!,
+				envKind: c.env.kind,
+				envLabel: c.env.label,
+			}));
 	const agents = new AgentsView(
 		agentSources,
 		m.onDidChange,
 		context.workspaceState,
 		sessions,
+		sidebarConfig,
 		new PaneDragController<AgentRow>(panels.placement, (row) => row.ref, connectedSnapshot),
 	);
 	const statusBar = new BlockedStatusBar();
