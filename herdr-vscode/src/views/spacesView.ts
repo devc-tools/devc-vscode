@@ -3,7 +3,7 @@ import { hasAgent, paneLabel, Snapshot, SnapshotPane } from '../sessions';
 import { SHELL_ICON, statusIcon, worstStatus } from '../status';
 import { SessionsView } from './sessionsView';
 
-/** What `herdr.focusPane` takes. */
+/** A pane across every session. */
 export interface PaneRef {
 	sessionKey: string;
 	paneId: string;
@@ -11,6 +11,22 @@ export interface PaneRef {
 
 export const FOCUS_PANE_COMMAND = 'herdr.focusPane';
 export const OPEN_TAB_COMMAND = 'herdr.openTab';
+export const OPEN_PANE_TAB_COMMAND = 'herdr.openPaneTab';
+export const ADD_TO_LAYOUT_COMMAND = 'herdr.addToLayout';
+
+export type OpenPaneIn = 'layout' | 'herdr';
+
+/** `herdr.openPaneIn`, where anything but `herdr` is the default. */
+export function openPaneIn(): OpenPaneIn {
+	return vscode.workspace.getConfiguration('herdr').get('openPaneIn') === 'herdr' ? 'herdr' : 'layout';
+}
+
+/** What clicking a pane or agent row runs. */
+export function paneClickCommand(target: OpenPaneIn, ref: PaneRef): vscode.Command {
+	return target === 'herdr'
+		? { command: OPEN_PANE_TAB_COMMAND, title: 'Open in herdr Tab', arguments: [ref.sessionKey, ref.paneId] }
+		: { command: ADD_TO_LAYOUT_COMMAND, title: 'Add to Layout', arguments: [ref.sessionKey, ref.paneId] };
+}
 
 export interface SpaceNode {
 	type: 'space';
@@ -117,13 +133,14 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 	}
 }
 
-/** A pane or agent row: status icon (or `terminal`), and a click that focuses it in herdr. */
+/** A pane or agent row: status icon (or `terminal`), and a click per `herdr.openPaneIn`. */
 export function paneTreeItem(
 	id: string,
 	label: string,
 	description: string | undefined,
 	pane: SnapshotPane,
 	ref: PaneRef,
+	target: OpenPaneIn = openPaneIn(),
 ): vscode.TreeItem {
 	const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
 	item.id = id;
@@ -132,7 +149,7 @@ export function paneTreeItem(
 	item.iconPath = agent ? statusIcon(pane.agent_status) : SHELL_ICON;
 	item.contextValue = agent ? 'herdr.pane.agent' : 'herdr.pane.shell';
 	item.tooltip = agent ? `${pane.agent} · ${pane.agent_status}\n${pane.pane_id}` : pane.pane_id;
-	item.command = { command: FOCUS_PANE_COMMAND, title: 'Focus Pane in herdr', arguments: [ref] };
+	item.command = paneClickCommand(target, ref);
 	return item;
 }
 
@@ -155,6 +172,11 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 			this.emitter,
 			onModelChange(() => this.update()),
 			sessions.onDidChangeSelected(() => this.update()),
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if (e.affectsConfiguration('herdr.openPaneIn')) {
+					this.emitter.fire();
+				}
+			}),
 		);
 		this.update();
 	}

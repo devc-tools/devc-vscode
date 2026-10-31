@@ -28,6 +28,7 @@ const stack = (id: string, size?: string): GlItem => ({
 			componentType: 'pane',
 			componentState: { sessionKey: 'host/s', paneId: id },
 			title: `label ${id}`,
+			reorderEnabled: false,
 		},
 	],
 });

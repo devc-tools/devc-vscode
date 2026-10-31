@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
+import { LayoutStore } from '../layouts';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
@@ -75,7 +76,8 @@ function controllers(): string[] {
 			return c && { shell: c.env.shell, name: c.name };
 		}, log);
 		focus = new FocusTracker(model, () => 'hv-row');
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, rowLabel: () => 'hv-row', log });
+		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, layouts: noLayouts, rowLabel: () => 'hv-row', log });
 
 		// A new tab holding three panes: one split right, then the right one split down.
 		const workspaceId = model.connection(key)!.snapshot!.workspaces[0].workspace_id;

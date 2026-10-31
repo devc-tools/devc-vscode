@@ -89,7 +89,17 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 	) {
 		this.filterValue = toFilter(state.get(AGENTS_FILTER_KEY));
 		this.treeView = vscode.window.createTreeView('herdr.agents', { treeDataProvider: this });
-		this.disposables.push(this.treeView, this.emitter, this.blockedEmitter, onModelChange(() => this.update()));
+		this.disposables.push(
+			this.treeView,
+			this.emitter,
+			this.blockedEmitter,
+			onModelChange(() => this.update()),
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if (e.affectsConfiguration('herdr.openPaneIn')) {
+					this.emitter.fire();
+				}
+			}),
+		);
 		void vscode.commands.executeCommand('setContext', AGENTS_FILTER_KEY, this.filterValue);
 		this.update();
 	}

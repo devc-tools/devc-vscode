@@ -27,6 +27,8 @@ export interface GlComponentItem {
 	componentType: 'pane';
 	componentState: PaneComponentState;
 	title: string;
+	/** Per component: a tab takes this before the settings' `reorderEnabled`, and it defaults to true. */
+	reorderEnabled?: boolean;
 }
 
 export interface GlStackItem {
@@ -56,6 +58,12 @@ export interface GlLayoutConfig {
 	header: { popout: false };
 	dimensions: { borderWidth: number; headerHeight: number };
 }
+
+/**
+ * A Layout tab's config as stored: `saveLayout()`'s `ResolvedLayoutConfig` (with
+ * `resolved: true`), or a new layout's short form, which has no `root` yet.
+ */
+export type StoredLayoutConfig = Omit<GlLayoutConfig, 'root'> & { root?: GlItem; resolved?: boolean };
 
 /** Mirrored tabs: no drag, no popouts; maximise is local, close goes to herdr. */
 export const MIRROR_SETTINGS: GlLayoutConfig['settings'] = {
@@ -118,6 +126,7 @@ function toItem(node: LayoutNode, sessionKey: string, title: (paneId: string) =>
 					componentType: 'pane',
 					componentState: { sessionKey, paneId: node.pane_id },
 					title: title(node.pane_id),
+					reorderEnabled: false,
 				},
 			],
 		};
@@ -156,9 +165,6 @@ export function layoutShape(node: LayoutNode): string {
 }
 
 /** The component states in a Golden Layout item tree. */
-export function componentStates(item: GlItem): PaneComponentState[] {
-	if (item.type === 'stack') {
-		return item.content.map((c) => c.componentState);
-	}
-	return item.content.flatMap(componentStates);
+export function componentStates(item: GlItem | GlComponentItem): PaneComponentState[] {
+	return item.type === 'component' ? [item.componentState] : item.content.flatMap(componentStates);
 }

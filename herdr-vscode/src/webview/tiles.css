@@ -59,10 +59,24 @@ body {
 	border-color: var(--vscode-focusBorder);
 }
 
+/* Which toolbar buttons a panel has: none until the host has said what it is. */
+
+body:not(.kind-mirror) .mirror-only,
+body:not(.kind-layout) .layout-only {
+	display: none;
+}
+
 #tiles {
 	position: relative;
 	min-height: 0;
 	overflow: hidden;
+}
+
+body.layout-empty #tiles::before {
+	content: 'Click a pane in Spaces or Agents to add it to this layout.';
+	position: absolute;
+	padding: 20px;
+	color: var(--vscode-tab-inactiveForeground);
 }
 
 #message {
@@ -109,16 +123,37 @@ body {
 	flex: none;
 }
 
-/* One tile per stack here: the stack's close control is the tile's, so the tab needs none. */
-.lm_header .lm_tab .lm_close_tab {
+/* Mirrored tabs have one tile per stack: the stack's close control is the tile's, so the tab needs none. */
+body:not(.kind-layout) .lm_header .lm_tab .lm_close_tab {
 	display: none !important;
+}
+
+/* Layout tabs stack tiles: each tab has its own X, and the front one is marked. */
+body.kind-layout .lm_header .lm_tab {
+	cursor: pointer;
+}
+
+body.kind-layout .lm_header .lm_tab .lm_close_tab {
+	position: static;
+	flex: none;
+	cursor: pointer;
+	line-height: 14px;
+}
+
+body.kind-layout .lm_header .lm_tab .lm_close_tab::before {
+	content: '\00d7';
+}
+
+body.kind-layout .lm_header .lm_tab.lm_active {
+	color: var(--vscode-tab-activeForeground);
+	box-shadow: inset 0 -1px 0 var(--vscode-tab-activeForeground);
 }
 
 .lm_stack:has(.tile-focused) > .lm_header {
 	box-shadow: inset 0 -1px 0 var(--vscode-focusBorder);
 }
 
-.lm_stack:has(.tile-focused) > .lm_header .lm_tab {
+.lm_stack:has(.tile-focused) > .lm_header .lm_tab.lm_active {
 	color: var(--vscode-tab-activeForeground);
 }
 
@@ -153,6 +188,36 @@ body {
 .lm_header .lm_controls .lm_close::before {
 	content: '\00d7';
 	font-size: 1.2em;
+}
+
+/* Dragging */
+
+.lm_dragProxy {
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-focusBorder);
+	opacity: 0.9;
+}
+
+.lm_dragProxy .lm_header .lm_tab {
+	color: var(--vscode-tab-activeForeground);
+}
+
+.lm_dropTargetIndicator .lm_inner {
+	background: var(--vscode-focusBorder);
+	opacity: 0.25;
+}
+
+.lm_header .lm_tabdropdown_list {
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+	border: 1px solid var(--vscode-panel-border);
+}
+
+.lm_header .lm_tabdropdown_list .lm_tab {
+	height: 22px;
+}
+
+.lm_header .lm_controls .lm_tabdropdown::before {
+	color: var(--vscode-tab-inactiveForeground);
 }
 
 /* Tile headers */

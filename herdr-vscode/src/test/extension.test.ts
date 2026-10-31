@@ -44,6 +44,7 @@ suite('herdr-vscode', () => {
 		assert.strictEqual(config.get('sshPath'), 'ssh');
 		assert.strictEqual(config.get('dockerPath'), 'docker');
 		assert.strictEqual(config.get('showStoppedSessions'), false);
+		assert.strictEqual(config.get('openPaneIn'), 'layout');
 	});
 
 	test('agent filter commands set the filter', async () => {
@@ -62,5 +63,24 @@ suite('herdr-vscode', () => {
 		assert.ok((ext.packageJSON.activationEvents as string[]).includes('onWebviewPanel:herdr.tiles'));
 		// Without the session connected (the test host discovers nothing) nothing opens.
 		await vscode.commands.executeCommand('herdr.openPaneTab', 'host/none', 'w1:p1');
+	});
+
+	test('layout tabs: commands, the context menu, and the icon ships', async () => {
+		const ext = extension();
+		await ext.activate();
+		const registered = new Set(await vscode.commands.getCommands(true));
+		for (const c of ['herdr.newLayout', 'herdr.openLayout', 'herdr.renameLayout', 'herdr.deleteLayout', 'herdr.addToLayout']) {
+			assert.ok(registered.has(c), c);
+		}
+		const menus = ext.packageJSON.contributes.menus;
+		assert.deepStrictEqual(
+			(menus['view/item/context'] as { command: string }[]).map((m) => m.command),
+			['herdr.addToLayout', 'herdr.openPaneTab', 'herdr.focusPane'],
+		);
+		const focus = (ext.packageJSON.contributes.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
+		assert.strictEqual(focus?.title, 'Focus in herdr TUI');
+		await vscode.workspace.fs.stat(vscode.Uri.joinPath(ext.extensionUri, 'resources', 'layout.svg'));
+		// Without the session connected (the test host discovers nothing) nothing opens.
+		await vscode.commands.executeCommand('herdr.addToLayout', 'host/none', 'w1:p1');
 	});
 });

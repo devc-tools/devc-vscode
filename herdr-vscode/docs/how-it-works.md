@@ -102,8 +102,11 @@ when its session stops and when its environment goes away.
   `circle-outline`; panes without an agent `terminal`. Sessions and spaces show their worst
   status.
 - **Agents** filter is stored in workspace state and in the context key `herdr.agentsFilter`.
-- **Spaces** tab rows run `herdr.openTab`. Pane and agent rows run `herdr.focusPane` on click and
-  have `herdr.openPaneTab` in their context menu. Session rows have no inline action.
+- **Spaces** tab rows run `herdr.openTab`. Pane and agent rows run `herdr.addToLayout` on click, or
+  `herdr.openPaneTab` when `herdr.openPaneIn` is `herdr`; the command is chosen when the item is
+  built, and the views refresh when the setting changes. Their context menu has **Add to Layout**,
+  **Open in herdr Tab** and **Focus in herdr TUI** (`herdr.focusPane`). Session rows have no inline
+  action.
 
 ## Mirrored tabs
 
@@ -204,3 +207,70 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   focused pane if it is in this tab, with `focus:false` and the pane's `foreground_cwd ?? cwd`.
 - The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last
   focused pane, fires `onDidChangeLastFocused`, and shows it in the status bar.
+
+## Layout tabs
+
+A Layout panel is the same view type, bundle and stream manager as a mirrored tab
+(`src/tilesPanel.ts`: `TilesPanel` is what they share, `MirrorPanel` and `LayoutPanel` what they
+don't), with webview state `{"kind":"layout","layoutId"}`. `init` puts `kind-layout` or `kind-mirror`
+on `<body>`, which picks the toolbar buttons and the tab close buttons. A Layout panel sends herdr no
+request that changes anything: only `terminal session control`, per tile.
+
+### Store
+
+`src/layouts.ts`: workspace state `herdr.layouts`, an array of `{"id","name","config"}`. `config` is
+`layout.saveLayout()`'s `ResolvedLayoutConfig`, sent by the webview 500 ms after Golden Layout's last
+`stateChanged` (and on `pagehide`), or the short form of a layout that has never had a tile, with no
+`root`. Golden Layout fires `stateChanged` on an animation frame, and not at all when the only stack
+closes, so the webview also listens to `itemDestroyed`.
+
+A tile being dragged is out of the tree, in Golden Layout's proxy. While `.lm_dragProxy` is in the
+document nothing is saved, no terminal is disposed and no size is sent; the drop fires `stateChanged`
+again. A terminal is disposed only when a settled layout no longer holds its pane, and that is also
+all that closing a tile does (`tileClose`, then the last viewer releases the stream).
+
+### Adding a pane
+
+`herdr.addToLayout` picks the panel (`selectLayoutTarget`: active, else most recently active still
+open, else a new `Layout <n>`, never a closed one) and posts `addTile`. The webview decides what that
+means from its current layout (`addPlacement`), since the host's copy can be up to 500 ms old:
+
+- pane present: focus its tile, bringing its tab to the front;
+- a focused tile: `stack.addComponent` in its stack;
+- neither: `saveLayout()` as a `LayoutConfig`, the pane added at the right of the root
+  (`addPaneAtRoot`), `loadLayout`. As in a mirrored tab, terminals survive that in the tile map.
+
+### Tile states
+
+`LayoutPanel` runs a tile's stream only while `paneAvailability` says `live`, and follows the session
+model:
+
+| The session | The pane | The tile |
+| --- | --- | --- |
+| not connected, or no snapshot yet | | *Waiting for <row label>…*, stream closed; never "gone" before there is a snapshot to say so |
+| connected | not in the snapshot | *This pane is gone.* with **Remove**, stream closed |
+| connected | in the snapshot | live; a stream that ends shows *Disconnected: …* or *Opened in another viewer.*, as in a mirrored tab |
+
+Going back to `live` opens a new stream with the tile's last size. herdr keeps pane ids across a
+server restart (with new terminals), so tiles come back.
+
+A tile behind another in its stack has no size. It announces itself (`tileOpen`) when it first comes to
+the front, so a restored stack only opens streams for its front tiles; once announced it keeps its
+stream while behind.
+
+### Moved panes
+
+`pane.moved` data, measured on herdr 0.9.5: `{"pane":{"pane_id",…,"terminal_id"},"previous_pane_id",
+"previous_tab_id","previous_workspace_id","created_tab"?,"created_workspace"?,"closed_tab_id"?}`. A
+move inside a workspace keeps the id; a move to another workspace gives a new one
+(`previous_pane_id` is the old), on the same terminal. `TilesPanels` rewrites that pane in every saved
+layout, open or not, and an open panel's webview rewrites its live layout: the tile gets a new
+terminal and a new stream on the new id, and the full first frame repaints the same screen. A move
+while the extension is not running is not seen, and the tile says *This pane is gone.*.
+
+### Copy as Layout
+
+The mirrored panel's webview posts its `saveLayout()`; `asLayoutConfig` turns on reorder in the settings
+**and on each component**. Golden Layout's tab takes a component's `reorderEnabled` before the
+settings', and a component without one resolves to `true`, so a mirrored tab's components carry
+`reorderEnabled: false` themselves.

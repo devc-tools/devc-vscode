@@ -9,7 +9,7 @@ import { eventTouchesTab, panelTitle, tileMetas } from '../tilesPanel';
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { agentRows, blockedCount, sortAndFilterAgents } from '../views/agentsView';
 import { effectiveSelection, groupOf, sessionRows } from '../views/sessionsView';
-import { buildSpaces, spacesTreeItem } from '../views/spacesView';
+import { buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem } from '../views/spacesView';
 import { snapshot } from './fixtures';
 
 const shell = new LocalShell();
@@ -85,8 +85,8 @@ suite('Spaces items', () => {
 		assert.strictEqual(agentItem.description, 'Refactoring');
 		assert.strictEqual(agentItem.contextValue, 'herdr.pane.agent');
 		assert.strictEqual((agentItem.iconPath as vscode.ThemeIcon).id, 'circle-filled');
-		assert.deepStrictEqual(agentItem.command?.arguments, [{ sessionKey: 'host/code-wksp', paneId: 'w2:p1' }]);
-		assert.strictEqual(agentItem.command?.command, 'herdr.focusPane');
+		assert.deepStrictEqual(agentItem.command?.arguments, ['host/code-wksp', 'w2:p1']);
+		assert.strictEqual(agentItem.command?.command, 'herdr.addToLayout', 'the default of herdr.openPaneIn');
 
 		const shellItem = spacesTreeItem(shellPane);
 		assert.strictEqual(shellItem.description, '/src/api/test', 'foreground_cwd before cwd');
@@ -109,6 +109,27 @@ suite('Spaces items', () => {
 	test('space icon is its worst agent status', () => {
 		assert.strictEqual(spaces[0].status, 'blocked');
 		assert.strictEqual(spaces[1].status, 'working');
+	});
+});
+
+suite('pane row clicks', () => {
+	const ref = { sessionKey: 'host/s', paneId: 'w1:p1' };
+
+	test('per herdr.openPaneIn', () => {
+		assert.deepStrictEqual(paneClickCommand('layout', ref), { command: 'herdr.addToLayout', title: 'Add to Layout', arguments: ['host/s', 'w1:p1'] });
+		assert.deepStrictEqual(paneClickCommand('herdr', ref), { command: 'herdr.openPaneTab', title: 'Open in herdr Tab', arguments: ['host/s', 'w1:p1'] });
+	});
+
+	test('a row takes the setting when it is built', () => {
+		const pane = snapshot().panes[0];
+		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref, 'herdr').command?.command, 'herdr.openPaneTab');
+		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref, 'layout').command?.command, 'herdr.addToLayout');
+	});
+
+	test('tab rows open the mirrored tab whatever the setting', () => {
+		const tab = buildSpaces(snapshot(), 'host/s')[0].children[0];
+		assert.strictEqual(spacesTreeItem(tab).command?.command, 'herdr.openTab');
+		assert.strictEqual(spacesTreeItem(buildSpaces(snapshot(), 'host/s')[0]).command, undefined, 'space rows only expand');
 	});
 });
 

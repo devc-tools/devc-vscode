@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Environments } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
+import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
 import { SessionModel } from './sessions';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND } from './status';
 import { PaneStreams } from './streams';
@@ -8,7 +9,7 @@ import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { AgentSource, AgentsView } from './views/agentsView';
 import { SessionsView } from './views/sessionsView';
-import { FOCUS_PANE_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpacesView } from './views/spacesView';
+import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpacesView } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -19,6 +20,11 @@ let streams: PaneStreams | undefined;
  * tests; views and commands are still registered.
  */
 const NO_DISCOVERY = process.env.HERDR_VSCODE_NO_DISCOVERY === '1';
+
+/** A pane command's arguments: the row from a context menu, or (sessionKey, paneId) from code. */
+function paneArg(arg?: string | { ref?: PaneRef }, paneId?: string): PaneRef | undefined {
+	return typeof arg === 'object' ? arg.ref : arg && paneId ? { sessionKey: arg, paneId } : undefined;
+}
 
 export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel('herdr');
@@ -48,12 +54,38 @@ export function activate(context: vscode.ExtensionContext): void {
 		const conn = m.connection(key);
 		return conn && { shell: conn.env.shell, name: conn.name };
 	}, log);
-	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, rowLabel, log });
+	const layouts = new LayoutStore(context.workspaceState);
+	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, layouts, rowLabel, log });
 	context.subscriptions.push(focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
+
+	const pickLayout = async (placeHolder: string): Promise<SavedLayout | undefined> => {
+		const saved = layouts.list();
+		if (saved.length === 0) {
+			void vscode.window.showInformationMessage('herdr: there are no saved layouts.');
+			return undefined;
+		}
+		const picked = await vscode.window.showQuickPick(
+			saved.map((layout) => ({ label: layout.name, layout })),
+			{ placeHolder },
+		);
+		return picked?.layout;
+	};
+	const askLayoutName = (value: string, prompt: string, own?: string) =>
+		vscode.window.showInputBox({
+			prompt,
+			value,
+			validateInput: (name) => {
+				if (!name.trim()) {
+					return 'Enter a name.';
+				}
+				return name.trim() !== own && layouts.names().includes(name.trim()) ? 'There is a layout with this name.' : undefined;
+			},
+		});
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
-		vscode.commands.registerCommand(FOCUS_PANE_COMMAND, async (ref?: PaneRef) => {
+		vscode.commands.registerCommand(FOCUS_PANE_COMMAND, async (arg?: PaneRef | { ref?: PaneRef }) => {
+			const ref = arg && 'ref' in arg ? arg.ref : (arg as PaneRef | undefined);
 			if (!ref?.sessionKey || !ref.paneId) {
 				return;
 			}
@@ -68,11 +100,53 @@ export function activate(context: vscode.ExtensionContext): void {
 				panels.openTab(sessionKey, tabId);
 			}
 		}),
-		// From a context menu the argument is the row; from code, (sessionKey, paneId).
-		vscode.commands.registerCommand('herdr.openPaneTab', (arg?: string | { ref?: PaneRef }, paneId?: string) => {
-			const ref = typeof arg === 'object' ? arg.ref : arg && paneId ? { sessionKey: arg, paneId } : undefined;
+		vscode.commands.registerCommand(OPEN_PANE_TAB_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
+			const ref = paneArg(arg, paneId);
 			if (ref) {
 				panels.openPaneTab(ref.sessionKey, ref.paneId);
+			}
+		}),
+		vscode.commands.registerCommand(ADD_TO_LAYOUT_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
+			const ref = paneArg(arg, paneId);
+			if (ref) {
+				panels.addToLayout(ref.sessionKey, ref.paneId);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.newLayout', async () => {
+			const name = await askLayoutName(nextLayoutName(layouts.names()), 'Name of the new layout');
+			if (name) {
+				panels.newLayout(name.trim());
+			}
+		}),
+		vscode.commands.registerCommand('herdr.openLayout', async () => {
+			const layout = await pickLayout('Layout to open');
+			if (layout) {
+				panels.openLayout(layout.id);
+			}
+		}),
+		// The Layout panel's toolbar passes its layout; the command palette asks.
+		vscode.commands.registerCommand('herdr.renameLayout', async (layoutId?: string) => {
+			const layout = layoutId ? layouts.get(layoutId) : await pickLayout('Layout to rename');
+			if (!layout) {
+				return;
+			}
+			const name = await askLayoutName(layout.name, `New name of "${layout.name}"`, layout.name);
+			if (name) {
+				panels.renameLayout(layout.id, name.trim());
+			}
+		}),
+		vscode.commands.registerCommand('herdr.deleteLayout', async () => {
+			const layout = await pickLayout('Layout to delete');
+			if (!layout) {
+				return;
+			}
+			const answer = await vscode.window.showWarningMessage(
+				`Delete layout "${layout.name}"? Its panes stay in herdr.`,
+				{ modal: true },
+				'Delete Layout',
+			);
+			if (answer === 'Delete Layout') {
+				panels.deleteLayout(layout.id);
 			}
 		}),
 		vscode.commands.registerCommand(REVEAL_FOCUSED_COMMAND, () => {

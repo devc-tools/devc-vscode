@@ -4,6 +4,14 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Layout tabs: named editor tabs holding any panes from any session, arranged freely with stacks,
+  drag and maximise, and saved per workspace. **New Layout**, **Open Layout…**, **Rename Layout…**,
+  **Delete Layout…**, **Add to Layout**, and **Copy as Layout** on a mirrored tab's toolbar. They never
+  change herdr's layout.
+- `herdr.openPaneIn`: clicking a pane or agent row adds it to a Layout tab (default) or opens its
+  mirrored herdr tab. It no longer focuses the pane in herdr: that moved to the context menu as
+  **Focus in herdr TUI**.
+- Fixed: a tile of a mirrored tab could be dragged, which rearranged it locally.
 - herdr tabs in the editor area: **Open herdr Tab** (click a tab in Spaces) and **Open in herdr
   Tab** (context menu of pane and agent rows) show a herdr tab's split layout as live terminal
   tiles, kept in sync with herdr. Typing, wheel scrolling, Split Right / Split Down and closing a
