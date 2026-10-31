@@ -14,7 +14,10 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:herdr.sessions"
+    "onView:herdr.sessions",
+    "onView:herdr.spaces",
+    "onView:herdr.agents",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -32,15 +35,159 @@
         {
           "id": "herdr.sessions",
           "name": "Sessions"
+        },
+        {
+          "id": "herdr.spaces",
+          "name": "Spaces"
+        },
+        {
+          "id": "herdr.agents",
+          "name": "Agents"
         }
       ]
     },
     "viewsWelcome": [
       {
         "view": "herdr.sessions",
-        "contents": "herdr sessions will appear here."
+        "contents": "Looking for herdr sessions\u2026"
+      },
+      {
+        "view": "herdr.spaces",
+        "contents": "Select a running session in Sessions.",
+        "when": "!herdr.sessionSelected"
+      },
+      {
+        "view": "herdr.spaces",
+        "contents": "This session has no spaces.",
+        "when": "herdr.sessionSelected"
+      },
+      {
+        "view": "herdr.agents",
+        "contents": "No agents.",
+        "when": "herdr.agentsFilter == all || !herdr.agentsFilter"
+      },
+      {
+        "view": "herdr.agents",
+        "contents": "No agents match this filter.",
+        "when": "herdr.agentsFilter && herdr.agentsFilter != all"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "herdr.refresh",
+        "title": "Refresh",
+        "category": "herdr",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "herdr.attachSession",
+        "title": "Attach in Terminal",
+        "category": "herdr",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "herdr.focusPane",
+        "title": "Focus Pane in herdr",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.agents.showAll",
+        "title": "Show All",
+        "category": "herdr",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "herdr.agents.showBlocked",
+        "title": "Show Blocked",
+        "category": "herdr",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "herdr.agents.showWorking",
+        "title": "Show Working",
+        "category": "herdr",
+        "icon": "$(sync)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "herdr.refresh",
+          "when": "view == herdr.sessions",
+          "group": "navigation"
+        },
+        {
+          "command": "herdr.agents.showAll",
+          "when": "view == herdr.agents && herdr.agentsFilter != all",
+          "group": "navigation@1"
+        },
+        {
+          "command": "herdr.agents.showBlocked",
+          "when": "view == herdr.agents",
+          "group": "navigation@2"
+        },
+        {
+          "command": "herdr.agents.showWorking",
+          "when": "view == herdr.agents",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "herdr.attachSession",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.(running|stopped)$/",
+          "group": "inline"
+        },
+        {
+          "command": "herdr.attachSession",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.(running|stopped)$/",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "herdr.attachSession",
+          "when": "false"
+        },
+        {
+          "command": "herdr.focusPane",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "herdr",
+      "properties": {
+        "herdr.sshHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "ssh aliases from `~/.ssh/config` whose herdr sessions are shown."
+        },
+        "herdr.sshPath": {
+          "type": "string",
+          "default": "ssh",
+          "scope": "application",
+          "description": "ssh client."
+        },
+        "herdr.dockerPath": {
+          "type": "string",
+          "default": "docker",
+          "scope": "application",
+          "description": "Docker CLI."
+        },
+        "herdr.showStoppedSessions": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "List stopped herdr sessions too."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",

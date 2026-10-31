@@ -18,28 +18,28 @@ Contracts.
 
 ## Checklist
 
-- [ ] 1. Copy `devc-vscode/src/docker.ts` and `devc-vscode/src/remoteShell.ts` to `herdr-vscode/src/docker.ts`
+- [x] 1. Copy `devc-vscode/src/docker.ts` and `devc-vscode/src/remoteShell.ts` to `herdr-vscode/src/docker.ts`
       and `herdr-vscode/src/remoteShell.ts`, each starting with the comment
       `// Copied from devc-vscode/src/<file> at <short commit>; maintained separately.`; add
       `LocalShell implements RemoteShell` (runs argv on this machine with `child_process`, same
       semantics as `DockerShell`). devc-vscode's files are not changed.
-- [ ] 2. `herdr-vscode/src/devcontainer.ts`: copies of `remoteUserFromMetadata` and `getRemoteUser`
+- [x] 2. `herdr-vscode/src/devcontainer.ts`: copies of `remoteUserFromMetadata` and `getRemoteUser`
       from `devc-vscode/src/herdr.ts` (same comment), plus `listDevcontainers()`
-- [ ] 3. Environments: discover host, SSH and container environments; rediscover on Docker
+- [x] 3. Environments: discover host, SSH and container environments; rediscover on Docker
       events, on a 30 s timer for SSH, and on **Refresh**
-- [ ] 4. Sessions per environment from `herdr session list --json`
-- [ ] 5. Bridge client: `--check`, one-shot requests, `events.subscribe` with event-name
+- [x] 4. Sessions per environment from `herdr session list --json`
+- [x] 5. Bridge client: `--check`, one-shot requests, `events.subscribe` with event-name
       normalization, `events_lost` handling, clean shutdown
-- [ ] 6. Session model: snapshot per running session, re-taken on events (debounced), with
+- [x] 6. Session model: snapshot per running session, re-taken on events (debounced), with
       per-pane `pane.agent_status_changed` subscriptions kept in step with the pane set
-- [ ] 7. **Sessions** view (`herdr.sessions`) with selection persisted in workspace state
-- [ ] 8. **Spaces** view (`herdr.spaces`) for the selected session
-- [ ] 9. **Agents** view (`herdr.agents`) with filter commands and the blocked-count badge
-- [ ] 10. Commands: refresh, attach session, focus pane, filters (contributed in `package.json`)
-- [ ] 11. Status bar item for blocked agents
-- [ ] 12. Settings in `package.json`
-- [ ] 13. Unit tests (list under Validation)
-- [ ] 14. `herdr-vscode/README.md` (what it shows, requirements, settings),
+- [x] 7. **Sessions** view (`herdr.sessions`) with selection persisted in workspace state
+- [x] 8. **Spaces** view (`herdr.spaces`) for the selected session
+- [x] 9. **Agents** view (`herdr.agents`) with filter commands and the blocked-count badge
+- [x] 10. Commands: refresh, attach session, focus pane, filters (contributed in `package.json`)
+- [x] 11. Status bar item for blocked agents
+- [x] 12. Settings in `package.json`
+- [x] 13. Unit tests (list under Validation)
+- [x] 14. `herdr-vscode/README.md` (what it shows, requirements, settings),
       `herdr-vscode/CHANGELOG.md`, `herdr-vscode/docs/how-it-works.md` (new:
       discovery, bridge protocol, refresh rules)
 
@@ -223,14 +223,14 @@ background `statusBarItem.warningBackground`; click runs `herdr.agents.showBlock
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run build && npm test` passes, including new unit tests for:
+- [x] `cd herdr-vscode && npm run build && npm test` passes, including new unit tests for:
       session-list parsing (running, stopped, malformed JSON → no sessions, environment error);
       event-name normalization (`pane_created`, `workspace_metadata_updated`,
       `pane.agent_status_changed` unchanged); snapshot → Spaces items (labels, descriptions,
       contextValues, ordering, focused expansion); pane label fallback order; counts description
       (`2 blocked · 1 working`, `idle`); Agents sort and each filter; worst-status rollup;
       session key format; the herdr wrapper argv for each environment kind
-- [ ] `git diff --stat -- devc-vscode` is empty (devc-vscode untouched)
+- [x] `git diff --stat -- devc-vscode` is empty (devc-vscode untouched)
 - [ ] Manual, host: `herdr --session hv-test` in a terminal, split a pane, start `claude` in one.
       In an Extension Development Host: Sessions → This machine shows `hv-test` with
       `1 working` (or `idle`) and the right icon; selecting it fills Spaces with its workspace,
@@ -269,3 +269,69 @@ background `statusBarItem.warningBackground`; click runs `herdr.agents.showBlock
 - `herdr-vscode/README.md`, `herdr-vscode/CHANGELOG.md`,
   `herdr-vscode/docs/how-it-works.md` (new)
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Verified (2026-10-30)
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 41 passing, 7 pending (the opt-in
+  live suites). `npx vsce ls` lists only `dist/extension.js`, `resources/herdr.svg`,
+  `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`.
+- The test host never discovers the machine's sessions: `.vscode-test.mjs` sets
+  `HERDR_VSCODE_NO_DISCOVERY=1`, which `activate` honours (views and commands are still
+  registered).
+- Live, against a throwaway `hv-test` session only (herdr 0.9.5), via the opt-in suites in
+  `src/test/live.test.ts` and `src/test/liveModel.test.ts` (see README § Development):
+  `--check`, subscribe, one-shot requests, `pane.split`, `pane.focus` (focus moved, seen in the
+  next snapshot), `pane.report_agent` blocked/idle/working seen by the model in 200–360 ms, a
+  new pane picked up and resubscribed, bridges gone from `ps` after dispose; full discovery in an
+  isolated `HOME` holding only `hv-test` (row `hv-test` / `1 working` / tooltip
+  `host/hv-test` + `herdr 0.9.5`, selection fallback, blocked count 1 then 0 within 2 s); and
+  `server stop` → `disconnected` → re-list → row `herdr not running` about 2 s later.
+- Not run: Docker (no Docker in this container) and SSH (no reachable host); their argv is unit
+  tested.
+
+### Deviations and decisions
+
+- `src/remoteShell.ts` copy: `SshHostNotAllowedError` names `herdr.sshHosts`; `DockerShell`
+  takes an optional spawn function (tests); `LocalShell` and `localEnv()` added. `LocalShell`
+  removes `HERDR_*` from the child's environment, and attach terminals unset them, because a VS
+  Code launched from a herdr pane inherits `HERDR_SESSION`/`HERDR_SOCKET_PATH`.
+- One subscription per session carries the global types and the per-pane
+  `pane.agent_status_changed` entries; it is replaced (new first, old closed) when the pane set
+  changes. The first one, before the first snapshot, has no per-pane entries.
+- The 150 ms snapshot debounce coalesces (the first event starts the timer; later ones do not
+  reset it), so a busy session still refreshes.
+- Unreachable SSH hosts are re-listed only on the 30 s SSH pass, not every 10 s.
+- Extra row descriptions: `connecting…` (running, before the first snapshot), `checking…`
+  (environment not listed yet), `error` (other list failures; message in the tooltip). An
+  environment with no session row to show gets one `herdr.session.absent` row, labelled
+  `this machine`, the alias, or the container folder name; this machine with no running session
+  shows `herdr not running` too.
+- Tab rows have no icon (the contract gives icons to sessions, spaces and panes only).
+- Additions: welcome texts for Spaces with a session selected but empty and for empty Agents;
+  context key `herdr.sessionSelected`; Agents `TreeView.description` shows the active filter;
+  internal (uncontributed) command `herdr.revealBlockedAgents` behind the status bar item; Attach
+  in Terminal also in the row's context menu; `herdr.attachSession` and `herdr.focusPane` hidden
+  from the Command Palette.
+- Host attach runs `herdr --session <S>` through the same `~/.local/bin` wrapper.
+
+### Measured against herdr 0.9.5 (for later phases)
+
+- Shell panes have no `agent` key at all; panes in the snapshot carry no `label` key;
+  `pane.focus` with an unknown id answers `pane_not_found`; `pane.report_agent` states are
+  `idle | working | blocked | unknown` (no `done`); the snapshot also has a `layouts` key, not
+  parsed yet.
+- herdr's socket path must fit `sun_path`: a `HOME` under a long directory gives
+  `connection_error: local socket name length exceeds capacity of sun_path`.
+
+### For herdr-mirrored-tabs (phase 15)
+
+- `SessionModel.request(sessionKey, method, params)` makes one-shot bridge calls;
+  `SessionModel.connection(key)` gives `env.shell` and `name` for spawning
+  `terminal session control` (use `herdrArgv` from `src/bridge.ts`, and `RemoteShell.spawn`,
+  which pipes stdin and ignores stderr).
+- Spaces tab rows have id `<session key>|tab|<tab_id>` and `contextValue` `herdr.tab`; pane
+  rows carry `PaneRef {sessionKey, paneId}` as the `herdr.focusPane` argument.
+- `parseSnapshot` drops `layouts`; extend it there. Every event (including `layout.updated`)
+  already re-snapshots, and `SessionModel.onDidChange` fires after each.
