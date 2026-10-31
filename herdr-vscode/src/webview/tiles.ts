@@ -4,7 +4,8 @@ import { ComponentContainer, ComponentItem, ContentItem, GoldenLayout, JsonValue
 import 'golden-layout/dist/css/goldenlayout-base.css';
 import '@xterm/xterm/css/xterm.css';
 import './tiles.css';
-import { componentStates, PaneComponentState, StoredLayoutConfig } from '../layoutMapping';
+import { componentStates, PaneComponentState, SPLIT_ID_PREFIX, StoredLayoutConfig } from '../layoutMapping';
+import { changedRatios, dropZone, DropZone, offeredZone, sameRatio } from '../mirrorEdit';
 import { addPaneAtRoot, addPlacement, layoutPaneKeys, PANE_MIME, parseTileDrag, rewritePane } from '../layouts';
 import { DropPoint, HostMessage, makePaneKey, PanelState, ProbeAction, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
 import { GlDrop } from './glDrop';
@@ -548,6 +549,10 @@ function saveNow(): void {
 // Golden Layout throttles this to an animation frame, so a drag's proxy is in the document by the
 // time its first `stateChanged` arrives; the drop sends another.
 function onLayoutChanged(): void {
+	if (kind === 'mirror') {
+		onMirrorStateChanged();
+		return;
+	}
 	if (kind !== 'layout' || isDragging()) {
 		return;
 	}
@@ -807,6 +812,297 @@ window.addEventListener(
 	true,
 );
 
+// ── Mirrored tabs: editing herdr's layout ───────────────────────────────────
+
+/** A Golden Layout row or column, with the members its `.d.ts` leaves out. */
+type SplitItem = ContentItem & { updateSize(force: boolean): void };
+type SizedItem = ContentItem & { size: number };
+
+/** The ratios the webview last applied or reported, by path key: a splitter drag reports only what differs. */
+let appliedRatios: Record<string, number> = {};
+/** herdr's zoom as applied here (a tile's pane key, or null): maximising reports only a change. */
+let appliedZoom: string | null = null;
+/** {@link applyZoom} is changing Golden Layout's maximised stack. */
+let applyingZoom = false;
+/** A splitter is pressed. */
+let splitterDown = false;
+/** Set from a splitter's release until the `stateChanged` that applies its sizes (or a second). */
+let splitterReleased: ReturnType<typeof setTimeout> | undefined;
+/** herdr's ratios that came in during a drag: applied once it is over. */
+let pendingRatios: Record<string, number> = {};
+const SPLITTER_REPORT_MS = 150;
+const MIRROR_HEADER_HEIGHT = 26;
+const MIRROR_DRAG_START_PX = 10;
+
+/** Every `split:` item of the live layout, by path key. */
+function splitItems(item: ContentItem | undefined = layout.rootItem, out = new Map<string, SplitItem>()): Map<string, SplitItem> {
+	if (!item) {
+		return out;
+	}
+	if (item.id?.startsWith(SPLIT_ID_PREFIX) && item.contentItems.length === 2) {
+		out.set(item.id.slice(SPLIT_ID_PREFIX.length), item as SplitItem);
+	}
+	for (const child of item.contentItems) {
+		splitItems(child, out);
+	}
+	return out;
+}
+
+function itemRatio(item: ContentItem): number {
+	const [a, b] = item.contentItems.map((c) => (c as SizedItem).size);
+	return a + b > 0 ? a / (a + b) : 0.5;
+}
+
+/** The live Golden Layout ratios, by path key. */
+function liveRatios(): Record<string, number> {
+	const out: Record<string, number> = {};
+	for (const [key, item] of splitItems()) {
+		out[key] = itemRatio(item);
+	}
+	return out;
+}
+
+/** Whether a drag is running: Golden Layout's (splitter), or our own tile drag. */
+function mirrorBusy(): boolean {
+	return document.body.classList.contains('lm_dragging') || splitterDown || mirrorDrag?.active === true;
+}
+
+/** Sets splits to herdr's ratios in place: no `loadLayout`, so terminals, focus and screens stay. */
+function applyRatios(ratios: Record<string, number>): void {
+	const items = splitItems();
+	for (const [key, ratio] of Object.entries(ratios)) {
+		const item = items.get(key);
+		if (!item) {
+			continue;
+		}
+		appliedRatios[key] = ratio;
+		if (sameRatio(itemRatio(item), ratio)) {
+			continue;
+		}
+		const [first, second] = item.contentItems as SizedItem[];
+		first.size = ratio * 100;
+		second.size = (1 - ratio) * 100;
+		item.updateSize(false);
+	}
+}
+
+function receiveRatios(ratios: Record<string, number>): void {
+	if (mirrorBusy()) {
+		pendingRatios = { ...pendingRatios, ...ratios };
+	} else {
+		applyRatios(ratios);
+	}
+}
+
+function flushPendingRatios(): void {
+	if (mirrorBusy() || Object.keys(pendingRatios).length === 0) {
+		return;
+	}
+	const ratios = pendingRatios;
+	pendingRatios = {};
+	applyRatios(ratios);
+}
+
+/** herdr's zoom: that pane's stack maximised, or none. Recorded first, so the `stateChanged` posts nothing. */
+function applyZoom(paneKey: string | null): void {
+	appliedZoom = paneKey;
+	const item = paneKey === null ? undefined : containers.get(paneKey)?.parent.parentItem;
+	const stack = item instanceof Stack ? item : undefined;
+	if (stack?.isMaximised) {
+		return;
+	}
+	// Moving the maximise minimises first, with a `stateChanged` of its own: not a change to report.
+	applyingZoom = true;
+	try {
+		layout.maximisedStack?.minimise();
+		stack?.maximise();
+	} finally {
+		applyingZoom = false;
+	}
+}
+
+function onMirrorStateChanged(): void {
+	if (applyingZoom) {
+		return;
+	}
+	const max = layout.maximisedStack;
+	const zoom = max ? (paneKeyAt(max.element) ?? null) : null;
+	if (zoom !== appliedZoom) {
+		appliedZoom = zoom;
+		post({ type: 'setZoom', paneKey: zoom });
+	}
+	if (splitterReleased === undefined) {
+		return;
+	}
+	clearTimeout(splitterReleased);
+	splitterReleased = undefined;
+	const changed = changedRatios(appliedRatios, liveRatios());
+	if (Object.keys(changed).length === 0) {
+		return;
+	}
+	appliedRatios = { ...appliedRatios, ...changed };
+	setTimeout(() => post({ type: 'setRatios', ratios: changed }), SPLITTER_REPORT_MS);
+}
+
+window.addEventListener(
+	'pointerdown',
+	(ev) => {
+		if (kind === 'mirror' && ev.button === 0 && (ev.target as Element | null)?.closest?.('.lm_splitter')) {
+			splitterDown = true;
+		}
+	},
+	true,
+);
+window.addEventListener(
+	'pointerup',
+	() => {
+		if (!splitterDown) {
+			return;
+		}
+		splitterDown = false;
+		// Golden Layout sets the sizes an animation frame after its drag stops; that `stateChanged` reports them.
+		clearTimeout(splitterReleased);
+		splitterReleased = setTimeout(() => (splitterReleased = undefined), 1000);
+		setTimeout(flushPendingRatios, 100);
+	},
+	true,
+);
+
+/** Our own tile drag in a mirrored tab: Golden Layout's would build stacks herdr cannot hold. */
+let mirrorDrag:
+	| { paneKey: string; x: number; y: number; active: boolean; ghost?: HTMLElement; indicator?: HTMLElement }
+	| undefined;
+
+/** The tile under a point, other than the dragged one, with its stack's rectangle. */
+function mirrorDropTarget(x: number, y: number, dragged: string): { paneKey: string; rect: DOMRect } | undefined {
+	for (const stack of allStacks()) {
+		const rect = stack.element.getBoundingClientRect();
+		if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+			continue;
+		}
+		const paneKey = paneKeyAt(stack.element);
+		return paneKey && paneKey !== dragged ? { paneKey, rect } : undefined;
+	}
+	return undefined;
+}
+
+function mirrorZone(target: { rect: DOMRect }, x: number, y: number): DropZone {
+	return offeredZone(dropZone(target.rect, MIRROR_HEADER_HEIGHT, x, y));
+}
+
+function startMirrorDrag(drag: NonNullable<typeof mirrorDrag>): void {
+	drag.active = true;
+	document.body.classList.add('mirror-moving');
+	const ghost = document.createElement('div');
+	ghost.className = 'mirror-ghost';
+	ghost.textContent = containers.get(drag.paneKey)?.title ?? '';
+	const indicator = document.createElement('div');
+	indicator.className = 'mirror-drop-indicator';
+	indicator.hidden = true;
+	document.body.append(ghost, indicator);
+	drag.ghost = ghost;
+	drag.indicator = indicator;
+}
+
+function endMirrorDrag(): void {
+	const wasActive = mirrorDrag?.active;
+	mirrorDrag?.ghost?.remove();
+	mirrorDrag?.indicator?.remove();
+	mirrorDrag = undefined;
+	document.body.classList.remove('mirror-moving');
+	if (wasActive) {
+		setTimeout(flushPendingRatios);
+	}
+}
+
+function moveMirrorDrag(x: number, y: number): void {
+	const drag = mirrorDrag;
+	if (!drag?.ghost || !drag.indicator) {
+		return;
+	}
+	drag.ghost.style.left = `${x + 12}px`;
+	drag.ghost.style.top = `${y + 12}px`;
+	const target = mirrorDropTarget(x, y, drag.paneKey);
+	drag.indicator.hidden = !target;
+	if (!target) {
+		return;
+	}
+	const r = target.rect;
+	const box = {
+		center: [r.left, r.top, r.width, r.height],
+		left: [r.left, r.top, r.width / 2, r.height],
+		right: [r.left + r.width / 2, r.top, r.width / 2, r.height],
+		top: [r.left, r.top, r.width, r.height / 2],
+		bottom: [r.left, r.top + r.height / 2, r.width, r.height / 2],
+	}[mirrorZone(target, x, y)];
+	Object.assign(drag.indicator.style, { left: `${box[0]}px`, top: `${box[1]}px`, width: `${box[2]}px`, height: `${box[3]}px` });
+}
+
+window.addEventListener(
+	'pointerdown',
+	(ev) => {
+		const target = ev.target as Element | null;
+		if (kind !== 'mirror' || ev.button !== 0 || !target?.closest?.('.lm_tab') || target.closest('.lm_close_tab, .lm_controls')) {
+			return;
+		}
+		const paneKey = paneKeyAt(target);
+		mirrorDrag = paneKey ? { paneKey, x: ev.clientX, y: ev.clientY, active: false } : undefined;
+	},
+	true,
+);
+window.addEventListener(
+	'pointermove',
+	(ev) => {
+		const drag = mirrorDrag;
+		if (!drag) {
+			return;
+		}
+		if (!drag.active) {
+			if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) <= MIRROR_DRAG_START_PX) {
+				return;
+			}
+			// Nothing to drop on: one tile, or one maximised.
+			if (allStacks().length < 2 || layout.maximisedStack) {
+				mirrorDrag = undefined;
+				return;
+			}
+			startMirrorDrag(drag);
+		}
+		ev.preventDefault();
+		moveMirrorDrag(ev.clientX, ev.clientY);
+	},
+	true,
+);
+window.addEventListener(
+	'pointerup',
+	(ev) => {
+		const drag = mirrorDrag;
+		if (!drag) {
+			return;
+		}
+		if (drag.active) {
+			const target = mirrorDropTarget(ev.clientX, ev.clientY, drag.paneKey);
+			if (target) {
+				post({ type: 'movePane', paneKey: drag.paneKey, targetPaneKey: target.paneKey, zone: mirrorZone(target, ev.clientX, ev.clientY) });
+			}
+		}
+		endMirrorDrag();
+	},
+	true,
+);
+window.addEventListener('pointercancel', () => endMirrorDrag(), true);
+window.addEventListener(
+	'keydown',
+	(ev) => {
+		if (mirrorDrag?.active && ev.key === 'Escape') {
+			ev.preventDefault();
+			ev.stopPropagation();
+			endMirrorDrag();
+		}
+	},
+	true,
+);
+
 // ── Tile headers ────────────────────────────────────────────────────────────
 
 /** The tab's status dot and faded detail, kept beside Golden Layout's own title element. */
@@ -896,6 +1192,12 @@ function runProbeAction(action: ProbeAction): void {
 		}
 	} else if (action.kind === 'dragToRightEdge') {
 		dragToRightEdge(action.paneKey);
+	} else if (action.kind === 'dragSplitter') {
+		dragSplitter(action.splitId, action.fraction);
+	} else if (action.kind === 'dragTile') {
+		dragTile(action.paneKey, action.targetPaneKey, action.zone);
+	} else if (action.kind === 'clickMaximise') {
+		tile?.host.closest('.lm_stack')?.querySelector<HTMLElement>('.lm_controls .lm_maximise')?.click();
 	} else if (action.kind === 'placeAt') {
 		const at = dropPoint(action.at);
 		if (at) {
@@ -905,7 +1207,7 @@ function runProbeAction(action: ProbeAction): void {
 			pointer('pointermove', 0);
 			pointer('pointerdown', 1);
 		}
-	} else {
+	} else if (action.kind === 'dropTileAt') {
 		const at = dropPoint(action.at);
 		if (at) {
 			const target = document.elementFromPoint(at.x, at.y) ?? rootEl;
@@ -968,6 +1270,54 @@ function dragToRightEdge(paneKey: string): void {
 	pointer('pointerup', document, endX, endY);
 }
 
+const synthetic = (type: string, target: EventTarget, x: number, y: number) =>
+	target.dispatchEvent(
+		new PointerEvent(type, { bubbles: true, cancelable: true, isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y }),
+	);
+
+/** Drags the splitter of a split item to `fraction` of the item's width (row) or height (column). */
+function dragSplitter(id: string, fraction: number): void {
+	const item = splitItems().get(id.startsWith(SPLIT_ID_PREFIX) ? id.slice(SPLIT_ID_PREFIX.length) : id);
+	const splitter = item?.element.querySelector<HTMLElement>(':scope > .lm_splitter');
+	if (!item || !splitter) {
+		return;
+	}
+	const handle = splitter.querySelector<HTMLElement>('.lm_drag_handle') ?? splitter;
+	const s = splitter.getBoundingClientRect();
+	const box = item.element.getBoundingClientRect();
+	const [x, y] = [s.left + s.width / 2, s.top + s.height / 2];
+	const row = item.isRow;
+	const [endX, endY] = row ? [box.left + box.width * fraction, y] : [x, box.top + box.height * fraction];
+	synthetic('pointerdown', handle, x, y);
+	// Past Golden Layout's 10 px first, away from the end, so the drag starts whatever the target.
+	const away = (row ? endX < x : endY < y) ? 15 : -15;
+	synthetic('pointermove', document, row ? x + away : x, row ? y : y + away);
+	synthetic('pointermove', document, endX, endY);
+	synthetic('pointerup', document, endX, endY);
+}
+
+/** Drags a tile's tab into a zone of another tile: its body's centre, or 10% in from an edge. */
+function dragTile(paneKey: string, targetPaneKey: string, zone: DropZone): void {
+	const tab = tabs.get(paneKey);
+	if (!tab) {
+		return;
+	}
+	const start = tab.getBoundingClientRect();
+	const [x, y] = [start.x + 5, start.y + 5];
+	let end = { x: x + 40, y: y + 40 };
+	const stack = containers.get(targetPaneKey)?.parent.parentItem;
+	if (stack instanceof Stack) {
+		const r = stack.element.getBoundingClientRect();
+		const [top, height] = [r.top + MIRROR_HEADER_HEIGHT, r.height - MIRROR_HEADER_HEIGHT];
+		const [fx, fy] = { center: [0.5, 0.5], left: [0.1, 0.5], right: [0.9, 0.5], top: [0.5, 0.1], bottom: [0.5, 0.9] }[zone];
+		end = { x: r.left + r.width * fx, y: top + height * fy };
+	}
+	synthetic('pointerdown', tab, x, y);
+	synthetic('pointermove', document, x + 15, y + 15);
+	synthetic('pointermove', document, end.x, end.y);
+	synthetic('pointerup', document, end.x, end.y);
+}
+
 window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	const msg = ev.data;
 	switch (msg.type) {
@@ -986,7 +1336,14 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			}
 			break;
 		case 'layout':
+			if (kind === 'mirror') {
+				// A new tree is never maximised, and saying so to herdr would unzoom it: `zoom` follows.
+				appliedZoom = null;
+			}
 			applyLayout(msg.config);
+			if (kind === 'mirror') {
+				appliedRatios = liveRatios();
+			}
 			document.body.classList.toggle('layout-empty', kind === 'layout' && !msg.config.root);
 			if (placing?.hovered) {
 				drop.calculateAreas();
@@ -1010,7 +1367,16 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			movePane(msg);
 			break;
 		case 'empty':
+			endMirrorDrag();
 			showEmpty(msg.text);
+			appliedRatios = {};
+			appliedZoom = null;
+			break;
+		case 'ratios':
+			receiveRatios(msg.ratios);
+			break;
+		case 'zoom':
+			applyZoom(msg.paneKey);
 			break;
 		case 'meta':
 			breadcrumbEl.textContent = msg.breadcrumb;
@@ -1041,6 +1407,8 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 				message: messageEl.hidden ? '' : (messageEl.textContent ?? ''),
 				config: layout.saveLayout() as unknown as StoredLayoutConfig,
 				dragging: isDragging(),
+				ratios: liveRatios(),
+				maximised: layout.maximisedStack ? (paneKeyAt(layout.maximisedStack.element) ?? null) : null,
 			});
 			break;
 	}

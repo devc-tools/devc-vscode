@@ -201,6 +201,27 @@ suite('pane moves and copies', () => {
 		assert.strictEqual(row.content[0].content[0].reorderEnabled, true);
 		assert.strictEqual(copy.resolved, true);
 	});
+
+	test('Copy as Layout removes `split:` ids and maximised stacks', () => {
+		const maxStack = (id: string) => ({ type: 'stack', maximised: true, content: [{ ...comp(id), reorderEnabled: false, maximised: true }] });
+		const mirrored = {
+			resolved: true,
+			root: {
+				type: 'row',
+				id: 'split:',
+				content: [maxStack('a'), { type: 'column', id: 'split:1', content: [stack('b'), { type: 'stack', id: 'mine', content: [comp('c')] }] }],
+			},
+			settings: { ...LAYOUT_SETTINGS, reorderEnabled: false },
+			header: { popout: false },
+			dimensions: { borderWidth: 3, headerHeight: 26 },
+		} as unknown as StoredLayoutConfig;
+		const copy = JSON.stringify(asLayoutConfig(mirrored));
+		assert.ok(!copy.includes('split:'), copy);
+		assert.ok(!copy.includes('"maximised":true'), copy);
+		assert.ok(copy.includes('"id":"mine"'), 'other ids stay');
+		assert.deepStrictEqual(layoutPaneKeys(asLayoutConfig(mirrored)), ['host/s|a', 'host/s|b', 'host/s|c']);
+		assert.ok(JSON.stringify(mirrored).includes('split:1'), 'the original is untouched');
+	});
 });
 
 suite('layout tiles', () => {

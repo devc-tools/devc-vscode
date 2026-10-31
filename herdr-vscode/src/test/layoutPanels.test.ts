@@ -57,6 +57,9 @@ class FakeModel {
 				},
 			});
 		}
+		if (method === 'pane.swap') {
+			return Promise.resolve({ type: 'pane_swap', swap: { changed: true } });
+		}
 		return Promise.reject(new Error(`unexpected ${method}`));
 	}
 }
@@ -334,15 +337,18 @@ suite('layout panels in a webview', function () {
 		assert.deepStrictEqual(savedShape(open.layoutId), ['w3:p1']);
 	});
 
-	test('mirrored panel: tiles do not drag, and Copy as Layout copies the arrangement, draggable', async () => {
+	test('mirrored panel: tiles do not drag locally (the drop goes to herdr), and Copy as Layout copies the arrangement, draggable', async () => {
 		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
 		const up = await waitFor('two tiles', async () => {
 			const p = await mirror.probe();
 			return p.tiles.length === 2 && p;
 		});
 		await mirror.probe({ kind: 'dragToRightEdge', paneKey: makePaneKey(A, 'w2:p1') });
-		await sleep(100);
+		// Over p2's tile: `movePane`, a swap in herdr (herdr 0.9.5 has no same-tab pane.move).
+		await waitFor('pane.swap', () => model.requests.includes('pane.swap'));
+		assert.ok(!model.requests.includes('pane.move'));
 		assert.deepStrictEqual(shape((await mirror.probe()).config?.root), { row: [['w2:p1'], ['w2:p2']] }, 'still as herdr has it');
+		assert.strictEqual((await mirror.probe()).dragging, false, 'no Golden Layout drag');
 		const widths = up.tiles.map((t) => t.width);
 		assert.ok(widths[0] > widths[1], '60% and 40%');
 
@@ -361,10 +367,10 @@ suite('layout panels in a webview', function () {
 		assert.strictEqual(p.config?.settings.reorderEnabled, true);
 		assert.deepStrictEqual(componentStates(p.config!.root!).map((s) => s.paneId), ['w2:p1', 'w2:p2']);
 
+		model.requests.length = 0;
 		await copy.probe({ kind: 'dragToRightEdge', paneKey: makePaneKey(A, 'w2:p1') });
 		await waitFor('it drags', async () => JSON.stringify(shape((await copy.probe()).config?.root)) === JSON.stringify({ row: [['w2:p2'], ['w2:p1']] }));
 		assert.deepStrictEqual(model.requests.filter((m) => m !== 'layout.export'), [], 'herdr is not told');
-		assert.ok(model.requests.length >= 1);
 	});
 
 	test('rename: the title and the toolbar follow, and names stay unique', async () => {

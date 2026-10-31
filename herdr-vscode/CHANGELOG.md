@@ -4,6 +4,12 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Mirrored tabs mirror both ways: dragging a splitter sets herdr's split ratio, and herdr's ratio
+  changes move the splitters in place (no reload, terminals and focus kept); dragging a tile onto
+  another swaps the two panes in herdr (herdr cannot move a pane within its tab, so there are no edge
+  drops); maximising a tile zooms the pane in herdr and herdr's zoom maximises the tile. **Copy as
+  Layout** opens unmaximised.
+
 - **Ask Agent**: comment threads on editor lines (the gutter `+`, or **Ask herdr Agent About Selection**) that ask a
   herdr agent on this machine, in a dev container or on an SSH host about the code, with the file's path as that
   agent sees it; the agent's answer shows as a reply in the thread. **Show Agent**, **Delete Thread**, **Resend**.

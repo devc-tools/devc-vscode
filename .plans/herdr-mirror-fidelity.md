@@ -22,23 +22,23 @@ no prior art to reuse; the herdr semantics below come from herdr 0.9.5's bundled
 
 ## Checklist
 
-- [ ] 1. Measure herdr 0.9.5 on throwaway `hv-test` (see Measurements) and record the results in
+- [x] 1. Measure herdr 0.9.5 on throwaway `hv-test` (see Measurements) and record the results in
       this plan's Implementation notes before writing any other code
-- [ ] 2. `src/mirrorEdit.ts` (new, no `vscode`/Node/DOM imports): split paths, ratio diffing, drop
+- [x] 2. `src/mirrorEdit.ts` (new, no `vscode`/Node/DOM imports): split paths, ratio diffing, drop
       zones, the request lists for a drop and for a zoom change
-- [ ] 3. `src/layoutMapping.ts`: split items carry `id` `split:<path>`; structure key without ratios;
+- [x] 3. `src/layoutMapping.ts`: split items carry `id` `split:<path>`; structure key without ratios;
       ratios by path; `layoutShape` replaced
-- [ ] 4. `src/tilesProtocol.ts`: new host and webview messages, new probe actions and probe fields
-- [ ] 5. Split ratios, VS Code → herdr: webview reports splitter drags; host sends
+- [x] 4. `src/tilesProtocol.ts`: new host and webview messages, new probe actions and probe fields
+- [x] 5. Split ratios, VS Code → herdr: webview reports splitter drags; host sends
       `layout.set_split_ratio`
-- [ ] 6. Split ratios, herdr → VS Code: a re-export with the same structure but new ratios resizes the
+- [x] 6. Split ratios, herdr → VS Code: a re-export with the same structure but new ratios resizes the
       tiles in place (no `loadLayout`)
-- [ ] 7. Tile drag in mirrored panels: own drag-and-drop overlay, drop zones, `movePane` →
+- [x] 7. Tile drag in mirrored panels: own drag-and-drop overlay, drop zones, `movePane` →
       `pane.swap` / `pane.move`
-- [ ] 8. Zoom: GL maximise ↔ herdr `pane.zoom` / export `zoomed`
-- [ ] 9. Copy as Layout drops the mirror-only parts (`split:` ids, `maximised`)
-- [ ] 10. Tests (list under Validation)
-- [ ] 11. README (mirrored tab bullets), CHANGELOG, `docs/how-it-works.md` (Layout mapping, new
+- [x] 8. Zoom: GL maximise ↔ herdr `pane.zoom` / export `zoomed`
+- [x] 9. Copy as Layout drops the mirror-only parts (`split:` ids, `maximised`)
+- [x] 10. Tests (list under Validation)
+- [x] 11. README (mirrored tab bullets), CHANGELOG, `docs/how-it-works.md` (Layout mapping, new
       "Editing herdr's layout" section)
 
 ## Measurements (step 1)
@@ -234,63 +234,69 @@ fields `ratios: Record<string,number>` (from the live GL items) and `maximised: 
 
 ## Validation
 
-- [ ] Measurements M1–M5 (and M6 if needed) recorded in Implementation notes with the raw JSON, and
+- [x] Measurements M1–M5 (and M6 if needed) recorded in Implementation notes with the raw JSON, and
       `hv-test`'s home deleted afterwards
-- [ ] `npm run build && npm run lint && xvfb-run -a npm test` (in `herdr-vscode/`) passes, including
+- [x] `npm run build && npm run lint && xvfb-run -a npm test` (in `herdr-vscode/`) passes, including
       unit tests (`src/test/mirrorEdit.test.ts`, `layoutMapping.test.ts`, `layouts.test.ts`) for:
-  - [ ] path key ↔ herdr path: `""` → `[]`, `"01"` → `[false,true]` (or the measured inverse)
-  - [ ] `mirrorConfig` ids: a right split holding a down split → row `split:`, column `split:1`;
+  - [x] path key ↔ herdr path: `""` → `[]`, `"01"` → `[false,true]` (or the measured inverse)
+  - [x] `mirrorConfig` ids: a right split holding a down split → row `split:`, column `split:1`;
         single pane → no id anywhere
-  - [ ] structure key equal for the same tree at ratios 0.5 and 0.6, different after a swap of two
+  - [x] structure key equal for the same tree at ratios 0.5 and 0.6, different after a swap of two
         panes; ratios by path for a nested tree
-  - [ ] ratio diff: 0.6 vs `0.6000000238418579` → no change; 0.6 vs 0.62 → changed; in-flight path
+  - [x] ratio diff: 0.6 vs `0.6000000238418579` → no change; 0.6 vs 0.62 → changed; in-flight path
         skipped
-  - [ ] clamping and rounding: 0.01 → 0.05, 0.99 → 0.95, 0.4567 → 0.457
-  - [ ] drop zone: header → `center`; body centre → `center`; 10% from the left → `left`; 10% from
+  - [x] clamping and rounding: 0.01 → 0.05, 0.99 → 0.95, 0.4567 → 0.457
+  - [x] drop zone: header → `center`; body centre → `center`; 10% from the left → `left`; 10% from
         the bottom → `bottom`; a corner at (0.1, 0.1) → `left`
-  - [ ] drop requests: `center` → one `pane.swap`; `right` → one `pane.move` with `split:"right"`,
-        `ratio:0.5`, `focus:false`; `left` → that move then a swap; `top` → down move then swap
-        (exact params JSON as in Contracts)
-  - [ ] zoom requests: herdr zoomed on A, `setZoom` B → `off` A, `on` B; `setZoom` null → `off` A;
+  - [x] drop requests (fallback, M2 refused and M6 not in place): `center` → one `pane.swap`
+        `{"source_pane_id":S,"target_pane_id":T}`; `left` / `right` / `top` / `bottom` → no request
+        (edge zones not offered; every zone in the webview is `center`). Was: `right` → one `pane.move`
+        with `split:"right"`, `ratio:0.5`, `focus:false`; `left` → that move then a swap; `top` → down
+        move then swap
+  - [x] zoom requests: herdr zoomed on A, `setZoom` B → `off` A, `on` B; `setZoom` null → `off` A;
         herdr not zoomed, `setZoom` null → nothing
-  - [ ] `asLayoutConfig` removes `split:` ids and `maximised`
-- [ ] `src/test/mirrorPanels.test.ts` (new; real webview, fake model that records method **and
+  - [x] `asLayoutConfig` removes `split:` ids and `maximised`
+- [x] `src/test/mirrorPanels.test.ts` (new; real webview, fake model that records method **and
       params**, spawns nothing; same pattern as `layoutPanels.test.ts`):
-  - [ ] a re-export with the same tree and ratio 0.6 → 0.3: tile rectangles follow within 1 s, every
+  - [x] a re-export with the same tree and ratio 0.6 → 0.3: tile rectangles follow within 1 s, every
         tile's `serial` unchanged, no `layout` message sent (count posts)
-  - [ ] `dragSplitter` on `split:` to 0.25 → exactly one `layout.set_split_ratio` with
+  - [x] `dragSplitter` on `split:` to 0.25 → exactly one `layout.set_split_ratio` with
         `{"tab_id":…,"path":[],"ratio":0.25}` (±0.01); a following re-export at 0.25 posts nothing
         and the splitter does not move
-  - [ ] `set_split_ratio` answered with 0.3 for a request of 0.25 → the split shows 0.3
-  - [ ] `dragTile` p1 → p2 `right` → `pane.move` with the Contracts' params; `center` → `pane.swap`;
-        the tile layout is unchanged until the next export
-  - [ ] `dragTile` with a maximised stack, or onto itself → no request
-  - [ ] `clickMaximise` p2 → `pane.zoom {"pane_id":"…p2","mode":"on"}`; export `zoomed:true` with
+  - [x] `set_split_ratio` answered with 0.3 for a request of 0.25 → the split shows 0.3
+  - [x] (fallback) `dragTile` p1 → p2 `right` → `pane.swap` p1/p2, no `pane.move`; `center` →
+        `pane.swap`; the tile layout is unchanged until the next export. Was: `right` → `pane.move`
+        with the Contracts' params
+  - [x] `dragTile` with a maximised stack, or onto itself → no request
+  - [x] `clickMaximise` p2 → `pane.zoom {"pane_id":"…p2","mode":"on"}`; export `zoomed:true` with
         focus p3 → p3 maximised and no `pane.zoom` sent back; export `zoomed:false` → nothing maximised
-- [ ] `src/test/layoutPanels.test.ts` "mirrored panel: tiles do not drag…" still passes; it now also
-      asserts the drag reached the host as `movePane` (a `pane.move` request), not a local GL move
-- [ ] Opt-in `src/test/liveMirrorEdit.test.ts` with `HERDR_VSCODE_LIVE_HOME` on throwaway `hv-test`
+- [x] `src/test/layoutPanels.test.ts` "mirrored panel: tiles do not drag…" still passes; it now also
+      asserts the drag reached the host as `movePane` (fallback: a `pane.swap` request; was a
+      `pane.move`), not a local GL move
+- [x] Opt-in `src/test/liveMirrorEdit.test.ts` with `HERDR_VSCODE_LIVE_HOME` on throwaway `hv-test`
       (same setup and teardown as `liveTiles.test.ts`, its own tab `p1 | (p2 / p3)`):
-  - [ ] `dragSplitter` root to 0.3 → `layout.export` root ratio within 0.01 of 0.3 within 1 s
-  - [ ] `layout.set_split_ratio` from outside on `[true]` to 0.7 → the column's tiles resize within
+  - [x] `dragSplitter` root to 0.3 → `layout.export` root ratio within 0.01 of 0.3 within 1 s
+  - [x] `layout.set_split_ratio` from outside on `[true]` to 0.7 → the column's tiles resize within
         1 s, `serial`s unchanged
-  - [ ] `dragTile` p3 → p1 `left` → export: root's first is a split `right` with p3 `first` and p1
-        `second`; terminals of p1, p2 kept (`serial`), p3's tile shows its old screen
-  - [ ] `dragTile` p1 → p2 `center` → p1 and p2 exchanged in the export
-  - [ ] `clickMaximise` p2 → export `zoomed:true`, `focused_pane_id` p2; `pane.zoom` off from outside
+  - [x] (fallback) `dragTile` p3 → p1 `left` → export: p3 and p1 exchanged
+        (`(right p3 (down p2 p1))`); terminals of p1, p2 and p3 kept (`serial`), p3's tile shows its old
+        screen. Was: root's first is a split `right` with p3 `first` and p1 `second`
+  - [x] `dragTile` p1 → p2 `center` → p1 and p2 exchanged in the export
+  - [x] `clickMaximise` p2 → export `zoomed:true`, `focused_pane_id` p2; `pane.zoom` off from outside
         → nothing maximised within 1 s
-  - [ ] `ps` lists no `--session hv-test terminal session control` after teardown
+  - [x] `ps` lists no `--session hv-test terminal session control` after teardown
 - [ ] Manual: in `hv-test`, open a mirrored tab of `p1 | (p2 / p3)` beside the herdr TUI. Drag the
       vertical splitter: the TUI's split follows within 1 s. Resize in the TUI: the editor tab's
       splitter follows within 1 s, the tiles keep their content, the cursor stays in the tile you
       were typing in
-- [ ] Manual: drag p3's tab onto p1's left edge: the indicator shows p1's left half; after the drop
-      both the TUI and the editor tab show p3 left of p1. Drag p1 onto p2's centre: they swap
+- [ ] Manual (fallback): drag p3's tab onto p1's left edge: the indicator covers the whole of p1;
+      after the drop both the TUI and the editor tab show p3 and p1 swapped. Drag p1 onto p2's
+      centre: they swap. (Was: the indicator shows p1's left half, p3 ends left of p1)
 - [ ] Manual: no drop indicator over the dragged tile itself or outside the tiles; Escape cancels
 - [ ] Manual: maximise a tile: the TUI zooms that pane; unzoom in the TUI: the tile restores
 - [ ] Manual: **Copy as Layout** of a maximised mirror opens unmaximised; dragging there does not
       change herdr (TUI unchanged)
-- [ ] `git diff --stat -- devc-vscode` is empty
+- [x] `git diff --stat -- devc-vscode` is empty
 
 ## Relevant Files
 
@@ -317,3 +323,134 @@ fields `ratios: Record<string,number>` (from the live GL items) and `maximised: 
 - `.plans/PLAN.md`
 
 ## Implementation notes
+
+### Measurements (step 1, herdr 0.9.5, 2026-10-31)
+
+Throwaway `hv-test` in an isolated `HOME=/tmp/hvt` (herdr copied to `/tmp/hvt/.local/bin`, every
+`HERDR_*` variable stripped), one workspace `w1`; requests through `bridgeRequest(new LocalShell(),
+'hv-test', …)` from `out/bridge.js`, events from `events.subscribe` (`subscriptionList([])`). Tab
+`w1:t4` set up as `p1 | (p2 / p3)` = `w1:p6 | (w1:p7 / w1:p8)` (`pane.split` takes `target_pane_id`,
+not `pane_id`; with `pane_id` it splits the focused pane of the focused tab):
+
+```json
+{"type":"layout_export","layout":{"workspace_id":"w1","tab_id":"w1:t4","zoomed":false,"focused_pane_id":"w1:p6","root":{"type":"split","direction":"right","ratio":0.5,"first":{"type":"pane","pane_id":"w1:p6","cwd":"/tmp/hvt"},"second":{"type":"split","direction":"down","ratio":0.5,"first":{"type":"pane","pane_id":"w1:p7","cwd":"/tmp/hvt"},"second":{"type":"pane","pane_id":"w1:p8","cwd":"/tmp/hvt"}}}}}
+```
+
+**M1 `layout.set_split_ratio`: path as expected, herdr clamps to [0.1, 0.9].**
+
+- `{"path":[],"ratio":0.3}` → `{"type":"layout_split_ratio_set","layout":{…"root":{"type":"split","direction":"right","ratio":0.3,…"second":{…"ratio":0.5…}}}}`: `[]` is the root.
+- `{"path":[true],"ratio":0.7}` → root 0.3, `second` (the down split) 0.7: `true` = `second`. No conversion change.
+- `{"path":[false]}` (a pane) → error `split_not_found` "split path not found".
+- `ratio` `0` → stored 0.1; `1` → 0.9; `1.5` → 0.9; `0.01` → 0.1; `0.99` → 0.9. No error code for out-of-range ratios: herdr **clamps to [0.1, 0.9]** and answers success. So the plan's own clamp to [0.05, 0.95] stays (never send outside [0,1]); a ratio in [0.05, 0.1) or (0.9, 0.95] comes back clamped and the "herdr clamped it" path posts herdr's value back.
+- Each success emits one `layout.updated`, whose `data.layout` is the *geometry* shape (`area`, `panes[].rect`, `splits[]` with ids like `"split_0_root"`, `"split_1_1"`, `"split_1_0"`: not path keys), not the export tree. A failure emits nothing. We re-export, as phase 15 does.
+
+**M2 `pane.move` within the same tab: refused.**
+
+```json
+{"type":"pane_move","move_result":{"changed":false,"reason":"same_tab","previous_pane_id":"w1:p8","previous_workspace_id":"w1","previous_tab_id":"w1:t4","pane":{"pane_id":"w1:p8","terminal_id":"term_65f267f12a1df8",…},"source_layout":{…},"target_layout":{…},"focused_pane_id":"w1:p6"}}
+```
+
+Same for `"split":"down"` and for every target in the tab. (A move **into** the tab from another tab of
+the same workspace does work, `changed:true`, pane id and terminal kept, the moved pane `second` at the
+given ratio: seen by accident with a mis-split tab. Not used.)
+
+**M3 `pane.swap`:** `{"source_pane_id":"w1:p6","target_pane_id":"w1:p8"}` →
+`{"type":"pane_swap","swap":{"changed":true,"source_pane_id":"w1:p6","target_pane_id":"w1:p8","focused_pane_id":"w1:p6","layout":{…geometry…}}}`;
+export after: `(right 0.5 p8 (down 0.7 p7 p6))`: the two ids exchanged, ratios kept. Events:
+`workspace.focused`, `tab.focused`, `pane.focused`, `layout.updated`. **A swap focuses the source pane**
+(seen with an unfocused source: `focused_pane_id` became the source). Swapping panes of different tabs:
+`changed:false`, `reason:"cross_tab"`.
+
+**M4 `pane.zoom`:**
+
+- `on` p2 → `{"type":"pane_zoom","zoom":{"changed":true,"zoom_changed":true,"focus_changed":true,"pane_id":"w1:pE","focused_pane_id":"w1:pE","zoomed":true,"layout":{…}}}`; export `zoomed:true`, `focused_pane_id` p2. Events `workspace.focused`, `tab.focused`, `pane.focused`, `layout.updated`.
+- `on` p3 while p2 is zoomed → `"changed":true,"zoom_changed":false,"focus_changed":true,"reason":"already_zoomed","zoomed":true,"focused_pane_id":p3`; export `zoomed:true`, focus p3. So herdr's zoom shows the **focused** pane: focusing another pane of a zoomed tab moves the zoom with it. The host still sends `off` first, as prescribed.
+- `off` p3 → `"changed":true,"zoom_changed":true,"focus_changed":false,"zoomed":false`; one `layout.updated` only.
+- `off` when not zoomed → `"changed":false,"reason":"already_unzoomed"` (it still focuses the named pane when it was not focused: `focus_changed:true`).
+- `on` in a one-pane tab → `"changed":true,"zoom_changed":false,"reason":"single_pane","zoomed":false`.
+
+**M5** `pane.move` while zoomed → `"changed":false,"reason":"zoomed_tab"` (checked before `same_tab`).
+`pane.swap` while zoomed → `changed:true`, the tab stays zoomed and focus goes to the source, so the zoom
+shows the source pane.
+
+**M6 `layout.apply` (M2 was refused)** `{"tab_id":"w1:t4","root":<export tree with p3 left of p1, pane
+nodes with their pane_id>,"focus":false}` → `{"type":"layout_apply","layout":{"tab_id":"w1:t5",…"root":{…"w1:p9"…"w1:pB"…"w1:pA"…}}}`:
+it **replaced the tab**: events `tab.created`, `tab.closed`, three `pane.created`; a new tab id, three
+new pane ids, new terminals; the old panes and their shells are gone (`pane.list` for `w1:t4` is empty,
+a second apply to `w1:t4` answers `tab_not_found`). It does not rearrange in place.
+
+**Decision (the plan's fallback):** M2 refused and M6 not in place, so **edge zones are not offered**:
+a tile drag in a mirrored tab only swaps (centre). Any point over another tile is the centre zone and
+the indicator covers the whole tile. `dropZone` (the full zone function) stays in `mirrorEdit.ts`, tested,
+but the webview does not use edges; the host ignores a `movePane` with an edge zone. The Validation
+items that described edge moves are rewritten below to the swap-only behaviour (marked "fallback").
+Untried alternative for later: a same-tab move could be two cross-tab moves through a temporary tab
+(cross-tab moves keep pane ids and terminals in a workspace).
+
+### Status (2026-10-31)
+
+Implemented with the M2/M6 fallback (swap only); the Manual items above were not run, because they
+need a person in VS Code beside a herdr TUI, so they stay unticked and the plan stays out of
+`implemented/`. The Validation items that described edge moves were rewritten to the fallback the plan
+prescribes (each says "fallback" and keeps the original wording after "Was:").
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 306 passing, 59 pending (opt-in live
+  suites), 0 failing. This phase adds 18 default tests and 6 opt-in live ones. `git diff --stat -- devc-vscode` is empty; no dependency changes.
+- New default tests: `src/test/mirrorEdit.test.ts` (paths, diff, clamp, zones, requests, answers),
+  `src/test/mirrorPanels.test.ts` (7 tests, real webview, fake herdr recording method and params; post
+  count via a wrapped `webview.postMessage`), new cases in `layoutMapping.test.ts` and `layouts.test.ts`,
+  and the mirror case of `layoutPanels.test.ts` now waits for the `pane.swap` and checks no Golden Layout
+  drag is under way.
+- Opt-in, against throwaway `hv-test` in an isolated `HOME=/tmp/hvt`: `src/test/liveMirrorEdit.test.ts`,
+  6 passing. Timings from the run: splitter drag to herdr's root ratio 0.299 in 205–249 ms; an outside
+  `set_split_ratio [true] 0.7` resized the column in place (serials kept) within 256 ms; a swap reached
+  herdr and the tiles followed in 111–216 ms (tiles about 95 ms after herdr's export), every terminal kept
+  and p3 showing its old screen (once its next frame arrived: the first run checked too early and failed,
+  now it waits up to 3 s); unzoom from outside restored the tile in 144–181 ms; no controller after the
+  panel closed. The whole live run (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`): 360 passing, 4 pending, 1 failing,
+  the known `live model … lists only the isolated session` (the home lists `default` and `hv-ctl`).
+  Afterwards `hv-ctl` and `hv-test` were deleted, the server stopped, `/tmp/hvt` removed; no `hv-test` /
+  `hv-ctl` process left; the real `herdr session list` still shows `default`, `devc`,
+  `devc-my-app-1a2b3c4d`.
+
+Not exercised at all: a real pointer (every drag is synthetic pointer events dispatched by the webview),
+the ghost and indicator's look (no screenshot), a real Escape during a drag, the herdr TUI following
+visibly, a window reload while zoomed (the host replays `zoom` after `ready`, untested).
+
+### Deviations and decisions
+
+- **Edge drops not offered** (measurements above). `dropZone` is implemented and tested as specified,
+  but `offeredZone` maps every zone to `center` while `EDGE_ZONES_OFFERED` is false, the indicator covers
+  the whole tile, and `dropRequests` has no requests for edges (the host ignores such a `movePane`). The
+  README says so.
+- herdr clamps ratios to [0.1, 0.9] itself; the plan's own [0.05, 0.95] clamp stays. The host compares
+  herdr's stored ratio with the ratio the **webview asked for** (not the clamped `r`), so a drag to 0.03
+  (sent as 0.05, stored as 0.1) snaps the splitter to 0.1 too. Same outcome as the contract for every
+  herdr clamp, plus our own.
+- Zoom: Golden Layout emits a `stateChanged` with nothing maximised when the maximise moves from one
+  stack to another, which posted `setZoom null` then `setZoom p3` (caught by the test). `applyZoom`
+  minimises then maximises under a flag, and `stateChanged`s during it are ignored.
+- While a `setZoom` is being carried out (`off` then `on` are two requests), re-exports leave the zoom
+  alone and the answer decides; otherwise the `layout.updated` between them unmaximised the tile.
+- The host keeps `view` (the config replayed after a webview reload) at herdr's latest ratios without
+  posting it, and posts `zoom` after `ready`.
+- Measured, and not in the plan: `pane.swap` focuses the source pane, so a drop moves herdr's focus to
+  the dragged pane (the README says so beside zoom). `pane.split` takes `target_pane_id`; with
+  `pane_id` it splits whatever is focused.
+- The indicator and ghost are `position: fixed` (the plan says absolutely positioned): the webview does
+  not scroll, so the client coordinates used for hit-testing are the same.
+- The `dragTile` probe drops at 10% / 90% of the target's body for edges and its centre for `center`.
+- Golden Layout internals used, all on items: `ContentItem.size` (writable, not in the `.d.ts`) and
+  `RowOrColumn.updateSize(false)` (public), cast in `tiles.ts`; ids through the public `ContentItem.id`.
+
+### For phase 23 (sidebar config) and later
+
+- Nothing in the sidebar changed. `src/mirrorEdit.ts` and the new `layoutMapping` exports
+  (`structureKey`, `ratiosByPath`, `splitId`, `SPLIT_ID_PREFIX`) have no `vscode` import.
+- `layoutShape` is gone; anything comparing export trees should use `structureKey` (ratios excluded).
+- A future herdr with same-tab `pane.move`: set `EDGE_ZONES_OFFERED` and fill in `dropRequests` from the
+  Contracts table; the webview, protocol and host already carry the zone. Untried alternative today:
+  two cross-tab moves through a temporary tab.
+

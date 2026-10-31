@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { BridgeError, HerdrEvent } from './bridge';
 import { FocusTracker } from './focus';
-import { layoutPaneIds, layoutShape, mirrorConfig, parseLayoutExport, StoredLayoutConfig } from './layoutMapping';
+import { LayoutExport, layoutPaneIds, mirrorConfig, parseLayoutExport, ratiosByPath, StoredLayoutConfig, structureKey } from './layoutMapping';
 import { asLayoutConfig, copyLayoutName, layoutPaneKeys, LayoutStore, nextLayoutName, parsePaneMoved, rewritePane, SavedLayout, selectLayoutTarget } from './layouts';
+import { changedRatios, clampRatio, dropRequests, herdrPath, refusal, sameRatio, zoomedAfter, zoomRequests } from './mirrorEdit';
 import { PanePlacement, PlacementPanel, PLACING_PANE_KEY } from './paneDrag';
 import { hasAgent, paneLabel, SessionModel, SessionConnection, Snapshot } from './sessions';
 import { PaneFrame, PaneStreams, PaneViewer } from './streams';
@@ -179,6 +180,11 @@ export interface TilesDeps {
 	tileMovedIn?(panel: LayoutPanel, paneKey: string, fromLayoutId: string): void;
 }
 
+/** herdr's zoomed pane in an export: the focused pane of a zoomed tab. */
+function zoomedPaneOf(layout: LayoutExport): string | undefined {
+	return layout.zoomed ? layout.focused_pane_id : undefined;
+}
+
 /** Which panel last had a tile focused, across every panel of the window. */
 let focusClock = 0;
 
@@ -188,7 +194,15 @@ const WEBVIEW_OPTIONS = (extensionUri: vscode.Uri): vscode.WebviewOptions & vsco
 	localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist', 'webview')],
 });
 
-type ProbeResult = { tiles: TileProbe[]; breadcrumb: string; message: string; config: StoredLayoutConfig | undefined; dragging?: boolean };
+type ProbeResult = {
+	tiles: TileProbe[];
+	breadcrumb: string;
+	message: string;
+	config: StoredLayoutConfig | undefined;
+	dragging?: boolean;
+	ratios?: Record<string, number>;
+	maximised?: string | null;
+};
 
 /** The webview plumbing every `herdr.tiles` panel shares: messages, streams, focus, replay when ready. */
 abstract class TilesPanel implements PaneViewer {
@@ -363,8 +377,16 @@ abstract class TilesPanel implements PaneViewer {
 
 /** One editor tab mirroring one herdr tab. */
 export class MirrorPanel extends TilesPanel {
-	/** The split tree in `view`; undefined when none is loaded. */
-	private shape: string | undefined;
+	/** The structure of the split tree in `view` (no ratios); undefined when none is loaded. */
+	private structure: string | undefined;
+	/** herdr's split ratios by path key, from the last export or `set_split_ratio` answer. */
+	private ratios: Record<string, number> = {};
+	/** Paths with a `layout.set_split_ratio` in flight: a re-export does not move their splitters. */
+	private readonly ratiosInFlight = new Set<string>();
+	/** herdr's zoomed pane, from the last export or `pane.zoom` answer. */
+	private zoomedPane: string | undefined;
+	/** A `setZoom` is being carried out: re-exports leave the zoom to its answer. */
+	private zoomBusy = false;
 	private paneIds = new Set<string>();
 	private focusedPane: string | undefined;
 	private herdrFocusedPane: string | undefined;
@@ -425,7 +447,9 @@ export class MirrorPanel extends TilesPanel {
 	private showEmpty(text: string): void {
 		clearTimeout(this.exportTimer);
 		this.exportTimer = undefined;
-		this.shape = undefined;
+		this.structure = undefined;
+		this.ratios = {};
+		this.zoomedPane = undefined;
 		this.paneIds = new Set();
 		this.deps.tilesChanged?.();
 		this.focusedPane = undefined;
@@ -466,7 +490,7 @@ export class MirrorPanel extends TilesPanel {
 		this.sendMeta(snapshot);
 		// Whatever the events said: a tab whose panes are not the ones on screen needs a new layout.
 		const panes = snapshot.panes.filter((p) => p.tab_id === this.tabId).map((p) => p.pane_id);
-		if (this.shape === undefined || panes.length !== this.paneIds.size || panes.some((id) => !this.paneIds.has(id))) {
+		if (this.structure === undefined || panes.length !== this.paneIds.size || panes.some((id) => !this.paneIds.has(id))) {
 			this.scheduleExport();
 		}
 	}
@@ -546,19 +570,155 @@ export class MirrorPanel extends TilesPanel {
 		this.herdrFocusedPane = layout.focused_pane_id;
 		this.paneIds = new Set(layoutPaneIds(layout.root));
 		this.deps.tilesChanged?.();
-		const shape = layoutShape(layout.root);
-		if (shape === this.shape) {
-			return; // Nothing moved: keep local splitter drags and maximise.
+		const structure = structureKey(layout.root);
+		const ratios = ratiosByPath(layout.root);
+		const snapshot = this.snapshot;
+		const config = this.configOf(layout);
+		if (structure !== this.structure) {
+			// Panes added, removed, moved, swapped: a new Golden Layout tree, then herdr's zoom on it.
+			this.structure = structure;
+			this.ratios = ratios;
+			this.setView({ type: 'layout', config });
+			if (!this.zoomBusy) {
+				this.zoomedPane = zoomedPaneOf(layout);
+			}
+			this.postZoom();
+			if (snapshot) {
+				this.sendMeta(snapshot);
+			}
+			return;
 		}
-		this.shape = shape;
+		// The same tree: splitters move in place, terminals and focus stay.
+		const changed = changedRatios(this.ratios, ratios, this.ratiosInFlight);
+		for (const [key, ratio] of Object.entries(ratios)) {
+			if (!this.ratiosInFlight.has(key)) {
+				this.ratios[key] = ratio;
+			}
+		}
+		this.view = { type: 'layout', config }; // replayed after a reload, not posted
+		if (Object.keys(changed).length > 0) {
+			this.post({ type: 'ratios', ratios: changed });
+		}
+		const zoomed = zoomedPaneOf(layout);
+		if (!this.zoomBusy && zoomed !== this.zoomedPane) {
+			this.zoomedPane = zoomed;
+			this.postZoom();
+		}
+	}
+
+	private configOf(layout: LayoutExport): StoredLayoutConfig {
 		const snapshot = this.snapshot;
 		const title = (paneId: string) => {
 			const pane = snapshot?.panes.find((p) => p.pane_id === paneId);
 			return pane && snapshot ? paneLabel(pane, snapshot) : 'shell';
 		};
-		this.setView({ type: 'layout', config: mirrorConfig(layout.root, this.sessionKey, title) });
-		if (snapshot) {
-			this.sendMeta(snapshot);
+		return mirrorConfig(layout.root, this.sessionKey, title);
+	}
+
+	private postZoom(): void {
+		this.post({ type: 'zoom', paneKey: this.zoomedPane ? makePaneKey(this.sessionKey, this.zoomedPane) : null });
+	}
+
+	/** Splitter drags in the webview: each changed split to herdr, one request at a time. */
+	private async setRatios(ratios: Record<string, number>): Promise<void> {
+		for (const [key, wanted] of Object.entries(ratios)) {
+			if (this.structure === undefined || this.ratios[key] === undefined || this.ratiosInFlight.has(key)) {
+				continue;
+			}
+			const ratio = clampRatio(wanted);
+			this.ratiosInFlight.add(key);
+			try {
+				const result = await this.deps.model.request(this.sessionKey, 'layout.set_split_ratio', {
+					tab_id: this.tabId,
+					path: herdrPath(key),
+					ratio,
+				});
+				const layout = parseLayoutExport(result);
+				const got = layout ? ratiosByPath(layout.root)[key] : undefined;
+				if (got !== undefined && !this.disposedFlag) {
+					this.ratios[key] = got;
+					// herdr clamps to [0.1, 0.9] (and we to [0.05, 0.95]): the splitter shows what herdr has.
+					if (!sameRatio(got, wanted)) {
+						this.post({ type: 'ratios', ratios: { [key]: got } });
+					}
+				}
+			} catch (err) {
+				this.deps.log(`${this.sessionKey}: layout.set_split_ratio ${this.tabId} ${key} failed: ${(err as Error).message}`);
+				const stored = this.ratios[key];
+				if (stored !== undefined) {
+					this.post({ type: 'ratios', ratios: { [key]: stored } });
+				}
+				this.scheduleExport();
+			} finally {
+				this.ratiosInFlight.delete(key);
+			}
+		}
+	}
+
+	/** A tile dropped on another tile of this tab: herdr swaps (or moves) the panes; the re-export shows it. */
+	private async movePane(msg: Extract<WebviewMessage, { type: 'movePane' }>): Promise<void> {
+		const source = splitPaneKey(msg.paneKey);
+		const target = splitPaneKey(msg.targetPaneKey);
+		if (
+			source.sessionKey !== this.sessionKey ||
+			target.sessionKey !== this.sessionKey ||
+			!this.paneIds.has(source.paneId) ||
+			!this.paneIds.has(target.paneId) ||
+			this.zoomedPane !== undefined
+		) {
+			return;
+		}
+		for (const { method, params } of dropRequests(msg.zone, source.paneId, target.paneId, this.tabId)) {
+			try {
+				const reason = refusal(await this.deps.model.request(this.sessionKey, method, params));
+				if (reason) {
+					void vscode.window.showWarningMessage(`herdr: ${reason}`);
+					this.scheduleExport();
+					return;
+				}
+			} catch (err) {
+				void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+				this.scheduleExport();
+				return;
+			}
+		}
+	}
+
+	/** Maximise in the webview is herdr's zoom; it also makes the pane herdr's focused pane. */
+	private async setZoom(paneKey: string | null): Promise<void> {
+		let wanted: string | null = null;
+		if (paneKey !== null) {
+			const { sessionKey, paneId } = splitPaneKey(paneKey);
+			if (sessionKey !== this.sessionKey || !this.paneIds.has(paneId)) {
+				return;
+			}
+			wanted = paneId;
+		}
+		const requests = zoomRequests(this.zoomedPane, wanted);
+		if (requests.length === 0 || this.zoomBusy) {
+			return;
+		}
+		this.zoomBusy = true;
+		let last: unknown;
+		try {
+			for (const { method, params } of requests) {
+				last = await this.deps.model.request(this.sessionKey, method, params);
+			}
+		} catch (err) {
+			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+			this.postZoom();
+			return;
+		} finally {
+			this.zoomBusy = false;
+		}
+		const after = zoomedAfter(last);
+		if (after === undefined || this.disposedFlag) {
+			this.scheduleExport();
+			return;
+		}
+		this.zoomedPane = after ?? undefined;
+		if (after !== wanted) {
+			this.postZoom(); // e.g. `single_pane`: the tile goes back to how herdr has it
 		}
 	}
 
@@ -621,6 +781,9 @@ export class MirrorPanel extends TilesPanel {
 		if (snapshot) {
 			this.sendMeta(snapshot);
 		}
+		if (this.view?.type === 'layout') {
+			this.postZoom();
+		}
 		if (this.focusOnReady) {
 			this.post({ type: 'focusTile', paneKey: makePaneKey(this.sessionKey, this.focusOnReady) });
 			this.focusOnReady = undefined;
@@ -638,6 +801,15 @@ export class MirrorPanel extends TilesPanel {
 				break;
 			case 'closePane':
 				void this.closePane(msg.paneKey);
+				break;
+			case 'setRatios':
+				void this.setRatios(msg.ratios);
+				break;
+			case 'movePane':
+				void this.movePane(msg);
+				break;
+			case 'setZoom':
+				void this.setZoom(msg.paneKey);
 				break;
 			case 'copyAsLayout': {
 				const snapshot = this.snapshot;

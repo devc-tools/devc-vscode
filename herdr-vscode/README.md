@@ -44,8 +44,16 @@ herdr tab, titled `<tab> · <space>`.
   **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
 - **Split Right** and **Split Down** in the toolbar split the focused tile in herdr; the tile's
   close button closes the pane in herdr, after asking, because its process ends. Changes made in a
-  herdr TUI come back within a second. Dragging a splitter or maximising a tile is local to VS
-  Code, and the next layout change in herdr resets it.
+  herdr TUI come back within a second, and splitters move in place when herdr's split ratios change.
+- Dragging a splitter sets herdr's split ratio (herdr keeps ratios between 0.1 and 0.9; the
+  splitter snaps to what herdr has).
+- Dragging a tile's tab onto another tile swaps the two panes in herdr. herdr 0.9.5 cannot move a
+  pane within its tab (`same_tab`), so there are no edge drops in a mirrored tab: anywhere on another
+  tile swaps. Nothing moves until herdr's layout comes back, a few hundred milliseconds later. Escape
+  cancels. To arrange panes freely, use **Copy as Layout**.
+- Maximising a tile zooms that pane in herdr, and herdr's zoom maximises the tile. Zooming also
+  makes that pane herdr's focused pane, and moves the herdr TUI's zoom with it. While herdr is
+  zoomed, tiles cannot be dragged.
 - A pane has one viewer at a time, per herdr: opening it in a second VS Code window shows
   *Opened in another viewer.* in the first, with **Reconnect** to take it back.
 - The status bar shows the last focused tile's pane and state; click it to reveal the tile.
@@ -55,8 +63,8 @@ herdr tab, titled `<tab> · <space>`.
 tile closes. A herdr TUI showing the same pane draws it at VS Code's size until the TUI resizes it
 back.
 
-Other than that, focusing a tile does not move herdr's own focus; **Focus in herdr TUI** on a pane
-row does.
+Other than maximising (zoom) and swapping (herdr focuses the dragged pane), focusing a tile does not
+move herdr's own focus; **Focus in herdr TUI** on a pane row does.
 
 ## Layout tabs
 
@@ -227,7 +235,8 @@ model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.t
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, Layout tabs, dragging panes into them, Pane Context, and it stops and restarts that session's server.
+  takeover, restore, Layout tabs, dragging panes into them, split ratios, swaps and zoom in mirrored tabs, Pane Context,
+  and it stops and restarts that session's server.
   Ask Agent runs a fake `claude` (a `sh` loop) in a pane of `hv-test` and prompts only that pane; its replies go to
   this machine's `/tmp/herdr-vscode/review`, and are removed afterwards. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
   bytes).

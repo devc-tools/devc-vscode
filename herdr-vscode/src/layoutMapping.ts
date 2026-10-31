@@ -34,11 +34,15 @@ export interface GlComponentItem {
 export interface GlStackItem {
 	type: 'stack';
 	size?: string;
+	/** In a saved (resolved) config: whether the stack was maximised. */
+	maximised?: boolean;
 	content: GlComponentItem[];
 }
 
 export interface GlSplitItem {
 	type: 'row' | 'column';
+	/** Mirrored tabs: `split:<path key>`, the split's place in herdr's tree. */
+	id?: string;
 	size?: string;
 	content: GlItem[];
 }
@@ -65,7 +69,7 @@ export interface GlLayoutConfig {
  */
 export type StoredLayoutConfig = Omit<GlLayoutConfig, 'root'> & { root?: GlItem; resolved?: boolean };
 
-/** Mirrored tabs: no drag, no popouts; maximise is local, close goes to herdr. */
+/** Mirrored tabs: no Golden Layout drag, no popouts; maximise is herdr's zoom, close goes to herdr. */
 export const MIRROR_SETTINGS: GlLayoutConfig['settings'] = {
 	reorderEnabled: false,
 	popoutWholeStack: false,
@@ -115,7 +119,14 @@ function percent(share: number): string {
 	return `${Math.round(share * 10000) / 100}%`;
 }
 
-function toItem(node: LayoutNode, sessionKey: string, title: (paneId: string) => string, size?: string): GlItem {
+/** The Golden Layout id of a mirrored split: `split:` and its path key (`0` first, `1` second; the root `""`). */
+export const SPLIT_ID_PREFIX = 'split:';
+
+export function splitId(pathKey: string): string {
+	return SPLIT_ID_PREFIX + pathKey;
+}
+
+function toItem(node: LayoutNode, sessionKey: string, title: (paneId: string) => string, size?: string, path = ''): GlItem {
 	if (node.type === 'pane') {
 		return {
 			type: 'stack',
@@ -133,10 +144,11 @@ function toItem(node: LayoutNode, sessionKey: string, title: (paneId: string) =>
 	}
 	return {
 		type: node.direction === 'right' ? 'row' : 'column',
+		id: splitId(path),
 		...(size ? { size } : {}),
 		content: [
-			toItem(node.first, sessionKey, title, percent(node.ratio)),
-			toItem(node.second, sessionKey, title, percent(1 - node.ratio)),
+			toItem(node.first, sessionKey, title, percent(node.ratio), path + '0'),
+			toItem(node.second, sessionKey, title, percent(1 - node.ratio), path + '1'),
 		],
 	};
 }
@@ -156,12 +168,28 @@ export function layoutPaneIds(node: LayoutNode): string[] {
 	return node.type === 'pane' ? [node.pane_id] : [...layoutPaneIds(node.first), ...layoutPaneIds(node.second)];
 }
 
+function withoutRatios(node: LayoutNode): unknown {
+	return node.type === 'pane'
+		? { type: 'pane', pane_id: node.pane_id }
+		: { type: 'split', direction: node.direction, first: withoutRatios(node.first), second: withoutRatios(node.second) };
+}
+
 /**
- * Compares split trees: panes, directions and ratios, nothing else (export
- * nodes also carry a `cwd`, and `layout.updated` fires for focus changes too).
+ * Compares split trees by structure: panes, their places and the directions;
+ * not ratios (those are resized in place), nor the `cwd` export nodes carry.
  */
-export function layoutShape(node: LayoutNode): string {
-	return JSON.stringify(node);
+export function structureKey(node: LayoutNode): string {
+	return JSON.stringify(withoutRatios(node));
+}
+
+/** Every split's ratio (the `first` child's share), by path key. */
+export function ratiosByPath(node: LayoutNode, path = '', out: Record<string, number> = {}): Record<string, number> {
+	if (node.type === 'split') {
+		out[path] = node.ratio;
+		ratiosByPath(node.first, path + '0', out);
+		ratiosByPath(node.second, path + '1', out);
+	}
+	return out;
 }
 
 /** The component states in a Golden Layout item tree. */

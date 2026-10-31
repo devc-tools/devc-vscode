@@ -1,4 +1,5 @@
 import { StoredLayoutConfig } from './layoutMapping';
+import { DropZone } from './mirrorEdit';
 
 /**
  * Messages between the extension host and the `herdr.tiles` webview. Imported
@@ -67,6 +68,10 @@ export type HostMessage =
 	| { type: 'placeEnd' }
 	/** Layout tabs: the pane moved to another Layout tab; close its tile. */
 	| { type: 'removeTile'; paneKey: string }
+	/** Mirrored tabs: herdr's split ratios changed (path key → the `first` child's share); resize in place. */
+	| { type: 'ratios'; ratios: Record<string, number> }
+	/** Mirrored tabs: herdr's zoomed pane (null: none); after every `layout` and on each change. */
+	| { type: 'zoom'; paneKey: string | null }
 	/** Test support: answer with `probeResult`, after an optional key press, click or drop. */
 	| { type: 'probe'; id: number; action?: ProbeAction };
 
@@ -96,7 +101,13 @@ export type ProbeAction =
 	/** Placing mode: `pointermove` then `pointerdown` at the point. */
 	| { kind: 'placeAt'; at: DropPoint }
 	/** `dragenter`, `dragover`, `drop` at the point, carrying `application/vnd.herdr.pane` = `data`. */
-	| { kind: 'dropTileAt'; at: DropPoint; data: string };
+	| { kind: 'dropTileAt'; at: DropPoint; data: string }
+	/** Mirrored tabs: drags the splitter of item `split:<key>` to `fraction` of that item's width or height. */
+	| { kind: 'dragSplitter'; splitId: string; fraction: number }
+	/** Mirrored tabs: drags a tile's tab to a point inside `zone` of another tile, with synthetic pointer events. */
+	| { kind: 'dragTile'; paneKey: string; targetPaneKey: string; zone: DropZone }
+	/** The maximise control of a tile's stack. */
+	| { kind: 'clickMaximise'; paneKey: string };
 
 export interface TileProbe {
 	paneKey: string;
@@ -144,6 +155,12 @@ export type WebviewMessage =
 	| { type: 'placeCancel' }
 	/** A grip drop from another Layout tab landed here. */
 	| { type: 'tileMovedIn'; sessionKey: string; paneId: string; fromLayoutId: string }
+	/** Mirrored tabs: splitter drags, as path key → the `first` child's share. */
+	| { type: 'setRatios'; ratios: Record<string, number> }
+	/** Mirrored tabs: a tile was maximised (its pane key) or restored (null). */
+	| { type: 'setZoom'; paneKey: string | null }
+	/** Mirrored tabs: a tile was dragged onto another tile's zone. */
+	| { type: 'movePane'; paneKey: string; targetPaneKey: string; zone: DropZone }
 	| {
 			type: 'probeResult';
 			id: number;
@@ -153,4 +170,8 @@ export type WebviewMessage =
 			config: StoredLayoutConfig;
 			/** A Golden Layout tab drag is under way. */
 			dragging: boolean;
+			/** Every `split:` item's ratio, from the live Golden Layout items, by path key. */
+			ratios: Record<string, number>;
+			/** The pane key of the maximised stack's tile. */
+			maximised: string | null;
 	  };

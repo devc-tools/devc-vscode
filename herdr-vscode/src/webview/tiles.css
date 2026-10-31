@@ -343,3 +343,46 @@ body.placing #tiles * {
 .tile-grip:active {
 	cursor: grabbing;
 }
+
+/* Mirrored tabs: dragging a tile onto another swaps the panes in herdr */
+
+body.kind-mirror .lm_header .lm_tab {
+	cursor: grab;
+}
+
+body.kind-mirror .lm_header .lm_tab .lm_close_tab,
+body.kind-mirror .lm_header .lm_controls > * {
+	cursor: pointer;
+}
+
+body.mirror-moving,
+body.mirror-moving * {
+	cursor: grabbing !important;
+	user-select: none !important;
+}
+
+.mirror-ghost {
+	position: fixed;
+	z-index: 100;
+	padding: 2px 8px;
+	pointer-events: none;
+	white-space: nowrap;
+	color: var(--vscode-tab-activeForeground);
+	background: var(--vscode-editorGroupHeader-tabsBackground);
+	border: 1px solid var(--vscode-focusBorder);
+	opacity: 0.9;
+}
+
+.mirror-drop-indicator {
+	position: fixed;
+	z-index: 90;
+	box-sizing: border-box;
+	pointer-events: none;
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+	background: color-mix(in srgb, var(--vscode-editor-selectionBackground) 40%, transparent);
+}
+
+.mirror-drop-indicator[hidden] {
+	display: none;
+}

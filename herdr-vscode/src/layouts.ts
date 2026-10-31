@@ -1,4 +1,4 @@
-import { componentStates, GlItem, GlLayoutConfig, PaneComponentState, StoredLayoutConfig } from './layoutMapping';
+import { componentStates, GlItem, GlLayoutConfig, PaneComponentState, SPLIT_ID_PREFIX, StoredLayoutConfig } from './layoutMapping';
 import { makePaneKey } from './tilesProtocol';
 
 /**
@@ -205,12 +205,30 @@ export function rewritePane<T extends Pick<StoredLayoutConfig, 'root'>>(config: 
 	};
 }
 
-/** A mirrored panel's saved config as a Layout's: every tile draggable, nothing maximised. */
+/** Drops what only a mirror has: `split:` ids (Golden Layout's default id is `""`) and maximised stacks. */
+function withoutMirrorParts(item: GlItem): GlItem {
+	const raw = { ...(item as unknown as Record<string, unknown>) };
+	if (typeof raw.id === 'string' && raw.id.startsWith(SPLIT_ID_PREFIX)) {
+		raw.id = '';
+	}
+	if ('maximised' in raw || raw.type === 'stack') {
+		raw.maximised = false;
+	}
+	if (Array.isArray(raw.content)) {
+		raw.content = (raw.content as GlItem[]).map(withoutMirrorParts);
+	}
+	return raw as unknown as GlItem;
+}
+
+/**
+ * A mirrored panel's saved config as a Layout's: every tile draggable, nothing
+ * maximised, no `split:` ids. A Layout tab never zooms herdr.
+ */
 export function asLayoutConfig(config: StoredLayoutConfig): StoredLayoutConfig {
 	return {
 		...config,
 		settings: { ...config.settings, ...LAYOUT_SETTINGS },
-		...(config.root ? { root: mapComponents(config.root, (c) => ({ ...c, reorderEnabled: true })) } : {}),
+		...(config.root ? { root: mapComponents(withoutMirrorParts(config.root), (c) => ({ ...c, reorderEnabled: true })) } : {}),
 	};
 }
 

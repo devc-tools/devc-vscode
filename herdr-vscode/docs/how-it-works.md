@@ -187,15 +187,24 @@ sends back fits, input and actions; the messages are typed in `src/tilesProtocol
 or `{"type":"split","direction":"right"|"down","ratio","first","second"}`. `src/layoutMapping.ts`
 turns that into a Golden Layout config, 1:1: `right` → `row`, `down` → `column`, sizes
 `<ratio>%` and `<1−ratio>%`, a pane → a stack of one `pane` component. Same-direction splits stay
-nested.
+nested. Every row and column gets `"id":"split:<path key>"`: its path from the root, one character
+per step, `0` = `first`, `1` = `second` (the root is `split:`). Golden Layout keeps the id on the item
+and in `saveLayout()`; the webview finds a split by it. Stacks and components have no id.
 
 A re-export follows, debounced 100 ms, when the session emits `layout.updated`, `pane.created`,
 `pane.closed`, `pane.moved`, `pane.exited` or `tab.renamed` for this tab; an event names its tab
 directly (`tab_id`, `layout.tab_id`, `pane.tab_id`) or only a pane (`pane_id`), looked up in the
 latest snapshot. It also follows whenever a snapshot's panes for the tab differ from those on
-screen, and after `events_lost`. `layout.updated` fires for focus changes too, so a re-export whose
-split tree is unchanged is dropped, which keeps local splitter drags and maximise until the tree
-really changes.
+screen, and after `events_lost`. The panel keeps, from the last export, the **structure key** (the
+tree as JSON with every `ratio` and `cwd` removed), the ratios by path key, and the zoomed pane
+(`focused_pane_id` when `zoomed`):
+
+1. Structure changed (panes added, removed, moved, swapped, a direction changed): `layout` (a full
+   config, `loadLayout`), then `zoom`.
+2. Same structure: `ratios` with only the paths whose ratio moved by more than 0.005 (herdr's ratios
+   are `f32`: `0.6` comes back as `0.6000000238418579`) and that have no `set_split_ratio` in flight;
+   nothing otherwise. `layout.updated` fires for every focus change, so this is the common case.
+3. Zoomed pane changed: `zoom`.
 
 `loadLayout` destroys every component. Each panel holds one xterm `Terminal` per pane in a map, in
 an element that is moved into the new component, and restores the keyboard focus afterwards. A
@@ -274,6 +283,52 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   focused pane if it is in this tab, with `focus:false` and the pane's `foreground_cwd ?? cwd`.
 - The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last
   focused pane, fires `onDidChangeLastFocused`, and shows it in the status bar.
+
+### Editing herdr's layout
+
+Measured against herdr 0.9.5 (the plan's step 1):
+
+- `layout.set_split_ratio` `{"tab_id","path":[<bool>…],"ratio"}`: `path` `[]` is the root, `true`
+  picks `second`. herdr clamps any ratio to [0.1, 0.9] (`0`, `1.5` are accepted) and answers
+  `{"type":"layout_split_ratio_set","layout":{…export…}}`; a path that is not a split is
+  `split_not_found`. One `layout.updated` follows, whose `splits[].id` (`split_0_root`, `split_1_1`)
+  are not path keys.
+- `pane.move` to the pane's own tab is refused: `move_result.changed:false`, `reason:"same_tab"`
+  (`zoomed_tab` first when zoomed). `layout.apply` with a `tab_id` does not rearrange in place: it
+  replaces the tab, with new pane ids and new shells. So a mirrored tab cannot move a pane to an edge.
+- `pane.swap` `{"source_pane_id","target_pane_id"}` exchanges two panes of a tab, ratios kept, and
+  focuses the source; across tabs `reason:"cross_tab"`. It works while zoomed.
+- `pane.zoom` `{"pane_id","mode":"on"|"off"}` focuses the pane; `on` for another pane while zoomed
+  answers `already_zoomed` and only moves the focus (herdr's zoom shows the focused pane); `off` when
+  not zoomed is `already_unzoomed`; a one-pane tab is `single_pane`, `zoomed:false`.
+
+**Ratios.** A `pointerdown` on a `.lm_splitter` arms the webview; the first `stateChanged` after the
+release (Golden Layout sets the sizes an animation frame after its drag stops) reads every `split:`
+item, `first.size / (first.size + second.size)`, and 150 ms later posts `setRatios` with those that
+differ by more than 0.005 from the ratio it last applied or reported. Other `stateChanged`s (resize,
+focus, maximise, our own resizes) post nothing. The host sends `layout.set_split_ratio` per path,
+clamped to [0.05, 0.95] and rounded to 3 decimals, and stores herdr's answer; when that differs from
+what the webview asked (herdr's own clamp), or on an error (logged, then a re-export), it posts
+`ratios` so the splitter snaps back. A `ratios` message sets the two children's `size` and calls the
+split's `updateSize(false)`: no `loadLayout`. During a drag it waits for the release.
+
+**Dragging tiles.** Golden Layout's drag stays off (`reorderEnabled: false` per component): its drop
+builds stacks and splits herdr cannot hold. The webview runs its own: a press on a tile's tab and a
+move over 10 px (not with one tile, nor while a stack is maximised) start it, `body.mirror-moving`, a
+label ghost, and an indicator over the tile under the pointer (the dragged one excepted). The zone
+function (`dropZone` in `src/mirrorEdit.ts`: header or a quarter in from every edge is the centre,
+else the nearest edge) is there, but since herdr cannot move within a tab (`EDGE_ZONES_OFFERED` is
+false) every zone is the centre: the whole tile is highlighted and a drop posts `movePane`, which the
+host turns into `pane.swap`, unless either pane is not in the last export or herdr is zoomed. A
+refusal (`changed:false`) or an error shows `herdr: <reason>` and re-exports. Escape and
+`pointercancel` cancel. The tiles move when the re-export says so.
+
+**Zoom.** After every `layout`, and when the zoomed pane changes, the host posts `zoom`; the webview
+records it, then maximises that pane's stack (minimising any other first) or minimises, and ignores
+the `stateChanged`s this causes. Any other change of `layout.maximisedStack` posts `setZoom`. The host
+sends `pane.zoom` `off` for herdr's zoomed pane first when another is zoomed, then `on`, ignores
+re-exports' zoom until the answer, and posts `zoom` back when herdr's answer is not what was asked
+(`single_pane`).
 
 ## Layout tabs
 
@@ -403,7 +458,8 @@ the tree, or they would dispose its terminal.
 The mirrored panel's webview posts its `saveLayout()`; `asLayoutConfig` turns on reorder in the settings
 **and on each component**. Golden Layout's tab takes a component's `reorderEnabled` before the
 settings', and a component without one resolves to `true`, so a mirrored tab's components carry
-`reorderEnabled: false` themselves.
+`reorderEnabled: false` themselves. It also blanks the `split:` ids and sets every `maximised` to
+`false`: a Layout tab never zooms herdr, and opens unmaximised.
 
 ## Pane Context
 
