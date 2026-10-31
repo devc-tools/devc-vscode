@@ -7,12 +7,25 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   in every running dev container. Each running session shows its agents' counts
   (`2 blocked · 1 working`) and an icon for its worst status. Click a running session to select
   it.
-- **Spaces**: the selected session's spaces, tabs and panes. Click a tab to open it in the editor
+- **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
+  status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
+  their panes (`claude, copilot`, `2 shells`). Click a tab to open it in the editor
   area (below); click a pane to put it in a Layout tab (below, or see `herdr.openPaneIn`).
-- **Agents**: every agent pane across all connected sessions, blocked first. Clicking one works as
-  for a pane in Spaces. The title bar filters to blocked or working agents. The number of blocked agents shows as a badge on the
-  herdr icon and as a `<n> blocked` warning in the status bar; clicking the status bar item
-  shows the blocked agents.
+- The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
+  tooltip); click it to go to Sessions.
+
+**Done and time in state.** herdr reports an agent that finished as `idle`. An agent that goes from
+working to idle shows as **done** (green) until you look at it: click into its tile, click its row, or
+move the herdr TUI's focus to it. Times count from when VS Code saw the state begin, and survive a window
+reload; a state that began while VS Code was closed shows no time until it next changes.
+- **Agents**: every agent pane across all connected sessions, blocked first, each with its state and
+  how long it has been in it (`deephaven-mcp › v3_auth · blocked 2m`). Clicking one works as for a pane
+  in Spaces. The title bar switches between **all sessions** and **this session** (the selected one, with
+  `<space> › <tab>` rows), and **Filter Agents…** picks All, Blocked, Working or Done, with their counts;
+  the view's description shows the counts (`all sessions · 2 blocked · 3 working`) or the filter
+  (`blocked 2 of 7`). The number of blocked agents shows as a badge on the herdr icon and as a
+  `<n> blocked` warning in the status bar; clicking the status bar item shows the blocked agents of
+  all sessions.
 - **Pane Context**: the repo, changes and files of the pane you are working with (below).
 
 ## herdr tabs in the editor area
@@ -28,6 +41,7 @@ herdr tab, titled `<tab> · <space>`.
   pane's row) create them in herdr and open the herdr tab they landed in.
 - **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
   because every pane in the session closes. A started session has no spaces until you add one.
+  **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
 - **Split Right** and **Split Down** in the toolbar split the focused tile in herdr; the tile's
   close button closes the pane in herdr, after asking, because its process ends. Changes made in a
   herdr TUI come back within a second. Dragging a splitter or maximising a tile is local to VS

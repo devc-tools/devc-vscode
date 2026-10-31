@@ -68,7 +68,7 @@
 | 16 | [herdr-layout-tabs.md](herdr-layout-tabs.md) | User-built Layout tabs of any panes; `herdr.openPaneIn` (depends on phase 15) | implemented, manual checks pending |
 | 17 | [herdr-pane-context.md](herdr-pane-context.md) | Pane Context view: repo, changes, files of the followed pane; terminal links (depends on phase 15) | implemented, manual checks pending |
 | 18 | [herdr-layout-drag-drop.md](herdr-layout-drag-drop.md) | Drag panes from the trees into Layout tabs; tiles between Layout tabs (depends on phase 16) | implemented, manual checks pending |
-| 19 | [herdr-sidebar-triage.md](herdr-sidebar-triage.md) | Agents filters with counts, done, time in state, scope; space git, tab summaries, container Start, status bar (depends on phase 14) | |
+| 19 | [herdr-sidebar-triage.md](herdr-sidebar-triage.md) | Agents filters with counts, done, time in state, scope; space git, tab summaries, container Start, status bar (depends on phase 14) | implemented, manual checks pending |
 | 20 | [herdr-pane-changes.md](herdr-pane-changes.md) | Pane Context: changes since a baseline, git markers, remote labels, repo actions (depends on phase 17) | |
 | 21 | [herdr-ask-agent.md](herdr-ask-agent.md) | Ask a herdr agent from editor comment threads (depends on phases 17 and 20) | |
 | 22 | [herdr-mirror-fidelity.md](herdr-mirror-fidelity.md) | Mirrored tabs: split ratios, pane moves and zoom both ways (depends on phase 15) | |

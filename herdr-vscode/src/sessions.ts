@@ -3,7 +3,9 @@ import * as vscode from 'vscode';
 import { bridgeRequest, checkBridge, herdrArgv, HerdrEvent, subscribe, Subscription, subscriptionList } from './bridge';
 import { Environment, Environments } from './environments';
 import { SSH_FAILURE_EXIT, ShellResult } from './remoteShell';
+import { AgentStates } from './agentState';
 import { AgentStatus, toStatus } from './status';
+import { makePaneKey } from './tilesProtocol';
 
 // ── Session list ────────────────────────────────────────────────────────────
 
@@ -71,6 +73,8 @@ export interface SnapshotWorkspace {
 	number: number;
 	focused: boolean;
 	repoName?: string;
+	/** `worktree.checkout_path`: where the space's checkout is. */
+	checkoutPath?: string;
 }
 
 export interface SnapshotTab {
@@ -88,7 +92,16 @@ export interface SnapshotPane {
 	label?: string;
 	agent?: string;
 	display_agent?: string;
+	/** The displayed status: herdr's, with a derived `done` (see `agentState.ts`). */
 	agent_status: AgentStatus;
+	/** herdr's own `agent_status`. */
+	raw_status: AgentStatus;
+	/** When the displayed state began (epoch ms), when that was observed. */
+	state_since?: number;
+	/** `state_change_seq` from `agents[]`. */
+	state_change_seq?: number;
+	/** `completion_seq` from `agents[]`, when an integer. */
+	completion_seq?: number;
 	cwd?: string;
 	foreground_cwd?: string;
 	terminal_title_stripped?: string;
@@ -115,6 +128,10 @@ function str(value: unknown): string | undefined {
 	return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+function uint(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 function num(value: unknown): number {
 	return typeof value === 'number' ? value : Number.MAX_SAFE_INTEGER;
 }
@@ -138,6 +155,7 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 			number: num(w.number),
 			focused: w.focused === true,
 			repoName: str(worktree?.repo_name),
+			checkoutPath: str(worktree?.checkout_path),
 		});
 	}
 	const tabs: SnapshotTab[] = [];
@@ -149,6 +167,20 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 		}
 		tabs.push({ tab_id: id, workspace_id: ws, label: str(t.label) ?? id, number: num(t.number), focused: t.focused === true });
 	}
+	// The seq fields are on `agents[]` only, not on `panes[]`.
+	const agentNames = new Map<string, string>();
+	const seqs = new Map<string, { state?: number; completion?: number }>();
+	for (const a of objects(s.agents)) {
+		const id = str(a.pane_id);
+		if (!id) {
+			continue;
+		}
+		const name = str(a.name);
+		if (name) {
+			agentNames.set(id, name);
+		}
+		seqs.set(id, { state: uint(a.state_change_seq), completion: uint(a.completion_seq) });
+	}
 	const panes: SnapshotPane[] = [];
 	for (const p of objects(s.panes)) {
 		const id = str(p.pane_id);
@@ -157,29 +189,54 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 		if (!id || !tab || !ws) {
 			continue;
 		}
-		panes.push({
+		const status = toStatus(p.agent_status);
+		const seq = seqs.get(id);
+		const pane: SnapshotPane = {
 			pane_id: id,
 			tab_id: tab,
 			workspace_id: ws,
 			label: str(p.label),
 			agent: str(p.agent),
 			display_agent: str(p.display_agent),
-			agent_status: toStatus(p.agent_status),
+			agent_status: status,
+			raw_status: status,
 			cwd: str(p.cwd),
 			foreground_cwd: str(p.foreground_cwd),
 			terminal_title_stripped: str(p.terminal_title_stripped),
 			focused: p.focused === true,
-		});
-	}
-	const agentNames = new Map<string, string>();
-	for (const a of objects(s.agents)) {
-		const id = str(a.pane_id);
-		const name = str(a.name);
-		if (id && name) {
-			agentNames.set(id, name);
+		};
+		if (seq?.state !== undefined) {
+			pane.state_change_seq = seq.state;
 		}
+		if (seq?.completion !== undefined) {
+			pane.completion_seq = seq.completion;
+		}
+		panes.push(pane);
 	}
 	return { workspaces, tabs, panes, agentNames, focusedPaneId: str(s.focused_pane_id), version: str(s.version) };
+}
+
+/**
+ * The snapshot with each agent pane's displayed status and `state_since`
+ * from the tracker; `raw_status` stays herdr's. A new object: views compare.
+ */
+export function withDisplayedStatus(snapshot: Snapshot, sessionKey: string, states: AgentStates): Snapshot {
+	return {
+		...snapshot,
+		panes: snapshot.panes.map((p) => {
+			if (!hasAgent(p)) {
+				return p;
+			}
+			const shown = states.displayed(makePaneKey(sessionKey, p.pane_id), p.raw_status);
+			const pane: SnapshotPane = { ...p, agent_status: shown.status };
+			if (shown.since !== undefined) {
+				pane.state_since = shown.since;
+			} else {
+				delete pane.state_since;
+			}
+			return pane;
+		}),
+	};
 }
 
 /** Whether a pane runs an agent. */
@@ -243,6 +300,8 @@ export class SessionConnection {
 		readonly name: string,
 		private readonly hooks: {
 			changed(): void;
+			/** A new snapshot as the model shows it (displayed statuses); `first` since (re)connecting. */
+			display?(snapshot: Snapshot, first: boolean): Snapshot;
 			/** Every event of this session, as it arrives. */
 			event(ev: HerdrEvent): void;
 			log(line: string): void;
@@ -429,7 +488,8 @@ export class SessionConnection {
 			if (gen !== this.gen) {
 				return;
 			}
-			this.snapshot = snapshot;
+			const first = this.state !== 'connected';
+			this.snapshot = this.hooks.display ? this.hooks.display(snapshot, first) : snapshot;
 			this.state = 'connected';
 			this.attempts = 0;
 			this.hooks.changed();
@@ -465,6 +525,8 @@ export class SessionModel implements vscode.Disposable {
 	constructor(
 		readonly environments: Environments,
 		private readonly log: (line: string) => void,
+		/** Time in state and derived done; in memory when not given. */
+		readonly agentStates: AgentStates = new AgentStates(),
 	) {
 		this.envListener = environments.onDidChange((change) => {
 			for (const env of change.removed) {
@@ -525,6 +587,18 @@ export class SessionModel implements vscode.Disposable {
 			return Promise.reject(new Error(`session ${key} is not connected`));
 		}
 		return bridgeRequest(conn.env.shell, conn.name, method, params);
+	}
+
+	/** The pane was looked at: a derived done ends there. */
+	markSeen(sessionKey: string, paneId: string): void {
+		if (!this.agentStates.markSeen(makePaneKey(sessionKey, paneId))) {
+			return;
+		}
+		const conn = this.conns.get(sessionKey);
+		if (conn?.snapshot) {
+			conn.snapshot = withDisplayedStatus(conn.snapshot, sessionKey, this.agentStates);
+		}
+		this.fireChanged();
 	}
 
 	/** Lists an environment's sessions; a call during a run shares it. */
@@ -593,6 +667,12 @@ export class SessionModel implements vscode.Disposable {
 			}
 			const conn = new SessionConnection(key, env, name, {
 				changed: () => this.fireChanged(),
+				display: (snapshot, first) => {
+					const connected = new Set([...this.conns.values()].filter((c) => c.state === 'connected').map((c) => c.key));
+					connected.add(key);
+					this.agentStates.apply(key, snapshot, first, connected);
+					return withDisplayedStatus(snapshot, key, this.agentStates);
+				},
 				event: (event) => this.events.fire({ sessionKey: key, event }),
 				log: this.log,
 				relist: () => this.relist(envKey),

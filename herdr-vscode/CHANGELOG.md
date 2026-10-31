@@ -4,6 +4,16 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Agents: a derived **done** state (an agent that went from working to idle, until you click into its
+  tile, click its row, or herdr's focus moves to it), time in state on every row (`blocked 2m`), an
+  **all sessions** / **this session** scope switch, and **Filter Agents…** (All, Blocked, Working, Done, with
+  counts) in place of the filter buttons. The view's description shows the counts. **Show Done** in the
+  command palette.
+- Spaces: branch and git status on space rows (`⎇ v3_auth ● 4 ↑1`), and a summary on tab rows
+  (`claude, copilot`, `2 shells`).
+- **Start Session** on a dev container's `herdr not running` row (starts `devc`) and on its stopped sessions.
+- Status bar item for the selected session, `herdr: <session>`, with the herdr version in its tooltip.
+
 - Drag panes into Layout tabs: a pane row of Spaces, Agents or Pane Context's **Other Panes** dragged
   onto a Layout tab on screen, then a click on a tab strip (a new tab there) or near an edge (a split),
   with Golden Layout's own drop zones. **Esc** (**Cancel Placing Pane**), the toolbar's **Cancel**, or

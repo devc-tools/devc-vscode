@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { containerKey, Environments, HOST_KEY, sshKey } from './environments';
+import { AgentStates } from './agentState';
+import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
@@ -7,9 +8,10 @@ import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView } from 
 import { CANCEL_PLACEMENT_COMMAND, PaneDragController, paneRowRef } from './paneDrag';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
-import { createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startHostSession, whenTabKnown } from './sessionControl';
+import { createdTabId, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
 import { SessionModel, sessionKey, Snapshot } from './sessions';
-import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND } from './status';
+import { SpaceGit } from './spaceGit';
+import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './status';
 import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
@@ -39,9 +41,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	const log = (line: string) => output.appendLine(`${new Date().toISOString()} ${line}`);
 
 	const environments = new Environments(log);
-	model = new SessionModel(environments, log);
+	// Loaded before the model starts: time in state and done survive a reload.
+	const agentStates = new AgentStates({ store: context.workspaceState });
+	model = new SessionModel(environments, log, agentStates);
 	const m = model;
-	context.subscriptions.push(m);
+	context.subscriptions.push(m, agentStates);
 
 	const sessions = new SessionsView(m, context.workspaceState);
 	const rowLabel = (key: string) => sessions.row(key)?.label;
@@ -59,10 +63,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		const conn = m.connection(key);
 		return conn?.state === 'connected' ? conn.snapshot : undefined;
 	};
+	const spaceGit = new SpaceGit((key) => m.connection(key)?.env.shell);
 	const spaces = new SpacesView(
 		sessions,
 		(key) => m.connection(key)?.snapshot,
 		m.onDidChange,
+		spaceGit,
 		new PaneDragController<SpacesNode>(panels.placement, paneRowRef, connectedSnapshot),
 	);
 	const agentSources = (): AgentSource[] =>
@@ -74,10 +80,40 @@ export function activate(context: vscode.ExtensionContext): void {
 		agentSources,
 		m.onDidChange,
 		context.workspaceState,
+		sessions,
 		new PaneDragController<AgentRow>(panels.placement, (row) => row.ref, connectedSnapshot),
 	);
 	const statusBar = new BlockedStatusBar();
-	context.subscriptions.push(spaces, agents, statusBar, agents.onDidChangeBlocked((n) => statusBar.update(n)));
+	const sessionBar = new SessionStatusBar();
+	const updateSessionBar = () => {
+		const key = sessions.selected;
+		const conn = key ? m.connection(key) : undefined;
+		sessionBar.update(
+			key && conn
+				? {
+						sessionKey: key,
+						rowLabel: sessions.row(key)?.label ?? conn.name,
+						envKind: conn.env.kind,
+						alias: conn.env.alias,
+						session: conn.name,
+						snapshot: conn.state === 'connected' ? conn.snapshot : undefined,
+					}
+				: undefined,
+		);
+	};
+	updateSessionBar();
+	context.subscriptions.push(
+		spaceGit,
+		spaces,
+		agents,
+		statusBar,
+		sessionBar,
+		agents.onDidChangeBlocked((n) => statusBar.update(n)),
+		sessions.onDidChangeSelected(updateSessionBar),
+		m.onDidChange(updateSessionBar),
+		// Looking at a pane ends its done.
+		focus.onDidReportFocus(({ sessionKey, paneId }) => m.markSeen(sessionKey, paneId)),
+	);
 
 	const paths = new EnvironmentPaths(environments);
 	const containerFs = new ContainerFileSystemProvider(
@@ -172,15 +208,19 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand(CANCEL_PLACEMENT_COMMAND, () => panels.placement.cancel()),
 		vscode.commands.registerCommand('herdr.startSession', async (row?: SessionRowNode) => {
 			const session = row?.session;
-			if (!session || row.envKey !== HOST_KEY) {
+			const env = row && environments.get(row.envKey);
+			if (!session || !env || (env.kind !== 'host' && env.kind !== 'container')) {
 				return;
 			}
 			try {
-				const started = await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, () => startHostSession(m, session));
+				const started = await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, () =>
+					env.kind === 'host' ? startHostSession(m, session) : startContainerSession(m, env, session, readSettings().dockerPath),
+				);
 				if (started) {
-					sessions.select(sessionKey(HOST_KEY, session));
+					sessions.select(sessionKey(env.key, session));
 				} else {
-					void vscode.window.showWarningMessage(`herdr: session "${session}" did not start. Its herdr-server.log says why.`);
+					const where = env.kind === 'container' ? ` in ${env.label}` : '';
+					void vscode.window.showWarningMessage(`herdr: session "${session}" did not start${where}. Its herdr-server.log says why.`);
 				}
 			} catch (err) {
 				warn(err);
@@ -242,6 +282,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!ref?.sessionKey || !ref.paneId) {
 				return;
 			}
+			m.markSeen(ref.sessionKey, ref.paneId);
 			try {
 				await m.request(ref.sessionKey, 'pane.focus', { pane_id: ref.paneId });
 			} catch (err) {
@@ -256,12 +297,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand(OPEN_PANE_TAB_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
 			const ref = paneArg(arg, paneId);
 			if (ref) {
+				m.markSeen(ref.sessionKey, ref.paneId);
 				panels.openPaneTab(ref.sessionKey, ref.paneId);
 			}
 		}),
 		vscode.commands.registerCommand(ADD_TO_LAYOUT_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
 			const ref = paneArg(arg, paneId);
 			if (ref) {
+				m.markSeen(ref.sessionKey, ref.paneId);
 				panels.addToLayout(ref.sessionKey, ref.paneId);
 			}
 		}),
@@ -322,7 +365,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('herdr.agents.showAll', () => agents.setFilter('all')),
 		vscode.commands.registerCommand('herdr.agents.showBlocked', () => agents.setFilter('blocked')),
 		vscode.commands.registerCommand('herdr.agents.showWorking', () => agents.setFilter('working')),
+		vscode.commands.registerCommand('herdr.agents.showDone', () => agents.setFilter('done')),
+		vscode.commands.registerCommand('herdr.agents.filter', () => agents.pickFilter()),
+		vscode.commands.registerCommand('herdr.agents.scopeSession', () => agents.setScope('session')),
+		vscode.commands.registerCommand('herdr.agents.scopeAll', () => agents.setScope('all')),
 		vscode.commands.registerCommand(REVEAL_BLOCKED_COMMAND, async () => {
+			await agents.setScope('all');
 			await vscode.commands.executeCommand('herdr.agents.showBlocked');
 			await vscode.commands.executeCommand('workbench.view.extension.herdr');
 		}),

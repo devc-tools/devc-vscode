@@ -53,6 +53,55 @@ suite('herdr-vscode', () => {
 		await vscode.commands.executeCommand('herdr.agents.showAll');
 	});
 
+	test('sidebar triage: Agents filter, done and scope commands, title bar, Start on containers', async () => {
+		const ext = extension();
+		await ext.activate();
+		const registered = new Set(await vscode.commands.getCommands(true));
+		for (const c of ['herdr.agents.filter', 'herdr.agents.showDone', 'herdr.agents.scopeSession', 'herdr.agents.scopeAll']) {
+			assert.ok(registered.has(c), c);
+		}
+		await vscode.commands.executeCommand('herdr.agents.showDone');
+		await vscode.commands.executeCommand('herdr.agents.scopeSession');
+		await vscode.commands.executeCommand('herdr.agents.scopeAll');
+		await vscode.commands.executeCommand('herdr.agents.showAll');
+		const contributed = ext.packageJSON.contributes;
+		const commands = contributed.commands as { command: string; title: string; icon?: string; category?: string }[];
+		const cmd = (id: string) => commands.find((c) => c.command === id);
+		assert.deepStrictEqual(
+			['herdr.agents.filter', 'herdr.agents.showDone', 'herdr.agents.scopeSession', 'herdr.agents.scopeAll'].map((id) => [cmd(id)?.title, cmd(id)?.category]),
+			[
+				['Filter Agents…', 'herdr'],
+				['Show Done', 'herdr'],
+				['Show Only the Selected Session', 'herdr'],
+				['Show All Sessions', 'herdr'],
+			],
+		);
+		const title = (contributed.menus['view/title'] as { command: string; when: string; group: string }[]).filter((m) => m.when.startsWith('view == herdr.agents'));
+		assert.deepStrictEqual(
+			title.map((m) => [m.group, m.command, cmd(m.command)?.icon, m.when]),
+			[
+				['navigation@1', 'herdr.agents.scopeSession', '$(globe)', 'view == herdr.agents && herdr.agentsScope != session'],
+				['navigation@1', 'herdr.agents.scopeAll', '$(target)', 'view == herdr.agents && herdr.agentsScope == session'],
+				['navigation@2', 'herdr.agents.filter', '$(filter)', 'view == herdr.agents'],
+				['navigation@3', 'herdr.agents.showAll', '$(list-flat)', 'view == herdr.agents && herdr.agentsFilter != all'],
+			],
+		);
+		const palette = (contributed.menus.commandPalette as { command: string }[]).map((m) => m.command);
+		for (const c of ['herdr.agents.filter', 'herdr.agents.showDone', 'herdr.agents.scopeSession', 'herdr.agents.scopeAll']) {
+			assert.ok(!palette.includes(c), `${c} is in the palette`);
+		}
+		const start = (contributed.menus['view/item/context'] as { command: string; when: string; group: string }[]).find((m) => m.command === 'herdr.startSession')!;
+		assert.strictEqual(start.group, 'inline@1');
+		const startWhen = /viewItem =~ \/(.*)\/$/.exec(start.when)![1];
+		const re = new RegExp(startWhen);
+		assert.ok(re.test('herdr.session.stopped host') && re.test('herdr.session.stopped container'));
+		assert.ok(!re.test('herdr.session.absent') && !re.test('herdr.session.running container') && !re.test('herdr.session.stopped'));
+		const stop = (contributed.menus['view/item/context'] as { command: string; when: string }[]).find((m) => m.command === 'herdr.stopSession')!;
+		assert.strictEqual(stop.when, "view == herdr.sessions && viewItem == 'herdr.session.running host'");
+		const welcome = (contributed.viewsWelcome as { view: string; contents: string; when: string }[]).filter((w) => w.view === 'herdr.agents');
+		assert.deepStrictEqual(welcome.map((w) => w.contents), ['Select a running session in Sessions.', 'No agents.', 'No agents match this filter.']);
+	});
+
 	test('mirrored tabs: commands, serializer activation, no Attach in Terminal', async () => {
 		const ext = extension();
 		await ext.activate();

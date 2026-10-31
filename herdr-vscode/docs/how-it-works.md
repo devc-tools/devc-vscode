@@ -80,7 +80,18 @@ means events were dropped; it is handled like any event.
   2 s, 5 s, 10 s, then every 30 s; each retry re-lists the environment first, so a session that
   stopped is dropped instead of retried.
 - **Start Session** runs `herdr --session <S> server` detached in the home directory, so it outlives the
-  window, then re-lists until it runs. **Stop Session** runs `herdr session stop <S>`. This machine only.
+  window, then re-lists until it runs (20 tries, 500 ms apart). **Stop Session** runs `herdr session stop <S>`,
+  on this machine only.
+- **Start Session** in a dev container (a stopped session row, or the `herdr not running` row, which starts
+  `devc`) runs, through `herdr.dockerPath` with a 15 s timeout, not through the container shell (whose `-i`
+  does not combine with `-d`):
+
+  ```
+  docker exec -d [-u <remote user>] <container id> /bin/bash -lc 'cd; PATH="$HOME/.local/bin:$PATH"; export SHELL; exec "$0" "$@"' herdr --session <S> server
+  ```
+
+  `cd` starts the server in the user's home; `export SHELL` because bash sets `SHELL` without exporting it
+  under `docker exec`, and herdr's panes start `$SHELL`. Then it re-lists as on this machine.
 - **Refresh**: rediscover environments, re-list every environment, re-snapshot every connected
   session and reconnect every disconnected or unsupported one.
 
@@ -103,7 +114,59 @@ when its session stops and when its environment goes away.
 - Status icons: blocked `circle-filled` orange, working blue, done green, idle and unknown
   `circle-outline`; panes without an agent `terminal`. Sessions and spaces show their worst
   status.
-- **Agents** filter is stored in workspace state and in the context key `herdr.agentsFilter`.
+- **Agents** filter (`all`, `blocked`, `working`, `done`) and scope (`all`, `session`: the selected
+  session) are stored in workspace state and in the context keys `herdr.agentsFilter` and
+  `herdr.agentsScope`. Counts in the view description and in **Filter Agents…** are over the agents in
+  scope, before the filter; the badge counts blocked agents everywhere. Rows re-render every 30 s
+  while the view is visible, for the elapsed times. The blocked status bar item sets scope `all` and
+  filter `blocked`.
+- **Sessions** row `contextValue`s get ` host` or ` container` appended (rows that cannot start stay
+  `herdr.session.absent`); **Start Session** shows on `herdr.session.stopped (host|container)`, **Stop Session**
+  on `herdr.session.running host` only.
+- The **session status bar item** (`herdr.session`, left, priority 101) shows `herdr: <row label>`, with
+  ` (<session>)` in a container and ` (<alias>)` on an SSH host, while a session is selected; its tooltip has
+  the session key, the herdr version and the counts. Clicking it runs `herdr.sessions.focus`.
+
+### Time in state and done
+
+herdr 0.9.5 sends no timestamps and reports no `done` (`src/agentState.ts`). Each agent pane has a record,
+keyed by pane key, updated whenever a snapshot is applied (`SessionModel`; `first` is the first snapshot
+since the connection was (re)established), from the pane's raw `agent_status` and, from `agents[]` (not
+`panes[]`), `state_change_seq` and `completion_seq`:
+
+- **New record:** `since` now, `observed` unless `first`; an idle pane's `completion_seq` is a baseline,
+  never shown as done.
+- **Changed** (status, or `state_change_seq` when both known): `since` now, `observed` unless `first`.
+  Turning idle, the completion token is `c:<completion_seq>`, else `l:<seq or now>` when it was working; a
+  new token makes it unseen.
+- **Unchanged** idle with a new `completion_seq`: a new token, unseen (herdr filled it in late).
+- Records of panes gone from a connected session's snapshot are deleted; those of sessions with no
+  connection are kept for 7 days.
+
+The displayed status is `done` for an idle pane with an unseen token, else herdr's; it replaces
+`agent_status` in the model's snapshots (herdr's is in `raw_status`), so every view, count, tile and
+status bar item shows it. `state_since` is set only when `observed`: a state that began while the window
+was closed or the session disconnected shows no time until its next change. A pane is seen when a tile of
+it reports focus (every report, not only a change of the last focused tile), when herdr's
+`focused_pane_id` moves to it (not on `first` snapshots), and when **Add to Layout**, **Open in herdr
+Tab** or **Focus in herdr TUI** runs for it.
+
+Records persist in workspace state `herdr.agentStates`
+(`{"v":1,"panes":{"<pane key>":{"status","seq","since","observed","token","seen"}}}`), written at most
+once a second after a change and on dispose, and read before the model starts. A malformed value or
+another `v` is ignored.
+
+### Spaces descriptions
+
+- **Space rows:** `⎇ <branch or short SHA>` + ` ● <changes>` or ` · clean` + ` ↑<ahead>` + ` ↓<behind>`,
+  from `git --no-optional-locks -C <dir> status --porcelain=v1 -z --branch` (`src/spaceGit.ts`) in the
+  space's `worktree.checkout_path`, else its focused pane's `foreground_cwd ?? cwd`, else its first
+  pane's. Until a result (or outside a repo) the repo name shows, as before. Git runs only for the
+  selected session and only while Spaces is visible: every 10 s, and once (300 ms debounce) when it
+  becomes visible, the session changes, or a space is added or changes directory; at most 4 at a time,
+  skipping a space whose run is still going. A result taken in another directory is dropped. The
+  tooltip has the label, repo name, directory and counts.
+- **Tab rows:** the agent kinds in snapshot order (`claude ×2, codex`) and `+ <n> shell(s)`.
 - **Spaces** tab rows run `herdr.openTab`. Pane and agent rows run `herdr.addToLayout` on click, or
   `herdr.openPaneTab` when `herdr.openPaneIn` is `herdr`; the command is chosen when the item is
   built, and the views refresh when the setting changes. Their context menu has **Add to Layout**,

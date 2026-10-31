@@ -30,25 +30,25 @@ Out of scope, decided:
 
 ## Checklist
 
-- [ ] 1. Snapshot parsing: `worktree.checkout_path` on workspaces; `state_change_seq` and
+- [x] 1. Snapshot parsing: `worktree.checkout_path` on workspaces; `state_change_seq` and
       `completion_seq` from `agents[]`; the raw herdr status kept beside the displayed one
-- [ ] 2. Agent state tracker: time in state, derived **done**, seen marks, persistence in workspace state
-- [ ] 3. The displayed status (with derived done) applied where snapshots enter the model, so every view,
+- [x] 2. Agent state tracker: time in state, derived **done**, seen marks, persistence in workspace state
+- [x] 3. The displayed status (with derived done) applied where snapshots enter the model, so every view,
       rollup, count, tile and status bar item uses it
-- [ ] 4. Seen marks from tile focus, herdr focus moving to the pane, and pane clicks
-- [ ] 5. Agents view: Done filter, **Filter Agents…** quick pick with counts, view description with counts,
+- [x] 4. Seen marks from tile focus, herdr focus moving to the pane, and pane clicks
+- [x] 5. Agents view: Done filter, **Filter Agents…** quick pick with counts, view description with counts,
       title bar reorganized
-- [ ] 6. Agents view: scope switch (`all sessions` / `this session`), context key and workspace state
-- [ ] 7. Agents rows: new description format with status and elapsed time; 30 s re-render while visible
-- [ ] 8. Spaces: git description on space rows (poller, visible-only)
-- [ ] 9. Spaces: tab row summary description
-- [ ] 10. Sessions: **Start Session** on dev container rows
-- [ ] 11. Status bar: session item `herdr: <label>` with the herdr version in its tooltip
-- [ ] 12. `herdr.revealBlockedAgents` also sets the scope to all sessions
-- [ ] 13. Live measurement in throwaway `hv-test`: `state_change_seq` / `completion_seq` behaviour of
+- [x] 6. Agents view: scope switch (`all sessions` / `this session`), context key and workspace state
+- [x] 7. Agents rows: new description format with status and elapsed time; 30 s re-render while visible
+- [x] 8. Spaces: git description on space rows (poller, visible-only)
+- [x] 9. Spaces: tab row summary description
+- [x] 10. Sessions: **Start Session** on dev container rows
+- [x] 11. Status bar: session item `herdr: <label>` with the herdr version in its tooltip
+- [x] 12. `herdr.revealBlockedAgents` also sets the scope to all sessions
+- [x] 13. Live measurement in throwaway `hv-test`: `state_change_seq` / `completion_seq` behaviour of
       `pane.report_agent`; record the result under Implementation notes
-- [ ] 14. Tests (list under Validation)
-- [ ] 15. `README.md`, `CHANGELOG.md`, `docs/how-it-works.md`
+- [x] 14. Tests (list under Validation)
+- [x] 15. `README.md`, `CHANGELOG.md`, `docs/how-it-works.md`
 
 ## Contracts
 
@@ -300,7 +300,7 @@ All with `"category": "herdr"`. `herdr.agents.showBlocked` / `showWorking` lose 
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, including new
+- [x] `cd herdr-vscode && npm run build && npm run lint && xvfb-run -a npm test` passes, including new
       unit tests for:
       - snapshot parsing: `checkout_path`; `state_change_seq` / `completion_seq` from `agents[]` (integer,
         `null`, absent)
@@ -327,14 +327,14 @@ All with `"category": "herdr"`. `herdr.agents.showBlocked` / `showWorking` lose 
       - status bar session text and tooltip for host, container, SSH
       - `extension.test.ts`: the new commands are registered; `herdr.agents.showDone`,
         `herdr.agents.scopeSession`, `herdr.agents.scopeAll` run without error
-- [ ] Live, against a throwaway `hv-test` only (`HERDR_VSCODE_LIVE_HOME=<dir>` per README § Development;
+- [x] Live, against a throwaway `hv-test` only (`HERDR_VSCODE_LIVE_HOME=<dir>` per README § Development;
       stop and delete `hv-test` afterwards with `herdr session stop hv-test` and
       `herdr session delete hv-test` in that `HOME`; never touch another session): extend
       `src/test/liveModel.test.ts` to report `working` then `idle` with `pane.report_agent` and assert the
       model's displayed status becomes `done` within 2 s, then `idle` after a seen mark; log the raw
       `agents[]` entry (`state_change_seq`, `completion_seq`) before and after, and copy the values into
       Implementation notes
-- [ ] `git diff --stat -- devc-vscode` is empty
+- [x] `git diff --stat -- devc-vscode` is empty
 - [ ] Manual: in an Extension Development Host with an agent working in a session, the Agents row shows
       `… · working <1m`, then `1m` after a minute without any herdr event; reloading the window keeps the
       minutes counting from the same start
@@ -384,3 +384,74 @@ All with `"category": "herdr"`. `herdr.agents.showBlocked` / `showWorking` lose 
 - `herdr-vscode/docs/how-it-works.md` (§ Views: tracker rules, seen marks, persistence key, git cadence,
   container start argv; § Sessions)
 - `.plans/PLAN.md` (phase 19 row and status, when implementing)
+
+## Implementation notes
+
+### Status (2026-10-31)
+
+Implemented; the Manual items above need a person in VS Code (and a dev container for Start), so they stay
+unticked and the plan stays out of `implemented/`.
+
+### Measured (herdr 0.9.5, throwaway `hv-test` in an isolated `HOME` under `/tmp/hvt`)
+
+From `src/test/liveModel.test.ts` ("working → idle shows done…"), the raw `agents[]` entry of the pane:
+
+- while working: `"state_change_seq":3`, **no `completion_seq` key at all** (absent, not `null`);
+- after `pane.report_agent` idle: `"state_change_seq":4,"completion_seq":4`; the model showed `done` 279 ms
+  (second run 1888 ms for the whole test) after the report, with `state_since` set (observed); tracker record
+  `{"status":"idle","seq":4,"token":"c:4","seen":false,"observed":true}`; `markSeen` → `idle`;
+- working again: `"state_change_seq":5`, `completion_seq` absent again;
+- **blocked → idle also gets a `completion_seq`** (`"state_change_seq":7,"completion_seq":7`), so with herdr
+  0.9.5 it shows `done` too. The contract's "blocked → idle without `completion_seq` → not done" rule is
+  implemented and unit tested, but herdr always fills `completion_seq` on a reported idle, so in practice any
+  report of idle after another state is a completion. Not changed: the contract says only an integer
+  `completion_seq` counts, and herdr says it means "completed work". `completion_seq` appears to equal the
+  `state_change_seq` of the idle transition.
+
+### Verified
+
+- `npm run build && npm run lint && xvfb-run -a npm test`: 238 passing, 48 pending (opt-in live suites); before
+  this phase 208 / 47. `git diff --stat -- devc-vscode` empty; no dependencies added.
+- Live (`HERDR_VSCODE_LIVE_HOME=/tmp/hvt`), three full runs: 280–281 passing, 4 pending. Every run fails the
+  pre-existing `live model … lists only the isolated session` (the isolated home lists `default` and
+  `hv-ctl`). Intermittent, one per run, not reproduced in the third run: `liveTiles` "tile headers follow the
+  model" (run 1) and `livePaneContext` "a directory is revealed in Files" (run 2); both were already flaky in
+  phase 18 and passed in the other runs. `hv-test` and `hv-ctl` were stopped and deleted, `/tmp/hvt` removed.
+- Not run: anything in a real VS Code window (the quick pick, the 30 s re-render in real time, welcome texts,
+  the inline Start button), the container start (no Docker), SSH.
+
+### Deviations and decisions
+
+- `SnapshotPane` gained `raw_status`, `state_since` (only when observed), `state_change_seq`,
+  `completion_seq` (from `agents[]`); `SnapshotWorkspace` gained `checkoutPath`. The model's snapshots are
+  replaced by `withDisplayedStatus(...)` copies (a new object on each seen mark too).
+- Pruning of stale (7-day) records runs on each applied snapshot, with the set of connected sessions.
+- The tracker also takes a record's `seq` when it first becomes known without a change.
+- `FocusTracker.onDidReportFocus` fires on every `set()`, which includes the `pane.moved` follow-up of the
+  last focused tile (harmless: the pane was the focused one).
+- `herdr.agents.showDone` has icon `$(pass)` (unused: it is not in the title bar).
+- `AgentsView`'s constructor takes the selected session (`SessionsView`) before the drag controller;
+  `SpacesView`'s takes an optional `SpaceGit` before it. The drag controller is still last in both.
+- `SpaceGit` re-checks "still running" when a space is dequeued, so two overlapping passes never run the
+  same space at once.
+- Container Start: `startContainerSession` in `src/sessionControl.ts`; the wait loop is shared as
+  `waitForSession(model, envKey, session)`. The container's `herdr not running` row keeps key `<env key>/`
+  and gets `session: 'devc'`.
+
+### For later phases
+
+- **Phase 23 (sidebar config)**, the row formatters:
+  - Agents rows: `agentRows(sources, scope, now)` in `src/views/agentsView.ts` builds the description
+    (`<breadcrumb>[ · <state>][ · <title>]`); the state part is `stateText(pane, now)` there. View
+    description `agentsViewDescription`, quick pick `filterPickItems`.
+  - Time in state: `formatElapsed(ms)` in `src/agentState.ts`; the start is `SnapshotPane.state_since`.
+    Tracker: `AgentStates` (same file); displayed status applied by `withDisplayedStatus` in `src/sessions.ts`.
+  - Branch + git status: `gitDescription(info)` in `src/spaceGit.ts` (poller `SpaceGit`, directory
+    `spaceDirectory`); space rows built in `buildSpaces(snapshot, sessionKey, git?)` in
+    `src/views/spacesView.ts`, which also sets the space tooltip.
+  - Tab summary: `tabSummary(panes)` in `src/views/spacesView.ts`. Agent row tooltip: `agentTooltip(pane, now)`
+    there.
+- **Phases 20/21**: nothing shared beyond `src/git.ts` (unchanged). Pane Context's other-pane rows show the
+  displayed status (done included) through the model.
+- **Phase 22**: tiles get the displayed status from the model; nothing else changed in `tilesPanel.ts`.
+

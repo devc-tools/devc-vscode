@@ -100,3 +100,57 @@ export class BlockedStatusBar implements vscode.Disposable {
 		this.item.dispose();
 	}
 }
+
+/** The selected session, as the session status bar item shows it. */
+export interface SessionStatusInput {
+	sessionKey: string;
+	/** The session's row label in Sessions. */
+	rowLabel: string;
+	envKind: 'host' | 'ssh' | 'container';
+	alias?: string;
+	session: string;
+	/** The connected session's snapshot (displayed statuses), if connected. */
+	snapshot?: { version?: string; panes: { agent?: string; agent_status: AgentStatus }[] };
+}
+
+/**
+ * `herdr: <row label>` plus ` (<session>)` in a container and ` (<alias>)` on
+ * an SSH host; the tooltip has the key, and when connected the herdr version
+ * and the counts.
+ */
+export function sessionStatusText(input: SessionStatusInput): { text: string; tooltip: string } {
+	const suffix = input.envKind === 'container' ? ` (${input.session})` : input.envKind === 'ssh' ? ` (${input.alias})` : '';
+	const lines = [input.sessionKey];
+	if (input.snapshot) {
+		if (input.snapshot.version) {
+			lines.push(`herdr ${input.snapshot.version}`);
+		}
+		lines.push(countsDescription(countStatuses(input.snapshot.panes.filter((p) => p.agent !== undefined).map((p) => p.agent_status))));
+	}
+	return { text: `herdr: ${input.rowLabel}${suffix}`, tooltip: lines.join('\n') };
+}
+
+/** `herdr: <session>` left of the focused pane item while a session is selected; a click focuses Sessions. */
+export class SessionStatusBar implements vscode.Disposable {
+	private readonly item = vscode.window.createStatusBarItem('herdr.session', vscode.StatusBarAlignment.Left, 101);
+
+	constructor() {
+		this.item.name = 'herdr session';
+		this.item.command = 'herdr.sessions.focus';
+	}
+
+	update(input: SessionStatusInput | undefined): void {
+		if (!input) {
+			this.item.hide();
+			return;
+		}
+		const { text, tooltip } = sessionStatusText(input);
+		this.item.text = text;
+		this.item.tooltip = tooltip;
+		this.item.show();
+	}
+
+	dispose(): void {
+		this.item.dispose();
+	}
+}

@@ -72,13 +72,18 @@
       },
       {
         "view": "herdr.agents",
+        "contents": "Select a running session in Sessions.",
+        "when": "herdr.agentsScope == session && !herdr.sessionSelected"
+      },
+      {
+        "view": "herdr.agents",
         "contents": "No agents.",
-        "when": "herdr.agentsFilter == all || !herdr.agentsFilter"
+        "when": "(herdr.agentsScope != session || herdr.sessionSelected) && (herdr.agentsFilter == all || !herdr.agentsFilter)"
       },
       {
         "view": "herdr.agents",
         "contents": "No agents match this filter.",
-        "when": "herdr.agentsFilter && herdr.agentsFilter != all"
+        "when": "(herdr.agentsScope != session || herdr.sessionSelected) && herdr.agentsFilter && herdr.agentsFilter != all"
       }
     ],
     "commands": [
@@ -146,6 +151,30 @@
         "title": "Show Working",
         "category": "herdr",
         "icon": "$(sync)"
+      },
+      {
+        "command": "herdr.agents.showDone",
+        "title": "Show Done",
+        "category": "herdr",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "herdr.agents.filter",
+        "title": "Filter Agents…",
+        "category": "herdr",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "herdr.agents.scopeSession",
+        "title": "Show Only the Selected Session",
+        "category": "herdr",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "herdr.agents.scopeAll",
+        "title": "Show All Sessions",
+        "category": "herdr",
+        "icon": "$(target)"
       },
       {
         "command": "herdr.paneContext.pin",
@@ -271,18 +300,23 @@
           "group": "navigation@2"
         },
         {
-          "command": "herdr.agents.showAll",
-          "when": "view == herdr.agents && herdr.agentsFilter != all",
+          "command": "herdr.agents.scopeSession",
+          "when": "view == herdr.agents && herdr.agentsScope != session",
           "group": "navigation@1"
         },
         {
-          "command": "herdr.agents.showBlocked",
+          "command": "herdr.agents.scopeAll",
+          "when": "view == herdr.agents && herdr.agentsScope == session",
+          "group": "navigation@1"
+        },
+        {
+          "command": "herdr.agents.filter",
           "when": "view == herdr.agents",
           "group": "navigation@2"
         },
         {
-          "command": "herdr.agents.showWorking",
-          "when": "view == herdr.agents",
+          "command": "herdr.agents.showAll",
+          "when": "view == herdr.agents && herdr.agentsFilter != all",
           "group": "navigation@3"
         },
         {
@@ -304,7 +338,7 @@
       "view/item/context": [
         {
           "command": "herdr.startSession",
-          "when": "view == herdr.sessions && viewItem == 'herdr.session.stopped host'",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.stopped (host|container)$/",
           "group": "inline@1"
         },
         {

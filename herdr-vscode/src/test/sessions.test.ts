@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { containerDisplayName, containerKey, HOST_KEY, sshKey } from '../environments';
 import { interpretSessionList, paneLabel, parseSessionList, sessionKey, SnapshotPane } from '../sessions';
-import { snapshot } from './fixtures';
+import { RAW_SNAPSHOT, snapshot } from './fixtures';
 
 const result = (exitCode: number, stdout = '', stderr = '') => ({
 	exitCode,
@@ -79,6 +79,38 @@ suite('snapshot', () => {
 		assert.strictEqual(s.agentNames.has('w1:p1'), false);
 	});
 
+	test('checkout_path, and the seq fields from agents[] (integer, null, absent)', () => {
+		const raw = {
+			...RAW_SNAPSHOT,
+			workspaces: [
+				{ workspace_id: 'w1', number: 1, label: 'web', worktree: { repo_key: 'k', repo_name: 'web', repo_root: '/src/web', checkout_path: '/src/web-wt', is_linked_worktree: true } },
+				{ workspace_id: 'w2', number: 2, label: 'api', worktree: null },
+			],
+			panes: RAW_SNAPSHOT.panes.map((p) => (p.pane_id === 'w2:p1' ? { ...p, state_change_seq: 99 } : p)),
+			agents: [
+				{ pane_id: 'w2:p1', name: 'api-fixer', state_change_seq: 12, completion_seq: 3 },
+				{ pane_id: 'w1:p1', state_change_seq: 4, completion_seq: null },
+				{ pane_id: 'w1:p2' },
+			],
+		};
+		const s = snapshot(raw);
+		assert.deepStrictEqual(
+			s.workspaces.map((w) => [w.workspace_id, w.checkoutPath]),
+			[
+				['w1', '/src/web-wt'],
+				['w2', undefined],
+			],
+		);
+		const byId = (id: string) => s.panes.find((p) => p.pane_id === id)!;
+		assert.deepStrictEqual([byId('w2:p1').state_change_seq, byId('w2:p1').completion_seq], [12, 3], 'from agents[], not panes[]');
+		assert.deepStrictEqual([byId('w1:p1').state_change_seq, byId('w1:p1').completion_seq], [4, undefined]);
+		assert.deepStrictEqual([byId('w1:p2').state_change_seq, byId('w1:p2').completion_seq], [undefined, undefined]);
+		assert.ok(!('completion_seq' in byId('w1:p1')), 'null is absent');
+		assert.strictEqual(byId('w2:p2').state_change_seq, undefined);
+		assert.strictEqual(byId('w1:p2').raw_status, 'done');
+		assert.strictEqual(byId('w1:p2').agent_status, 'done');
+	});
+
 	test('pane label fallback order', () => {
 		const names = { agentNames: new Map([['p', 'named']]) };
 		const none = { agentNames: new Map<string, string>() };
@@ -87,6 +119,7 @@ suite('snapshot', () => {
 			tab_id: 't',
 			workspace_id: 'w',
 			agent_status: 'unknown',
+			raw_status: 'unknown',
 			focused: false,
 			...extra,
 		});

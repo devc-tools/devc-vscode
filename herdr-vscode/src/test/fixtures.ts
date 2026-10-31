@@ -8,7 +8,13 @@ export const RAW_SNAPSHOT = {
 	focused_tab_id: 'w2:t1',
 	focused_pane_id: 'w2:p1',
 	workspaces: [
-		{ workspace_id: 'w2', number: 2, label: 'api', focused: true, worktree: { repo_name: 'api' } },
+		{
+			workspace_id: 'w2',
+			number: 2,
+			label: 'api',
+			focused: true,
+			worktree: { repo_key: 'api', repo_name: 'api', repo_root: '/src/api', checkout_path: '/src/api', is_linked_worktree: false },
+		},
 		{ workspace_id: 'w1', number: 1, label: 'web', focused: false, worktree: { repo_name: 'frontend' } },
 	],
 	tabs: [
@@ -59,8 +65,8 @@ export const RAW_SNAPSHOT = {
 		},
 	],
 	agents: [
-		{ pane_id: 'w2:p1', name: 'api-fixer', agent: 'claude', agent_status: 'working' },
-		{ pane_id: 'w1:p1', name: null, agent: 'codex', agent_status: 'blocked' },
+		{ pane_id: 'w2:p1', name: 'api-fixer', agent: 'claude', agent_status: 'working', state_change_seq: 7, completion_seq: 2 },
+		{ pane_id: 'w1:p1', name: null, agent: 'codex', agent_status: 'blocked', state_change_seq: 3, completion_seq: null },
 	],
 };
 

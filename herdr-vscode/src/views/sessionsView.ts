@@ -119,7 +119,21 @@ export function sessionRows(
 			groupId,
 		});
 	}
-	return rows.length > 0 ? rows : [absent('herdr not running')];
+	if (rows.length > 0) {
+		return rows;
+	}
+	// A container's herdr can be started from here: the row starts devc's session.
+	return env.kind === 'container'
+		? [{ ...absent('herdr not running'), session: DEVC_SESSION, contextValue: 'herdr.session.stopped' }]
+		: [absent('herdr not running')];
+}
+
+/** A row's `contextValue`: ` host` / ` container` appended, except on rows that cannot start. */
+export function sessionItemContext(node: Pick<SessionRowNode, 'envKey' | 'contextValue'>, kind: Environment['kind'] | undefined): string {
+	if (node.envKey === HOST_KEY) {
+		return `${node.contextValue} host`;
+	}
+	return kind === 'container' && node.contextValue !== 'herdr.session.absent' ? `${node.contextValue} container` : node.contextValue;
 }
 
 /**
@@ -274,7 +288,7 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 		const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
 		item.id = `row:${node.key}`;
 		item.description = node.description;
-		item.contextValue = node.envKey === HOST_KEY ? `${node.contextValue} host` : node.contextValue;
+		item.contextValue = sessionItemContext(node, this.model.environments.get(node.envKey)?.kind);
 		item.tooltip = node.tooltip;
 		item.iconPath = statusIcon(
 			node.snapshot ? worstStatus(node.snapshot.panes.filter(hasAgent).map((p) => p.agent_status)) : undefined,

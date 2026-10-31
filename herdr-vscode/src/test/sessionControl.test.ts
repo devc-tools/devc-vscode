@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import { createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
+import { containerStartArgs, createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
 import { Snapshot, SessionModel } from '../sessions';
 import { spacesTreeItem, SpaceNode } from '../views/spacesView';
 import { sessionRows } from '../views/sessionsView';
@@ -50,6 +50,38 @@ suite('session control', () => {
 		} as unknown as SessionModel;
 		assert.strictEqual(await startHostSession(model, 's', async () => undefined), true);
 		assert.strictEqual(lists, 2);
+	});
+
+	test('container start argv, with and without a user', () => {
+		const script = 'cd; PATH="$HOME/.local/bin:$PATH"; export SHELL; exec "$0" "$@"';
+		assert.deepStrictEqual(containerStartArgs('3f2a9c1b04de', 'vscode', 'devc'), [
+			'exec', '-d', '-u', 'vscode', '3f2a9c1b04de', '/bin/bash', '-lc', script, 'herdr', '--session', 'devc', 'server',
+		]);
+		assert.deepStrictEqual(containerStartArgs('3f2a9c1b04de', undefined, 'devc'), [
+			'exec', '-d', '3f2a9c1b04de', '/bin/bash', '-lc', script, 'herdr', '--session', 'devc', 'server',
+		]);
+	});
+
+	test('container start: docker exec -d, then the listing until it runs; a failing exec says why', async () => {
+		let lists = 0;
+		const model = {
+			relist: async () => {
+				lists++;
+			},
+			states: () => [{ env: { key: 'container:abc' }, sessions: [{ name: 'devc', running: lists >= 3 }] }],
+		} as unknown as SessionModel;
+		const calls: unknown[][] = [];
+		const ok = (async (...args: unknown[]) => {
+			calls.push(args);
+			return { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+		}) as never;
+		const env = { key: 'container:abc', containerId: 'abcdef', user: 'node' };
+		assert.strictEqual(await startContainerSession(model, env, 'devc', '/usr/bin/docker', ok), true);
+		assert.strictEqual(lists, 3);
+		assert.deepStrictEqual(calls[0].slice(1), [undefined, '/usr/bin/docker', 15000]);
+		assert.deepStrictEqual((calls[0][0] as string[]).slice(0, 5), ['exec', '-d', '-u', 'node', 'abcdef']);
+		const fail = (async () => ({ exitCode: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('No such container: abcdef\n') })) as never;
+		await assert.rejects(startContainerSession(model, env, 'devc', 'docker', fail), /No such container: abcdef/);
 	});
 
 	test("this machine's stopped sessions are always rows; other environments follow the setting", () => {

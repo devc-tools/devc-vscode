@@ -33,6 +33,12 @@ export class FocusTracker implements vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<string | undefined>();
 	/** The last focused pane's key, whenever it changes. */
 	readonly onDidChangeLastFocused = this.emitter.event;
+	private readonly reportEmitter = new vscode.EventEmitter<{ sessionKey: string; paneId: string }>();
+	/**
+	 * Every focus report of a tile, including one of the tile already last
+	 * focused ({@link onDidChangeLastFocused} fires only when the key changes).
+	 */
+	readonly onDidReportFocus = this.reportEmitter.event;
 	private readonly listeners: vscode.Disposable[];
 	private last: string | undefined;
 
@@ -71,6 +77,7 @@ export class FocusTracker implements vscode.Disposable {
 			this.last = paneKey;
 			this.emitter.fire(paneKey);
 		}
+		this.reportEmitter.fire({ sessionKey, paneId });
 		this.update();
 	}
 
@@ -92,6 +99,7 @@ export class FocusTracker implements vscode.Disposable {
 			listener.dispose();
 		}
 		this.emitter.dispose();
+		this.reportEmitter.dispose();
 		this.item.dispose();
 	}
 }

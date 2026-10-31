@@ -1,7 +1,8 @@
 import * as cp from 'child_process';
 import * as os from 'os';
 import { herdrArgv } from './bridge';
-import { HOST_KEY } from './environments';
+import { execDocker } from './docker';
+import { Environment, HOST_KEY } from './environments';
 import { localEnv } from './remoteShell';
 import { Snapshot, SessionModel } from './sessions';
 
@@ -37,17 +38,64 @@ export function startDetached(argv: string[], spawnFn: typeof cp.spawn = cp.spaw
 	});
 }
 
-/** Starts a session on this machine and waits for the listing to show it running. */
-export async function startHostSession(model: SessionModel, session: string, start: typeof startDetached = startDetached): Promise<boolean> {
-	await start(sessionServerArgv(session));
+/** Re-lists an environment until the session runs (20 tries, 500 ms apart). */
+export async function waitForSession(model: Pick<SessionModel, 'relist' | 'states'>, envKey: string, session: string): Promise<boolean> {
 	for (let i = 0; i < START_TRIES; i++) {
-		await model.relist(HOST_KEY);
-		if (model.states().find((s) => s.env.key === HOST_KEY)?.sessions.find((s) => s.name === session)?.running) {
+		await model.relist(envKey);
+		if (model.states().find((s) => s.env.key === envKey)?.sessions.find((s) => s.name === session)?.running) {
 			return true;
 		}
 		await new Promise((r) => setTimeout(r, START_WAIT_MS));
 	}
 	return false;
+}
+
+/** Starts a session on this machine and waits for the listing to show it running. */
+export async function startHostSession(model: SessionModel, session: string, start: typeof startDetached = startDetached): Promise<boolean> {
+	await start(sessionServerArgv(session));
+	return waitForSession(model, HOST_KEY, session);
+}
+
+/**
+ * `docker exec -d` arguments starting a container's herdr server in the user's
+ * home. Not through `DockerShell`, whose `run` adds `-i` (`-d` and `-i` do not
+ * combine). `export SHELL`: bash sets it without exporting under `docker exec`,
+ * and herdr's panes start `$SHELL`.
+ */
+export function containerStartArgs(containerId: string, user: string | undefined, session: string): string[] {
+	return [
+		'exec',
+		'-d',
+		...(user ? ['-u', user] : []),
+		containerId,
+		'/bin/bash',
+		'-lc',
+		'cd; PATH="$HOME/.local/bin:$PATH"; export SHELL; exec "$0" "$@"',
+		'herdr',
+		'--session',
+		session,
+		'server',
+	];
+}
+
+export const CONTAINER_START_TIMEOUT_MS = 15000;
+
+/** Starts a session in a dev container and waits for the listing to show it running. */
+export async function startContainerSession(
+	model: Pick<SessionModel, 'relist' | 'states'>,
+	env: Pick<Environment, 'key' | 'containerId' | 'user'>,
+	session: string,
+	dockerPath: string,
+	exec: typeof execDocker = execDocker,
+): Promise<boolean> {
+	if (!env.containerId) {
+		throw new Error('not a dev container.');
+	}
+	const res = await exec(containerStartArgs(env.containerId, env.user, session), undefined, dockerPath, CONTAINER_START_TIMEOUT_MS);
+	if (res.exitCode !== 0) {
+		throw new Error(res.stderr.toString('utf8').trim() || `docker exec exited with ${res.exitCode}`);
+	}
+	return waitForSession(model, env.key, session);
 }
 
 /** The pane a tab's split starts from: the tab's focused pane, else its first. */

@@ -92,6 +92,40 @@ async function waitFor(what: string, ms: number, ok: () => boolean): Promise<num
 		console.log(`[live-model] blocked cleared after ${await waitFor('cleared', 2000, () => blocked() === 0)} ms`);
 	});
 
+	test('working → idle shows done within 2 s; a seen mark makes it idle', async () => {
+		await waitFor('connected', 10000, () => model.connection(key)?.state === 'connected');
+		const snap = model.connection(key)!.snapshot!;
+		const paneId = snap.panes[snap.panes.length - 1].pane_id;
+		const shown = () => model.connection(key)?.snapshot?.panes.find((p) => p.pane_id === paneId);
+		const rawAgent = async () => {
+			const res = (await bridgeRequest(shell, SESSION, 'session.snapshot', {})) as { snapshot?: { agents?: { pane_id?: string }[] } };
+			return JSON.stringify(res.snapshot?.agents?.find((a) => a.pane_id === paneId));
+		};
+		const report = (state: string) =>
+			bridgeRequest(shell, SESSION, 'pane.report_agent', { pane_id: paneId, source: 'herdr-vscode-test', agent: 'claude', state });
+		await report('working');
+		await waitFor('working', 2000, () => shown()?.agent_status === 'working');
+		console.log(`[live-model] agents[] while working: ${await rawAgent()}`);
+		await report('idle');
+		const after = await waitFor('done', 2000, () => shown()?.agent_status === 'done');
+		console.log(`[live-model] done shown after ${after} ms; agents[] after idle: ${await rawAgent()}`);
+		const p = shown()!;
+		assert.strictEqual(p.raw_status, 'idle');
+		assert.ok(p.state_since !== undefined, 'the change was observed: time in state is shown');
+		console.log(`[live-model] tracker record: ${JSON.stringify(model.agentStates.record(`${key}|${paneId}`))}`);
+		model.markSeen(key, paneId);
+		await waitFor('idle after seen', 2000, () => shown()?.agent_status === 'idle');
+		await report('working');
+		await waitFor('working again', 2000, () => shown()?.agent_status === 'working');
+		console.log(`[live-model] agents[] working again: ${await rawAgent()}`);
+		await report('blocked');
+		await waitFor('blocked', 2000, () => shown()?.agent_status === 'blocked');
+		await report('idle');
+		await waitFor('idle', 2000, () => shown()?.raw_status === 'idle');
+		await sleep(400);
+		console.log(`[live-model] blocked → idle shows ${shown()?.agent_status}; agents[]: ${await rawAgent()}`);
+	});
+
 	test('a stopped session is dropped after its subscription ends (HERDR_VSCODE_LIVE_STOP=1)', async function () {
 		if (process.env.HERDR_VSCODE_LIVE_STOP !== '1') {
 			this.skip();

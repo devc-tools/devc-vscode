@@ -7,9 +7,11 @@ import { EnvState, SessionConnection } from '../sessions';
 import { countsDescription, statusIconSpec, statusRank, worstStatus } from '../status';
 import { eventTouchesTab, panelTitle, tileMetas } from '../tilesPanel';
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
-import { agentRows, blockedCount, sortAndFilterAgents } from '../views/agentsView';
-import { effectiveSelection, groupOf, sessionRows } from '../views/sessionsView';
-import { buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem } from '../views/spacesView';
+import { sessionStatusText } from '../status';
+import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
+import { effectiveSelection, groupOf, sessionItemContext, sessionRows } from '../views/sessionsView';
+import { agentTooltip, buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
+import { Snapshot, SnapshotPane } from '../sessions';
 import { snapshot } from './fixtures';
 
 const shell = new LocalShell();
@@ -145,9 +147,9 @@ suite('Agents', () => {
 		const fixer = rows.find((r) => r.ref.paneId === 'w2:p1' && r.rowLabel === 'a');
 		assert.ok(fixer);
 		assert.strictEqual(fixer.label, 'api-fixer');
-		assert.strictEqual(fixer.description, 'a › api · Refactoring');
+		assert.strictEqual(fixer.description, 'a › api · working · Refactoring');
 		const codex = rows.find((r) => r.ref.paneId === 'w1:p1' && r.rowLabel === 'a');
-		assert.strictEqual(codex?.description, 'a › web');
+		assert.strictEqual(codex?.description, 'a › web · blocked');
 	});
 
 	test('sorted by status, then session row label, then workspace number', () => {
@@ -168,6 +170,118 @@ suite('Agents', () => {
 		);
 		assert.strictEqual(sortAndFilterAgents(rows, 'all').length, 6);
 		assert.strictEqual(blockedCount(rows), 2);
+		assert.deepStrictEqual(
+			sortAndFilterAgents(rows, 'done').map((r) => [r.pane.agent_status, r.rowLabel]),
+			[
+				['done', 'a'],
+				['done', 'b'],
+			],
+		);
+		assert.deepStrictEqual(['all', 'blocked', 'working', 'done', 'idle', undefined].map(toFilter), ['all', 'blocked', 'working', 'done', 'all', 'all']);
+		assert.deepStrictEqual(['all', 'session', 'x', undefined].map(toScope), ['all', 'session', 'all', 'all']);
+	});
+
+	/** One agent pane with a displayed status, state start and title. */
+	const one = (status: SnapshotPane['agent_status'], since?: number, title?: string, ws = { label: 'v3_auth', id: 'w1' }, tab = 'agents'): Snapshot =>
+		({
+			workspaces: [{ workspace_id: ws.id, label: ws.label, number: 1, focused: true }],
+			tabs: [{ tab_id: 't1', workspace_id: ws.id, label: tab, number: 1, focused: true }],
+			panes: [
+				{
+					pane_id: 'p1',
+					tab_id: 't1',
+					workspace_id: ws.id,
+					agent: 'claude',
+					agent_status: status,
+					raw_status: status === 'done' ? 'idle' : status,
+					state_since: since,
+					terminal_title_stripped: title,
+					focused: false,
+				},
+			],
+			agentNames: new Map(),
+		}) as Snapshot;
+	const NOW = 10_000_000;
+
+	test('row descriptions in both scopes: state, elapsed only when observed, unknown omitted', () => {
+		const desc = (snap: Snapshot, scope: 'all' | 'session', rowLabel = 'deephaven-mcp') =>
+			agentRows([{ sessionKey: 'host/s', rowLabel, snapshot: snap }], scope, NOW)[0].description;
+		assert.strictEqual(desc(one('blocked', NOW - 125_000), 'all'), 'deephaven-mcp › v3_auth · blocked 2m');
+		assert.strictEqual(desc(one('working', NOW - 180_000, 'Refactoring auth middleware'), 'session'), 'v3_auth › agents · working 3m · Refactoring auth middleware');
+		assert.strictEqual(desc(one('idle', undefined, undefined, { label: 'api', id: 'w1' }), 'all', 'code-wksp'), 'code-wksp › api · idle');
+		assert.strictEqual(desc(one('done', NOW - 10_000, undefined, { label: 'web', id: 'w1' }), 'all', 'my-app'), 'my-app › web · done <1m');
+		assert.strictEqual(desc(one('unknown', NOW - 10_000, 'zsh'), 'all', 'x'), 'x › v3_auth · zsh');
+		const pane = one('blocked', NOW - 125_000).panes[0];
+		assert.strictEqual(agentTooltip(pane, NOW), 'claude · blocked for 2m\np1');
+		assert.strictEqual(agentTooltip({ ...pane, state_since: undefined }, NOW), 'claude · blocked\np1');
+	});
+
+	test('scope: all sessions, the selected session, or none without one', () => {
+		const srcs: AgentSource[] = [
+			{ sessionKey: 'host/a', rowLabel: 'a', snapshot: snapshot() },
+			{ sessionKey: 'host/b', rowLabel: 'b', snapshot: snapshot() },
+		];
+		assert.strictEqual(scopeSources(srcs, 'all', undefined).length, 2);
+		assert.deepStrictEqual(scopeSources(srcs, 'session', 'host/b').map((s) => s.sessionKey), ['host/b']);
+		assert.deepStrictEqual(scopeSources(srcs, 'session', undefined), []);
+		const scoped = agentRows(scopeSources(srcs, 'session', 'host/b'), 'session');
+		assert.deepStrictEqual(
+			scoped.map((r) => r.description),
+			['api › main · working · Refactoring', 'web › 1 · blocked', 'web › logs · done'],
+		);
+	});
+
+	test('view description: counts with filter all, `<filter> n of m` filtered', () => {
+		const inScope = agentRows([{ sessionKey: 'host/a', rowLabel: 'a', snapshot: snapshot() }]);
+		assert.strictEqual(agentsViewDescription('all', 'all', inScope), 'all sessions · 1 blocked · 1 working · 1 done');
+		assert.strictEqual(agentsViewDescription('session', 'all', []), 'this session');
+		assert.strictEqual(agentsViewDescription('all', 'blocked', [...inScope, ...rows]), 'all sessions · blocked 3 of 9');
+		assert.strictEqual(agentsViewDescription('session', 'done', inScope), 'this session · done 1 of 3');
+		const idle = agentRows([{ sessionKey: 'host/a', rowLabel: 'a', snapshot: one('idle') }]);
+		assert.strictEqual(agentsViewDescription('all', 'all', idle), 'all sessions · idle');
+	});
+
+	test('Filter Agents… items: order, counts in scope, a check on the current one', () => {
+		const items = filterPickItems(rows, 'done');
+		assert.deepStrictEqual(
+			items.map((i) => [i.label, i.description, i.filter]),
+			[
+				['All', '6', 'all'],
+				['Blocked', '2', 'blocked'],
+				['Working', '2', 'working'],
+				['Done', '2', 'done'],
+			],
+		);
+		assert.deepStrictEqual(
+			items.map((i) => (i.iconPath as vscode.ThemeIcon | undefined)?.id),
+			[undefined, undefined, undefined, 'check'],
+		);
+	});
+});
+
+suite('Spaces summaries', () => {
+	const p = (agent?: string, display_agent?: string) => ({ pane_id: 'x', agent, display_agent }) as SnapshotPane;
+
+	test('tab summary: agents, shells, mixed, repeated kinds, empty', () => {
+		assert.strictEqual(tabSummary([p('claude'), p('copilot')]), 'claude, copilot');
+		assert.strictEqual(tabSummary([p()]), '1 shell');
+		assert.strictEqual(tabSummary([p(), p()]), '2 shells');
+		assert.strictEqual(tabSummary([p('claude'), p(), p('codex'), p('claude')]), 'claude \u00D72, codex + 1 shell');
+		assert.strictEqual(tabSummary([p('codex', 'Codex')]), 'Codex');
+		assert.strictEqual(tabSummary([]), undefined);
+	});
+
+	test('tab rows and space rows: descriptions and tooltips', () => {
+		const spaces = buildSpaces(snapshot(), 'host/s', (id, dir) => (id === 'w2' && dir === '/src/api' ? '\u2387 main · clean' : undefined));
+		assert.deepStrictEqual(
+			spaces.flatMap((s) => s.children.map((t) => spacesTreeItem(t).description)),
+			['Codex', 'claude', 'claude + 1 shell'],
+		);
+		const [web, api] = spaces.map(spacesTreeItem);
+		assert.strictEqual(api.description, '\u2387 main · clean', 'git when known');
+		assert.strictEqual(web.description, 'frontend', 'repo name fallback');
+		assert.strictEqual(api.tooltip, 'api\napi\n/src/api\n1 working');
+		assert.strictEqual(web.tooltip, 'web\nfrontend\n/src/web\n1 blocked · 1 done');
 	});
 });
 
@@ -244,6 +358,46 @@ suite('Sessions rows', () => {
 				['container:3f2a9c1b04de/devc', 'my-app', '1 blocked · 1 working · 1 done'],
 				['container:3f2a9c1b04de/other', 'my-app', 'other · 1 blocked · 1 working · 1 done'],
 			],
+		);
+	});
+
+	test('Start in dev containers: the herdr not running row starts devc; suffixes', () => {
+		const [row] = sessionRows({ env: containerEnv, status: 'ok', sessions: [] }, () => undefined, false);
+		assert.deepStrictEqual([row.key, row.label, row.description, row.session, row.contextValue], [
+			'container:3f2a9c1b04de/',
+			'my-app',
+			'herdr not running',
+			'devc',
+			'herdr.session.stopped',
+		]);
+		assert.strictEqual(sessionItemContext(row, 'container'), 'herdr.session.stopped container');
+		const notInstalled = sessionRows({ env: containerEnv, status: 'notInstalled', sessions: [] }, () => undefined, false)[0];
+		assert.strictEqual(sessionItemContext(notInstalled, 'container'), 'herdr.session.absent');
+		assert.strictEqual(notInstalled.session, undefined);
+		const running = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'devc', default: false, running: true }] }, () => conn('connected'), false)[0];
+		assert.strictEqual(sessionItemContext(running, 'container'), 'herdr.session.running container');
+		const stopped = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'x', default: false, running: false }] }, () => undefined, true)[0];
+		assert.strictEqual(sessionItemContext(stopped, 'container'), 'herdr.session.stopped container');
+		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.stopped' }, 'host'), 'herdr.session.stopped host');
+		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.running' }, 'host'), 'herdr.session.running host');
+		assert.strictEqual(sessionItemContext({ envKey: 'ssh:box', contextValue: 'herdr.session.stopped' }, 'ssh'), 'herdr.session.stopped');
+		const hostNone = sessionRows({ env: hostEnv, status: 'ok', sessions: [] }, () => undefined, false)[0];
+		assert.strictEqual(hostNone.contextValue, 'herdr.session.absent', "this machine's empty row is unchanged");
+	});
+
+	test('session status bar item: host, container, SSH', () => {
+		const snap = snapshot();
+		assert.deepStrictEqual(
+			sessionStatusText({ sessionKey: 'host/code-wksp', rowLabel: 'code-wksp', envKind: 'host', session: 'code-wksp', snapshot: snap }),
+			{ text: 'herdr: code-wksp', tooltip: 'host/code-wksp\nherdr 0.9.5\n1 blocked · 1 working · 1 done' },
+		);
+		assert.deepStrictEqual(
+			sessionStatusText({ sessionKey: 'container:3f2a9c1b04de/devc', rowLabel: 'deephaven-mcp', envKind: 'container', session: 'devc' }),
+			{ text: 'herdr: deephaven-mcp (devc)', tooltip: 'container:3f2a9c1b04de/devc' },
+		);
+		assert.deepStrictEqual(
+			sessionStatusText({ sessionKey: 'ssh:buildbox/default', rowLabel: 'default', envKind: 'ssh', alias: 'buildbox', session: 'default', snapshot: { panes: [] } }),
+			{ text: 'herdr: default (buildbox)', tooltip: 'ssh:buildbox/default\nidle' },
 		);
 	});
 
