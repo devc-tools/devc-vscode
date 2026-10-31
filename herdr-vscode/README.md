@@ -65,6 +65,24 @@ arrangement belongs to VS Code: it never changes herdr's tabs or splits.
   A pane that no longer exists says *This pane is gone.*, with **Remove**. A pane moved to another
   space in herdr stays in the tile, while VS Code is running to see the move.
 
+### Dragging panes in
+
+- Drag a pane row from Spaces, Agents or Pane Context's **Other Panes in This Space** onto a Layout tab
+  that is on screen and **let go, then click** where it should go: on a stack's tab strip to add it
+  there as a tab, or near an edge of a tile (or of the whole tab) to split. The highlight while you move
+  the pointer is Golden Layout's own, the same as when dragging a tile's tab. VS Code does not let a
+  drag from a view drop into an editor's web page, so letting go only arms the Layout tab, which says
+  *Place "…"* until the pointer comes over it; on some platforms letting go over it already places the pane.
+- **Esc** (right after letting go: the keyboard is still in the view), **Cancel** on the tab's toolbar,
+  or moving the pointer out of the tab cancels. After 15 s with the pointer never over a Layout tab,
+  it cancels by itself.
+- A pane is in a layout at most once: dragging in one it already has moves that tile there, or only
+  focuses it when the spot is its own stack's tab strip.
+- Each tile's tab has a grip (the dots before its status dot). Drag it into another Layout tab on screen,
+  in another editor group (no Shift needed), to move the tile there; the first tab loses it. Dragging it
+  within the same tab works too.
+- Mirrored herdr tabs take no drops: their arrangement is herdr's.
+
 ## Pane Context
 
 The **Pane Context** view shows the repo, changes and file tree of the pane you last clicked into, so
@@ -145,7 +163,7 @@ model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.t
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, Layout tabs, Pane Context, and it stops and restarts that session's server. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
+  takeover, restore, Layout tabs, dragging panes into them, Pane Context, and it stops and restarts that session's server. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
   bytes).
 
 Open `herdr-vscode/` as the folder in VS Code and press <kbd>F5</kbd> (**Run Extension**) to build

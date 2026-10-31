@@ -17,20 +17,20 @@ No new dependencies.
 
 ## Checklist
 
-- [ ] 1. Drag sources: a `TreeDragAndDropController` on `herdr.spaces`, `herdr.agents` and
+- [x] 1. Drag sources: a `TreeDragAndDropController` on `herdr.spaces`, `herdr.agents` and
       `herdr.paneContext` that arms placement for a dragged pane row
-- [ ] 2. Placement state in the extension host: arm and disarm, the `herdr.placingPane` context
+- [x] 2. Placement state in the extension host: arm and disarm, the `herdr.placingPane` context
       key, `herdr.cancelPlacement` on Escape, the 15 s timeout
-- [ ] 3. Golden Layout drop shim in the webview (Golden Layout 2.6.0's own drop areas, indicator and
+- [x] 3. Golden Layout drop shim in the webview (Golden Layout 2.6.0's own drop areas, indicator and
       `onDrop`), behind one typed module
-- [ ] 4. Placing mode in Layout panels: overlay, toolbar hint, drop zones under the pointer, place on
+- [x] 4. Placing mode in Layout panels: overlay, toolbar hint, drop zones under the pointer, place on
       release or click, cancel
-- [ ] 5. Tile grip in Layout panels: HTML5 drag of a tile into another (or the same) Layout tab; the
+- [x] 5. Tile grip in Layout panels: HTML5 drag of a tile into another (or the same) Layout tab; the
       source layout loses the tile
-- [ ] 6. A pane already in the target layout: move or focus, by the rules below
-- [ ] 7. Mirrored panels ignore placement and grip drops
-- [ ] 8. Tests (list under Validation)
-- [ ] 9. README, CHANGELOG, `docs/how-it-works.md`
+- [x] 6. A pane already in the target layout: move or focus, by the rules below
+- [x] 7. Mirrored panels ignore placement and grip drops
+- [x] 8. Tests (list under Validation)
+- [x] 9. README, CHANGELOG, `docs/how-it-works.md`
 
 ## Measured: a tree drag cannot reach a webview
 
@@ -278,20 +278,20 @@ synthetic events at it):
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm ci && npm run build && npm run lint && xvfb-run -a npm test` passes
+- [x] `cd herdr-vscode && npm ci && npm run build && npm run lint && xvfb-run -a npm test` passes
       (this checkout's `node_modules` lacks `golden-layout` and `@xterm/*`, so `npm ci` first).
       `git diff --stat -- devc-vscode` is empty; `package.json` `dependencies` unchanged.
-- [ ] Unit tests (no webview): `handleDrag` of a Spaces pane node, an Agents row and a Pane Context
+- [x] Unit tests (no webview): `handleDrag` of a Spaces pane node, an Agents row and a Pane Context
       pane node sets `application/vnd.herdr.pane` to `[{"sessionKey","paneId"}]` and arms with the
       pane's label as title; of a space, tab or Files row sets nothing and disarms; of a pane whose
       session is not connected arms nothing. Grip data parsing: the valid JSON; `""`; `"x"`; missing
       `layoutId`; `paneId` not a string → only the first is a tile.
-- [ ] Unit tests (placement state, fake panels): arm posts `placePane` only to visible Layout panels
+- [x] Unit tests (placement state, fake panels): arm posts `placePane` only to visible Layout panels
       and sets `herdr.placingPane`; with none visible nothing is posted; `placeHover` sends
       `placeEnd` to the others; disarm on `placed`, `placeCancel`, `herdr.cancelPlacement`, a new
       drag, and after 15 s without `placeHover` (fake clock), each posting `placeEnd` and clearing
       the key; `placed` makes `showsPane` true at once.
-- [ ] Webview tests in `src/test/layoutPanels.test.ts` (real webview, made-up model), as `shape()`
+- [x] Webview tests in `src/test/layoutPanels.test.ts` (real webview, made-up model), as `shape()`
       of the saved config after the 500 ms save, starting from a Layout with one stack `[P1]`:
       1. `placePane` P2, `placeAt {paneKey:P1, segment:"right"}` → `{row:[[P1],[P2]]}`, P2 focused,
          `placed` received;
@@ -302,19 +302,19 @@ synthetic events at it):
       5. P3 at `{paneKey:P3, segment:"header"}` → unchanged, P3 in front of its stack;
       6. P5 at `{edge:"left"}` → P5's stack first in the root row;
       7. a new empty Layout, P1 at `{center:true}` → `[P1]`.
-- [ ] Webview tests, cancel: after `placePane`, a probe `press` of `Escape` posts `placeCancel` and
+- [x] Webview tests, cancel: after `placePane`, a probe `press` of `Escape` posts `placeCancel` and
       a following `placeAt` changes nothing; `placeEnd` likewise; while placing, `placeAt` does not
       focus xterm's textarea before the place, and does not start a Golden Layout drag (no
       `.lm_dragProxy`).
-- [ ] Webview tests, grip: two Layout panels L1 `[P1,P2]` and L2 `[P3]`; `dropTileAt` on L2
+- [x] Webview tests, grip: two Layout panels L1 `[P1,P2]` and L2 `[P3]`; `dropTileAt` on L2
       `{paneKey:P3, segment:"right"}` with `{"sessionKey",paneId:P1,"title","layoutId":L1}` → L2 saved
       as `{row:[[P3],[P1]]}`, L1 saved as `[P2]`, `showsPane` follows for both; the same drop again
       (P1 now in L2) from L1's id moves nothing duplicated (L2 has P1 once); data `""` with nothing
       armed does nothing; data with `layoutId` of L2 itself moves within L2 and posts no
       `tileMovedIn`; a tile tab in L1 has a `[draggable="true"]` grip, a mirrored panel's has none.
-- [ ] Webview test, mirrors: a mirrored panel never receives `placePane` on arm, and `dropTileAt`
+- [x] Webview test, mirrors: a mirrored panel never receives `placePane` on arm, and `dropTileAt`
       on it leaves its layout unchanged.
-- [ ] `package.json` test (extension.test.ts): `herdr.cancelPlacement` contributed, keybinding
+- [x] `package.json` test (extension.test.ts): `herdr.cancelPlacement` contributed, keybinding
       `escape` with `when` `herdr.placingPane`, hidden in `commandPalette`.
 - [ ] Manual: drag an agent from Agents onto a Layout tab and let go. The overlay shows while
       dragging; moving the pointer shows Golden Layout's highlight; clicking near the right edge of a
@@ -354,3 +354,97 @@ synthetic events at it):
 - `herdr-vscode/docs/how-it-works.md` (Layout tabs: a new "Dragging panes in" section with the
   measured table and the reason a tree drag only arms, the zones, the move rules, the internals used)
 - `.plans/PLAN.md`
+
+## Implementation notes
+
+### Status (2026-10-31)
+
+Implemented; the Manual items above were not run, because they need a person in VS Code (and macOS for
+the release question), so they stay unticked and the plan stays out of `implemented/`. Evidence for them,
+which does not replace them, is below.
+
+### Verified
+
+- `npm ci && npm run build && npm run lint && xvfb-run -a npm test`: 208 passing, 47 pending (opt-in live
+  suites); before this phase 187 / 46. Five runs in a row passed. `git diff --stat -- devc-vscode` is
+  empty; `dependencies` unchanged; nothing installed.
+- New default tests: `src/test/paneDrag.test.ts` (the controller over real Spaces nodes, Agents rows and
+  Pane Context nodes, a real `vscode.DataTransfer`; the placement over fake panels and a fake clock),
+  `tile grip data` in `layouts.test.ts`, four webview tests in `layoutPanels.test.ts` (the seven
+  placing steps of Validation, cancel, grip, mirrors), and the `package.json` test.
+- Opt-in, against throwaway `hv-test` in an isolated `HOME` (`HERDR_VSCODE_LIVE_HOME`): new
+  `src/test/liveDrag.test.ts`. A Spaces row of a real pane, through `PaneDragController.handleDrag`
+  with a real `DataTransfer`, armed the open Layout panel; `placeAt` right of the other tile made a
+  side-by-side split, the tile painted and typing reached it, focus went to it; a grip drop into a second
+  Layout tab beside it (`ViewColumn.Beside`) moved the live tile there (still painted, typing works, the
+  first tab lost it, one controller per pane); `layout.export` of the herdr tab unchanged. Passed twice.
+  The whole live run: 250 passing, 1 failing, `live model … lists only the isolated session`, which
+  fails the same way at HEAD without this phase (the isolated home lists `default` and the `hv-ctl`
+  session that `liveSessionControl` leaves stopped). `livePaneContext`'s "a missing path opens nothing"
+  and `liveTiles`' "tile headers follow the model" failed once each, intermittently, the first also at
+  HEAD; neither touches this phase's code.
+
+Not exercised at all:
+
+- A real pointer: no real tree drag of the extension's rows, no real release over a Layout tab, no real
+  click after it, no real grip drag. Every drop and press in the tests is a synthetic event dispatched by
+  the webview at a point it computed (`placeAt`, `dropTileAt`). Whether the release alone places (a
+  delivered `pointerup`) is unknown on every platform; the spike says no on Linux.
+- The overlay, the toolbar hint, the grip's look, the highlight while moving: nobody looked; no screenshot.
+- The `escape` keybinding in a real window (only its contribution is tested, and the command by a direct
+  call), `pointerleave` cancelling, the 15 s timer in real time (fake clock only).
+- A drop from another window's Layout tab.
+
+### Deviations and decisions
+
+- `placeEnd` goes to the panel that posted `placed` / `placeCancel` too ("every armed panel still
+  open"); its webview has ended placing already, so it does nothing there. A panel that closes gets
+  nothing. A placement whose last armed panel closes before any `placeHover` is disarmed too.
+- `handleDrag` sets the MIME data for every pane row, connected or not; only arming needs the
+  connected snapshot. It cancels any placement first, as "a new handleDrag" disarms.
+- Rule 1 ("zone is `S`'s header") is decided by the drop point being inside `S.header.element`'s
+  rectangle while `getArea` returns `S`, not by reading Golden Layout's `_dropSegment`: one internal
+  fewer.
+- "`S` survived" is a walk up from `S` checking each parent still holds the child: a removed stack
+  keeps its `parent`.
+- Grip test: "the same drop again" is a drop of P1 from L1's id at **P3's left** rather than its right
+  again, so that the following steps start from a known shape (`{row:[[P1],[P3]]}`); it checks P1 is in
+  L2 once, which is the point of that item.
+- Test support beyond the contract: `TileProbe.grip` (the tab has a `draggable` grip) and
+  `probeResult.dragging` (`.lm_dragProxy` present), for the grip and "no Golden Layout drag" checks.
+- While placing, presses on the toolbar are not swallowed, or its **Cancel** could never be clicked.
+- The swallowed `click` is the next one within 1 s of a swallowed press or release, so a placement by
+  release (no click follows) cannot eat a later, unrelated click.
+- An HTML5 grip drag does not un-maximise the target (only placing does, per the contract); a grip
+  drag over a maximised stack sees that stack's zones only.
+- `src/webview/glDrop.ts` is excluded from the root `tsconfig.json` as `tiles.ts` is (it needs the DOM
+  lib); `src/webview/tsconfig.json` checks it.
+- `extension.ts` now creates the tiles panels before Spaces and Agents, since their tree views take
+  the controller, which needs `panels.placement`.
+- Measured in the tests, a point fixed before a move can fall on a zone boundary after the move's
+  collapse (Golden Layout's hover areas exclude their edges), and then `onDrop` reuses the segment
+  recorded last. Only a problem for synthetic points; a real pointer press is at the pointer.
+- Found, not changed (phase 16): adding the first pane of an empty layout goes through `loadLayout`,
+  which fires no `stateChanged`, so that layout may not be saved until the next change. A test that
+  waited for that save was flaky under load and was dropped.
+- Live check setup: the isolated home was `/tmp/hvd` (herdr's socket path must stay under ~100 bytes,
+  too long under the scratchpad); `hv-test` and `hv-ctl` were stopped and deleted and the directory
+  removed afterwards.
+
+### For later phases
+
+- **Phase 22 (mirror fidelity)** will make mirrored tabs drop targets for their own tiles. Mirrored
+  panels now set `dropEffect: "none"` for drags carrying `application/vnd.herdr.pane` and have no
+  grips; `GlDrop` (`src/webview/glDrop.ts`) is the place to reuse Golden Layout's zones, and its
+  `dropAt` returns where a tile went. Golden Layout's own tab drags in a mirror stay disabled by
+  `reorderEnabled: false`.
+- **Phase 19 / 23 (sidebar)**: `SpacesView` and `AgentsView` take an optional
+  `TreeDragAndDropController` as their last constructor argument; any new pane-like row must have a
+  `ref` (and for Spaces / Pane Context `type: 'pane'`) to be draggable through `paneRowRef`. Rows that
+  are not panes disarm a placement when dragged. Every row of the three trees is draggable now.
+- **Phase 20 (pane changes)**: Pane Context's tree view is created with the controller in
+  `extension.ts` (`createHost`); keep passing it if the host changes. Its change and Files rows, having
+  a `resourceUri`, can be dropped on an editor group.
+- **Phase 21 (ask agent)**: nothing shared.
+- New host↔webview messages are in `src/tilesProtocol.ts`; `LayoutPanel.gainPane` /
+  `removeTile` are how the host tells a panel about a pane added or moved away outside `addTile`.

@@ -220,3 +220,35 @@ export function parsePaneMoved(data: Record<string, unknown>): { from: string; t
 	const to = (data.pane as { pane_id?: unknown } | undefined)?.pane_id;
 	return typeof from === 'string' && typeof to === 'string' && from !== '' && to !== '' && from !== to ? { from, to } : undefined;
 }
+
+// ── Dragging ────────────────────────────────────────────────────────────────
+
+/** The MIME type of a dragged pane: tree rows and tile grips. VS Code lower-cases MIME types. */
+export const PANE_MIME = 'application/vnd.herdr.pane';
+
+/** What a tile grip drag carries. */
+export interface TileDrag {
+	sessionKey: string;
+	paneId: string;
+	title: string;
+	layoutId: string;
+}
+
+/** A grip drag's data, or undefined for anything else (a tree drag carries `""`). */
+export function parseTileDrag(data: string): TileDrag | undefined {
+	let value: unknown;
+	try {
+		value = JSON.parse(data);
+	} catch {
+		return undefined;
+	}
+	if (typeof value !== 'object' || value === null) {
+		return undefined;
+	}
+	const v = value as Record<string, unknown>;
+	const nonEmpty = (x: unknown): x is string => typeof x === 'string' && x !== '';
+	if (!nonEmpty(v.sessionKey) || !nonEmpty(v.paneId) || !nonEmpty(v.layoutId) || typeof v.title !== 'string') {
+		return undefined;
+	}
+	return { sessionKey: v.sessionKey, paneId: v.paneId, title: v.title, layoutId: v.layoutId };
+}

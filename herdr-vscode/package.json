@@ -246,6 +246,11 @@
         "title": "Split Down",
         "category": "herdr",
         "icon": "$(split-vertical)"
+      },
+      {
+        "command": "herdr.cancelPlacement",
+        "title": "Cancel Placing Pane",
+        "category": "herdr"
       }
     ],
     "menus": {
@@ -460,9 +465,20 @@
         {
           "command": "herdr.splitDown",
           "when": "false"
+        },
+        {
+          "command": "herdr.cancelPlacement",
+          "when": "false"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "herdr.cancelPlacement",
+        "key": "escape",
+        "when": "herdr.placingPane"
+      }
+    ],
     "configuration": {
       "title": "herdr",
       "properties": {

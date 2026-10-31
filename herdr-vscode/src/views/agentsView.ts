@@ -86,9 +86,10 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 		private readonly sources: () => AgentSource[],
 		onModelChange: vscode.Event<void>,
 		private readonly state: vscode.Memento,
+		dragAndDropController?: vscode.TreeDragAndDropController<AgentRow>,
 	) {
 		this.filterValue = toFilter(state.get(AGENTS_FILTER_KEY));
-		this.treeView = vscode.window.createTreeView('herdr.agents', { treeDataProvider: this });
+		this.treeView = vscode.window.createTreeView('herdr.agents', { treeDataProvider: this, dragAndDropController });
 		this.disposables.push(
 			this.treeView,
 			this.emitter,

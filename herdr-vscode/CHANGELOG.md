@@ -4,6 +4,13 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Drag panes into Layout tabs: a pane row of Spaces, Agents or Pane Context's **Other Panes** dragged
+  onto a Layout tab on screen, then a click on a tab strip (a new tab there) or near an edge (a split),
+  with Golden Layout's own drop zones. **Esc** (**Cancel Placing Pane**), the toolbar's **Cancel**, or
+  leaving the tab cancels. A pane the layout already has moves rather than doubling.
+- A grip on each Layout tile's tab drags the tile to another Layout tab (or within its own).
+- Every row of Spaces, Agents and Pane Context can now be dragged. Pane Context's Files and change
+  rows can be dropped on an editor group, which opens the file.
 - **New Space**, **New Tab**, **Split Right** and **Split Down** in Spaces.
 - This machine's stopped sessions are always listed, with **Start Session** and **Stop Session**.
 - Clicking a pane always adds it to a Layout tab as a tab. It used to become a split when no tile had

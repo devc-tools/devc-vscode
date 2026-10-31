@@ -4,17 +4,18 @@ import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
 import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView } from './paneContext';
+import { CANCEL_PLACEMENT_COMMAND, PaneDragController, paneRowRef } from './paneDrag';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startHostSession, whenTabKnown } from './sessionControl';
-import { SessionModel, sessionKey } from './sessions';
+import { SessionModel, sessionKey, Snapshot } from './sessions';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND } from './status';
 import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
-import { AgentSource, AgentsView } from './views/agentsView';
+import { AgentRow, AgentSource, AgentsView } from './views/agentsView';
 import { SessionRowNode, SessionsView } from './views/sessionsView';
-import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
+import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -43,16 +44,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(m);
 
 	const sessions = new SessionsView(m, context.workspaceState);
-	const spaces = new SpacesView(sessions, (key) => m.connection(key)?.snapshot, m.onDidChange);
-	const agentSources = (): AgentSource[] =>
-		m
-			.connections()
-			.filter((c) => c.state === 'connected' && c.snapshot)
-			.map((c) => ({ sessionKey: c.key, rowLabel: sessions.row(c.key)?.label ?? c.name, snapshot: c.snapshot! }));
-	const agents = new AgentsView(agentSources, m.onDidChange, context.workspaceState);
-	const statusBar = new BlockedStatusBar();
-	context.subscriptions.push(sessions, spaces, agents, statusBar, agents.onDidChangeBlocked((n) => statusBar.update(n)));
-
 	const rowLabel = (key: string) => sessions.row(key)?.label;
 	const focus = new FocusTracker(m, rowLabel);
 	streams = new PaneStreams((key) => {
@@ -61,7 +52,32 @@ export function activate(context: vscode.ExtensionContext): void {
 	}, log);
 	const layouts = new LayoutStore(context.workspaceState);
 	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, layouts, rowLabel, log });
-	context.subscriptions.push(focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
+	context.subscriptions.push(sessions, focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
+
+	// Pane rows drag into Layout tabs.
+	const connectedSnapshot = (key: string): Snapshot | undefined => {
+		const conn = m.connection(key);
+		return conn?.state === 'connected' ? conn.snapshot : undefined;
+	};
+	const spaces = new SpacesView(
+		sessions,
+		(key) => m.connection(key)?.snapshot,
+		m.onDidChange,
+		new PaneDragController<SpacesNode>(panels.placement, paneRowRef, connectedSnapshot),
+	);
+	const agentSources = (): AgentSource[] =>
+		m
+			.connections()
+			.filter((c) => c.state === 'connected' && c.snapshot)
+			.map((c) => ({ sessionKey: c.key, rowLabel: sessions.row(c.key)?.label ?? c.name, snapshot: c.snapshot! }));
+	const agents = new AgentsView(
+		agentSources,
+		m.onDidChange,
+		context.workspaceState,
+		new PaneDragController<AgentRow>(panels.placement, (row) => row.ref, connectedSnapshot),
+	);
+	const statusBar = new BlockedStatusBar();
+	context.subscriptions.push(spaces, agents, statusBar, agents.onDidChangeBlocked((n) => statusBar.update(n)));
 
 	const paths = new EnvironmentPaths(environments);
 	const containerFs = new ContainerFileSystemProvider(
@@ -75,7 +91,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessions,
 		panels,
 		paths,
-		createHost: (treeDataProvider) => vscode.window.createTreeView(PANE_CONTEXT_VIEW, { treeDataProvider }),
+		createHost: (treeDataProvider) =>
+			vscode.window.createTreeView(PANE_CONTEXT_VIEW, {
+				treeDataProvider,
+				dragAndDropController: new PaneDragController<PaneContextNode>(panels.placement, paneRowRef, connectedSnapshot),
+			}),
 		log,
 	});
 	context.subscriptions.push(
@@ -149,6 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
+		vscode.commands.registerCommand(CANCEL_PLACEMENT_COMMAND, () => panels.placement.cancel()),
 		vscode.commands.registerCommand('herdr.startSession', async (row?: SessionRowNode) => {
 			const session = row?.session;
 			if (!session || row.envKey !== HOST_KEY) {

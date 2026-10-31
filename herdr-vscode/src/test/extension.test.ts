@@ -86,6 +86,24 @@ suite('herdr-vscode', () => {
 		await vscode.commands.executeCommand('herdr.addToLayout', 'host/none', 'w1:p1');
 	});
 
+	test('dragging panes: Cancel Placing Pane on Escape while placing, not in the palette', async () => {
+		const ext = extension();
+		await ext.activate();
+		const contributed = ext.packageJSON.contributes;
+		const command = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.cancelPlacement');
+		assert.strictEqual(command?.title, 'Cancel Placing Pane');
+		assert.deepStrictEqual(
+			(contributed.keybindings as { command: string }[]).filter((k) => k.command === 'herdr.cancelPlacement'),
+			[{ command: 'herdr.cancelPlacement', key: 'escape', when: 'herdr.placingPane' }],
+		);
+		assert.deepStrictEqual(
+			(contributed.menus.commandPalette as { command: string; when: string }[]).find((m) => m.command === 'herdr.cancelPlacement'),
+			{ command: 'herdr.cancelPlacement', when: 'false' },
+		);
+		// Nothing is armed in the test host.
+		await vscode.commands.executeCommand('herdr.cancelPlacement');
+	});
+
 	test('pane context: the title bar, the actions, and the schemes', async () => {
 		const ext = extension();
 		await ext.activate();

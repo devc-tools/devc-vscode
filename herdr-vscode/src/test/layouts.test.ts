@@ -10,6 +10,7 @@ import {
 	layoutPaneKeys,
 	LayoutState,
 	LAYOUTS_KEY,
+	parseTileDrag,
 	LayoutStore,
 	nextLayoutName,
 	parsePaneMoved,
@@ -221,5 +222,20 @@ suite('layout tiles', () => {
 		assert.strictEqual(paneAvailability({ state: 'disconnected', snapshot: undefined }, 'w1:p1'), 'waiting');
 		assert.strictEqual(paneAvailability({ state: 'connected', snapshot: s }, 'w1:p1'), 'live');
 		assert.strictEqual(paneAvailability({ state: 'connected', snapshot: s }, 'nope'), 'gone');
+	});
+});
+
+suite('tile grip data', () => {
+	test('only a complete grip drag is a tile', () => {
+		const valid = { sessionKey: 'host/a', paneId: 'w1:p1', title: 'claude', layoutId: '0b8f…' };
+		assert.deepStrictEqual(parseTileDrag(JSON.stringify(valid)), valid);
+		assert.deepStrictEqual(parseTileDrag(JSON.stringify({ ...valid, title: '' })), { ...valid, title: '' });
+		assert.strictEqual(parseTileDrag(''), undefined, 'what a tree drag carries');
+		assert.strictEqual(parseTileDrag('x'), undefined);
+		assert.strictEqual(parseTileDrag(JSON.stringify({ sessionKey: 'host/a', paneId: 'w1:p1', title: 't' })), undefined, 'no layoutId');
+		assert.strictEqual(parseTileDrag(JSON.stringify({ ...valid, paneId: 3 })), undefined);
+		assert.strictEqual(parseTileDrag(JSON.stringify({ ...valid, layoutId: '' })), undefined);
+		assert.strictEqual(parseTileDrag('null'), undefined);
+		assert.strictEqual(parseTileDrag(JSON.stringify([valid])), undefined);
 	});
 });

@@ -18,6 +18,7 @@
         "src"
     ],
     "exclude": [
-        "src/webview/tiles.ts"
+        "src/webview/tiles.ts",
+        "src/webview/glDrop.ts"
     ]
 }

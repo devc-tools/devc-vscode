@@ -5,8 +5,9 @@ import 'golden-layout/dist/css/goldenlayout-base.css';
 import '@xterm/xterm/css/xterm.css';
 import './tiles.css';
 import { componentStates, PaneComponentState, StoredLayoutConfig } from '../layoutMapping';
-import { addPaneAtRoot, addPlacement, layoutPaneKeys, rewritePane } from '../layouts';
-import { HostMessage, makePaneKey, PanelState, ProbeAction, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
+import { addPaneAtRoot, addPlacement, layoutPaneKeys, PANE_MIME, parseTileDrag, rewritePane } from '../layouts';
+import { DropPoint, HostMessage, makePaneKey, PanelState, ProbeAction, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
+import { GlDrop } from './glDrop';
 import { createWheelAccumulator, wrapPaste } from './input';
 import { findPathLinks } from './links';
 
@@ -55,11 +56,17 @@ let pendingFocus: string | undefined;
 let nextSerial = 0;
 let font: { fontFamily: string; fontSize: number } | undefined;
 let kind: PanelState['kind'] | undefined;
+/** A Layout panel's layout id, for grip drags. */
+let layoutId: string | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 const breadcrumbEl = document.getElementById('breadcrumb') as HTMLElement;
 const messageEl = document.getElementById('message') as HTMLElement;
 const rootEl = document.getElementById('tiles') as HTMLElement;
+const placeOverlayEl = document.getElementById('place-overlay') as HTMLElement;
+const placeTitleEl = document.getElementById('place-title') as HTMLElement;
+const placeHintEl = document.getElementById('place-hint') as HTMLElement;
+const placeTextEl = document.getElementById('place-text') as HTMLElement;
 
 // ── Theme ───────────────────────────────────────────────────────────────────
 
@@ -378,6 +385,9 @@ layout.on('tabCreated', (tab) => {
 	}
 	const paneKey = makePaneKey(state.sessionKey, state.paneId);
 	tabs.set(paneKey, tab.element);
+	if (kind === 'layout') {
+		tab.element.prepend(createGrip(paneKey, state));
+	}
 	applyTileMeta(paneKey);
 });
 
@@ -576,6 +586,227 @@ function showEmpty(text: string): void {
 	messageEl.hidden = false;
 }
 
+// ── Dragging panes in ───────────────────────────────────────────────────────
+
+const drop = new GlDrop(layout);
+
+/** Puts a pane at a point by Golden Layout's drop zones; a pane already here moves or is only focused. */
+function placePaneAt(x: number, y: number, sessionKey: string, paneId: string, title: string): boolean {
+	const paneKey = makePaneKey(sessionKey, paneId);
+	drop.calculateAreas();
+	const result = drop.dropAt(x, y, { sessionKey, paneId }, title, containers.get(paneKey)?.parent, targetStack);
+	if (result.kind === 'none') {
+		return false;
+	}
+	const tile = tiles.get(paneKey);
+	if (tile) {
+		settleTile(tile);
+	}
+	focusTile(paneKey);
+	setFocused(paneKey);
+	return true;
+}
+
+/** A tree drag armed this panel: the pane goes where the pointer next presses or lets go. */
+let placing: { sessionKey: string; paneId: string; title: string; hovered: boolean } | undefined;
+/** The click that follows a press used for placing goes nowhere else either. */
+let swallowClickUntil = 0;
+
+function startPlacing(msg: Extract<HostMessage, { type: 'placePane' }>): void {
+	placing = { sessionKey: msg.sessionKey, paneId: msg.paneId, title: msg.title, hovered: false };
+	document.body.classList.add('placing');
+	placeTitleEl.textContent = `Place "${msg.title}"`;
+	placeOverlayEl.hidden = false;
+	placeHintEl.hidden = true;
+}
+
+function endPlacing(): void {
+	placing = undefined;
+	document.body.classList.remove('placing');
+	placeOverlayEl.hidden = true;
+	placeHintEl.hidden = true;
+	drop.clear();
+}
+
+function cancelPlacing(): void {
+	if (placing) {
+		endPlacing();
+		post({ type: 'placeCancel' });
+	}
+}
+
+function hoverPlacing(): void {
+	if (!placing || placing.hovered) {
+		return;
+	}
+	placing.hovered = true;
+	placeOverlayEl.hidden = true;
+	post({ type: 'placeHover' });
+	layout.maximisedStack?.toggleMaximise();
+	drop.calculateAreas();
+	placeTextEl.textContent = `Placing "${placing.title}"`;
+	placeHintEl.hidden = false;
+}
+
+/** Places the armed pane at the point; with no zone there, placing goes on. */
+function placeArmedAt(x: number, y: number): void {
+	if (!placing) {
+		return;
+	}
+	const { sessionKey, paneId, title } = placing;
+	if (placePaneAt(x, y, sessionKey, paneId, title)) {
+		endPlacing();
+		post({ type: 'placed', sessionKey, paneId });
+	}
+}
+
+/** The toolbar keeps working while placing: its Cancel is how a mouse cancels. */
+const inToolbar = (ev: Event) => Boolean((ev.target as Element | null)?.closest?.('#toolbar'));
+
+window.addEventListener(
+	'pointermove',
+	(ev) => {
+		if (placing) {
+			hoverPlacing();
+			drop.highlight(ev.pageX, ev.pageY);
+		}
+	},
+	true,
+);
+window.addEventListener('pointerover', () => hoverPlacing(), true);
+// Capture phase, and the press swallowed: otherwise xterm starts a selection or takes the focus,
+// and Golden Layout starts a tab or splitter drag.
+for (const type of ['pointerdown', 'pointerup'] as const) {
+	window.addEventListener(
+		type,
+		(ev) => {
+			if (!placing || inToolbar(ev)) {
+				return;
+			}
+			ev.preventDefault();
+			ev.stopPropagation();
+			swallowClickUntil = performance.now() + 1000;
+			if (type === 'pointerdown' && ev.button !== 0) {
+				return;
+			}
+			hoverPlacing();
+			placeArmedAt(ev.pageX, ev.pageY);
+		},
+		true,
+	);
+}
+window.addEventListener(
+	'click',
+	(ev) => {
+		if (performance.now() < swallowClickUntil && !inToolbar(ev)) {
+			swallowClickUntil = 0;
+			ev.preventDefault();
+			ev.stopPropagation();
+		}
+	},
+	true,
+);
+window.addEventListener(
+	'keydown',
+	(ev) => {
+		if (placing && ev.key === 'Escape') {
+			ev.preventDefault();
+			ev.stopPropagation();
+			cancelPlacing();
+		}
+	},
+	true,
+);
+document.documentElement.addEventListener('pointerleave', () => {
+	if (placing?.hovered) {
+		cancelPlacing();
+	}
+});
+
+/** A tile's grip: an HTML5 drag, which (unlike a tree drag) reaches other Layout tabs of the window. */
+function createGrip(paneKey: string, state: PaneComponentState): HTMLElement {
+	const grip = document.createElement('span');
+	grip.className = 'tile-grip';
+	grip.draggable = true;
+	grip.title = 'Drag to another Layout tab';
+	// Golden Layout starts its own tab drag on pointerdown; not preventDefault, which would stop this one.
+	grip.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+	grip.addEventListener('dragstart', (ev) => {
+		if (!ev.dataTransfer || !layoutId) {
+			return;
+		}
+		const title = containers.get(paneKey)?.title ?? '';
+		ev.dataTransfer.setData(PANE_MIME, JSON.stringify({ sessionKey: state.sessionKey, paneId: state.paneId, title, layoutId }));
+		ev.dataTransfer.effectAllowed = 'move';
+	});
+	return grip;
+}
+
+/** Drags with a pane in them, entered and not yet left: at 0 the highlight goes. */
+let dragDepth = 0;
+
+function carriesPane(ev: DragEvent): boolean {
+	return [...(ev.dataTransfer?.types ?? [])].includes(PANE_MIME);
+}
+
+function onDragOver(ev: DragEvent): void {
+	if (!carriesPane(ev)) {
+		return;
+	}
+	if (kind !== 'layout') {
+		if (ev.dataTransfer) {
+			ev.dataTransfer.dropEffect = 'none';
+		}
+		return;
+	}
+	ev.preventDefault();
+	if (ev.dataTransfer) {
+		ev.dataTransfer.dropEffect = 'move';
+	}
+	const first = dragDepth === 0;
+	if (ev.type === 'dragenter' || first) {
+		dragDepth++;
+	}
+	if (first) {
+		drop.calculateAreas();
+	}
+	drop.highlight(ev.pageX, ev.pageY);
+}
+window.addEventListener('dragenter', onDragOver, true);
+window.addEventListener('dragover', onDragOver, true);
+window.addEventListener(
+	'dragleave',
+	(ev) => {
+		if (kind === 'layout' && carriesPane(ev) && dragDepth > 0 && --dragDepth === 0) {
+			drop.clear();
+		}
+	},
+	true,
+);
+window.addEventListener(
+	'drop',
+	(ev) => {
+		if (kind !== 'layout' || !carriesPane(ev)) {
+			return;
+		}
+		dragDepth = 0;
+		const tile = parseTileDrag(ev.dataTransfer?.getData(PANE_MIME) ?? '');
+		if (tile) {
+			ev.preventDefault();
+			if (placePaneAt(ev.pageX, ev.pageY, tile.sessionKey, tile.paneId, tile.title) && tile.layoutId !== layoutId) {
+				post({ type: 'tileMovedIn', sessionKey: tile.sessionKey, paneId: tile.paneId, fromLayoutId: tile.layoutId });
+			}
+		} else if (placing) {
+			ev.preventDefault();
+			hoverPlacing();
+			placeArmedAt(ev.pageX, ev.pageY);
+		} else {
+			drop.clear();
+		}
+	},
+	true,
+);
+
 // ── Tile headers ────────────────────────────────────────────────────────────
 
 /** The tab's status dot and faded detail, kept beside Golden Layout's own title element. */
@@ -595,7 +826,12 @@ function applyTileMeta(paneKey: string): void {
 	let dot = tab.querySelector<HTMLElement>('.tile-dot');
 	if (!dot) {
 		dot = document.createElement('span');
-		tab.prepend(dot);
+		const grip = tab.querySelector('.tile-grip');
+		if (grip) {
+			grip.after(dot);
+		} else {
+			tab.prepend(dot);
+		}
 	}
 	dot.className = `tile-dot tile-dot-${meta.status}`;
 	let detail = tab.querySelector<HTMLElement>('.tile-detail');
@@ -630,11 +866,12 @@ function probeTile(tile: Tile): TileProbe {
 		title: tabs.get(tile.paneKey)?.textContent ?? '',
 		overlay: tile.overlay.hidden ? '' : (tile.overlay.textContent ?? ''),
 		overLink: tile.termEl.querySelector('.xterm-cursor-pointer') !== null,
+		grip: Boolean(tabs.get(tile.paneKey)?.querySelector('.tile-grip[draggable="true"]')),
 	};
 }
 
 function runProbeAction(action: ProbeAction): void {
-	const tile = tiles.get(action.paneKey);
+	const tile = 'paneKey' in action ? tiles.get(action.paneKey) : undefined;
 	if (action.kind === 'press') {
 		const init = { key: action.key, keyCode: action.keyCode, bubbles: true, cancelable: true } as KeyboardEventInit;
 		tile?.term.textarea?.dispatchEvent(new KeyboardEvent('keydown', init));
@@ -657,9 +894,61 @@ function runProbeAction(action: ProbeAction): void {
 				mouse('mouseup');
 			}
 		}
-	} else {
+	} else if (action.kind === 'dragToRightEdge') {
 		dragToRightEdge(action.paneKey);
+	} else if (action.kind === 'placeAt') {
+		const at = dropPoint(action.at);
+		if (at) {
+			const target = document.elementFromPoint(at.x, at.y) ?? rootEl;
+			const pointer = (type: string, buttons: number) =>
+				target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, isPrimary: true, button: 0, buttons, clientX: at.x, clientY: at.y }));
+			pointer('pointermove', 0);
+			pointer('pointerdown', 1);
+		}
+	} else {
+		const at = dropPoint(action.at);
+		if (at) {
+			const target = document.elementFromPoint(at.x, at.y) ?? rootEl;
+			const dataTransfer = new DataTransfer();
+			dataTransfer.setData(PANE_MIME, action.data);
+			for (const type of ['dragenter', 'dragover', 'drop']) {
+				target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, dataTransfer }));
+			}
+		}
 	}
+}
+
+/** A probe's drop point, worked out from the live layout. */
+function dropPoint(at: DropPoint): { x: number; y: number } | undefined {
+	const area = rootEl.getBoundingClientRect();
+	if ('center' in at) {
+		return { x: area.left + area.width / 2, y: area.top + area.height / 2 };
+	}
+	if ('edge' in at) {
+		const [midX, midY] = [area.left + area.width / 2, area.top + area.height / 2];
+		switch (at.edge) {
+			case 'left':
+				return { x: area.left + 20, y: midY };
+			case 'right':
+				return { x: area.right - 20, y: midY };
+			case 'top':
+				return { x: midX, y: area.top + 20 };
+			case 'bottom':
+				return { x: midX, y: area.bottom - 20 };
+		}
+	}
+	const stack = containers.get(at.paneKey)?.parent.parentItem;
+	if (!(stack instanceof Stack)) {
+		return undefined;
+	}
+	if (at.segment === 'header') {
+		const header = stack.header.element.getBoundingClientRect();
+		const last = stack.header.tabs[stack.header.tabs.length - 1]?.element.getBoundingClientRect();
+		return { x: (last?.right ?? header.left) + 5, y: header.top + header.height / 2 };
+	}
+	const body = stack.childElementContainer.getBoundingClientRect();
+	const share = { left: [0.1, 0.5], right: [0.9, 0.5], top: [0.5, 0.2], bottom: [0.5, 0.8] }[at.segment];
+	return { x: body.left + body.width * share[0], y: body.top + body.height * share[1] };
 }
 
 function dragToRightEdge(paneKey: string): void {
@@ -684,6 +973,7 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	switch (msg.type) {
 		case 'init':
 			kind = msg.state.kind;
+			layoutId = msg.state.kind === 'layout' ? msg.state.layoutId : undefined;
 			document.body.classList.add(`kind-${kind}`);
 			vscode.setState(msg.state);
 			break;
@@ -698,6 +988,20 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 		case 'layout':
 			applyLayout(msg.config);
 			document.body.classList.toggle('layout-empty', kind === 'layout' && !msg.config.root);
+			if (placing?.hovered) {
+				drop.calculateAreas();
+			}
+			break;
+		case 'placePane':
+			if (kind === 'layout') {
+				startPlacing(msg);
+			}
+			break;
+		case 'placeEnd':
+			endPlacing();
+			break;
+		case 'removeTile':
+			containers.get(msg.paneKey)?.close();
 			break;
 		case 'addTile':
 			addOrReveal(msg);
@@ -736,6 +1040,7 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 				breadcrumb: breadcrumbEl.textContent ?? '',
 				message: messageEl.hidden ? '' : (messageEl.textContent ?? ''),
 				config: layout.saveLayout() as unknown as StoredLayoutConfig,
+				dragging: isDragging(),
 			});
 			break;
 	}
@@ -752,6 +1057,7 @@ for (const [id, direction] of [
 }
 
 for (const [id, send] of [
+	['place-cancel', () => cancelPlacing()],
 	['copy-layout', () => layout.rootItem && post({ type: 'copyAsLayout', config: layout.saveLayout() as unknown as StoredLayoutConfig })],
 	['rename-layout', () => post({ type: 'renameLayout' })],
 ] as const) {

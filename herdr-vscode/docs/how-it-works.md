@@ -272,6 +272,69 @@ layout, open or not, and an open panel's webview rewrites its live layout: the t
 terminal and a new stream on the new id, and the full first frame repaints the same screen. A move
 while the extension is not running is not seen, and the tile says *This pane is gone.*.
 
+### Dragging panes in
+
+Measured on 2026-10-31 with VS Code 1.144.0 under Xvfb and a real X pointer (XTest), with a tree view
+whose controller has `dragMimeTypes: ["application/vnd.herdr.pane"]` and two webview panels side by side:
+
+| Drag | Shift | Reached the target webview |
+| --- | --- | --- |
+| tree row → webview | no / held | no events at all |
+| webview A (a `draggable` element) → webview B | no / held | yes: `dragenter`, `dragover`, `drop`, with A's data |
+| webview A → over the side bar → webview B | no / held | yes |
+| webview A → webview A | no / held | yes |
+
+Webviews are out-of-process iframes, and Chromium does not drop a drag from one renderer process into a
+frame of another. The workbench is one process; the webviews of one extension in one window share an
+origin, hence a process. (VS Code also sets `pointer-events: none` on webview iframes during a workbench
+drag, `auto` again while Shift is held; that does not help.) A tree drag's native `DataTransfer` holds
+only `application/vnd.code.tree.<view>` and the controller's MIME types with the value `""`: what
+`handleDrag` sets reaches other trees and text editors, never a webview. macOS was not measured.
+
+So a tree drag only **arms** (`src/paneDrag.ts`). `PaneDragController` on `herdr.spaces`, `herdr.agents`
+and `herdr.paneContext` takes a pane row's `handleDrag` (pane in a connected snapshot) to
+`PanePlacement.arm`: `placePane` to every open Layout panel whose `WebviewPanel.visible` is true, context
+key `herdr.placingPane`, a 15 s timer. Any other row's drag disarms. The panel the pointer reaches first
+posts `placeHover`, takes the placement and the others get `placeEnd`. It ends on `placed`,
+`placeCancel`, `herdr.cancelPlacement` (Escape while `herdr.placingPane`: after a tree drag the
+keyboard is still in the tree), the timer, a new drag, or the panel closing.
+
+The webview, armed, shows an overlay until the first `pointermove`/`pointerover`, then un-maximises,
+highlights the zone under the pointer, and places on the first `pointerdown` or `pointerup` (whichever
+comes; `pointerup` only if the platform delivers the tree drag's release), or on an HTML5 `drop` whose
+data is not a tile. Placing listens in the capture phase on `window` and swallows the press, the release
+and the next click: otherwise xterm would start a selection or take the focus, and Golden Layout a tab
+or splitter drag.
+
+Tile grips are real HTML5 drags (`application/vnd.herdr.pane` =
+`{"sessionKey","paneId","title","layoutId"}`, `effectAllowed: "move"`); the grip's `pointerdown` stops
+propagation so Golden Layout does not start its own tab drag. A drop from another layout posts
+`tileMovedIn`; the host closes that pane's tile in the source panel (`removeTile`), whose layout then
+saves as usual. A drop from another window's Layout tab (an unknown `layoutId`) only adds. Mirrored
+panels ignore both: `dropEffect: "none"`, no grips, never armed.
+
+Zones are Golden Layout 2.6.0's own drag-proxy logic, reached through `src/webview/glDrop.ts`, the one
+place that touches its `@internal` members: `calculateItemAreas()`, `getArea(x, y)` (smallest area
+wins), `contentItem.highlightDropZone(x, y, area)` (which also records the segment and tab index; it is
+called again at the drop point right before `onDrop`), `ItemConfig.resolve`, `onDrop(item, area)`,
+`dropTargetIndicator` and `tabDropPlaceholder` (removed after each drop or cancel). `golden-layout` is
+pinned at 2.6.0, and the layout panel tests fail if these change.
+
+| Pointer over | Result |
+| --- | --- |
+| a stack's header | a tab there, at the position under the pointer |
+| a stack's body, left / right 25% | a split beside it (its size halved), or the stack wrapped in a new row at 50/50 |
+| a stack's body, middle half, upper / lower half | a split above / below, in a column likewise |
+| an empty stack's body; an empty layout | the only tile |
+| a 50 px band along an edge of the tile area, when the root is a row or column | a new stack at that edge of the root |
+
+A pane already in the layout, component `T` in stack `S`: on `S`'s header, or any zone of `S` while
+`S` holds only `T`, nothing moves and `T` is focused. Otherwise `S.removeChild(T, true)`, then areas,
+`getArea` and `highlightDropZone` again at the same point (the removal may have collapsed `S`'s row or
+column) and `onDrop(T, area)`: the component, and its terminal, are kept. Removal and drop run in one
+task: the webview's `itemDestroyed` and `stateChanged` handlers are deferred and must find `T` back in
+the tree, or they would dispose its terminal.
+
 ### Copy as Layout
 
 The mirrored panel's webview posts its `saveLayout()`; `asLayoutConfig` turns on reorder in the settings

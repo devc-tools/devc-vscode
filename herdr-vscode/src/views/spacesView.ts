@@ -169,8 +169,9 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 		private readonly sessions: SessionsView,
 		private readonly snapshotOf: (key: string) => Snapshot | undefined,
 		onModelChange: vscode.Event<void>,
+		dragAndDropController?: vscode.TreeDragAndDropController<SpacesNode>,
 	) {
-		this.treeView = vscode.window.createTreeView('herdr.spaces', { treeDataProvider: this });
+		this.treeView = vscode.window.createTreeView('herdr.spaces', { treeDataProvider: this, dragAndDropController });
 		this.disposables.push(
 			this.treeView,
 			this.emitter,

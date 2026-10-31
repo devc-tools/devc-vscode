@@ -3,6 +3,7 @@ import { BridgeError, HerdrEvent } from './bridge';
 import { FocusTracker } from './focus';
 import { layoutPaneIds, layoutShape, mirrorConfig, parseLayoutExport, StoredLayoutConfig } from './layoutMapping';
 import { asLayoutConfig, copyLayoutName, layoutPaneKeys, LayoutStore, nextLayoutName, parsePaneMoved, rewritePane, SavedLayout, selectLayoutTarget } from './layouts';
+import { PanePlacement, PlacementPanel, PLACING_PANE_KEY } from './paneDrag';
 import { hasAgent, paneLabel, SessionModel, SessionConnection, Snapshot } from './sessions';
 import { PaneFrame, PaneStreams, PaneViewer } from './streams';
 import {
@@ -140,8 +141,10 @@ function panelHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
 <button id="split-right" class="mirror-only">Split Right</button>
 <button id="split-down" class="mirror-only">Split Down</button>
 <button id="rename-layout" class="layout-only">Rename</button>
+<span id="place-hint" hidden><span id="place-text"></span><button id="place-cancel">Cancel</button></span>
 </div>
 <div id="tiles"></div>
+<div id="place-overlay" hidden><div id="place-title"></div><div>Let go over this tab, then click a tab strip to add it there or near an edge to split. Esc cancels.</div></div>
 <div id="message" hidden></div>
 <script src="${asset('tiles.js')}"></script>
 </body>
@@ -170,6 +173,10 @@ export interface TilesDeps {
 	tilesChanged?(): void;
 	/** A path printed in a tile was clicked. Set by {@link TilesPanels}. */
 	openLink?(paneKey: string, text: string): void;
+	/** Set by {@link TilesPanels}. */
+	placement?: PanePlacement;
+	/** A grip drop from another Layout tab landed in `panel`. Set by {@link TilesPanels}. */
+	tileMovedIn?(panel: LayoutPanel, paneKey: string, fromLayoutId: string): void;
 }
 
 /** Which panel last had a tile focused, across every panel of the window. */
@@ -181,7 +188,7 @@ const WEBVIEW_OPTIONS = (extensionUri: vscode.Uri): vscode.WebviewOptions & vsco
 	localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist', 'webview')],
 });
 
-type ProbeResult = { tiles: TileProbe[]; breadcrumb: string; message: string; config: StoredLayoutConfig | undefined };
+type ProbeResult = { tiles: TileProbe[]; breadcrumb: string; message: string; config: StoredLayoutConfig | undefined; dragging?: boolean };
 
 /** The webview plumbing every `herdr.tiles` panel shares: messages, streams, focus, replay when ready. */
 abstract class TilesPanel implements PaneViewer {
@@ -658,7 +665,7 @@ interface LayoutTile {
 }
 
 /** One editor tab holding a saved layout: any panes, arranged by the user. Nothing here changes herdr's layout. */
-export class LayoutPanel extends TilesPanel {
+export class LayoutPanel extends TilesPanel implements PlacementPanel {
 	/** The panes in the webview's layout, from its last report plus what was added since. */
 	private paneKeys = new Set<string>();
 	/** The tiles the webview has announced, which have a size. */
@@ -701,6 +708,37 @@ export class LayoutPanel extends TilesPanel {
 		} else {
 			this.pendingAdds.push(add);
 		}
+	}
+
+	/** The webview's layout has the pane now (placed or dropped there): known at once, before the next save. */
+	gainPane(sessionKey: string, paneId: string): void {
+		this.paneKeys.add(makePaneKey(sessionKey, paneId));
+		this.deps.tilesChanged?.();
+		this.sync();
+		this.panel.reveal(undefined, false);
+	}
+
+	/** The pane moved to another Layout tab: its tile here closes, and the layout saves as usual. */
+	removeTile(sessionKey: string, paneId: string): void {
+		const paneKey = makePaneKey(sessionKey, paneId);
+		if (this.paneKeys.delete(paneKey)) {
+			this.deps.tilesChanged?.();
+		}
+		this.post({ type: 'removeTile', paneKey });
+	}
+
+	// PlacementPanel
+
+	isVisible(): boolean {
+		return !this.disposedFlag && this.panel.visible;
+	}
+
+	placePane(sessionKey: string, paneId: string, title: string): void {
+		this.post({ type: 'placePane', sessionKey, paneId, title });
+	}
+
+	placeEnd(): void {
+		this.post({ type: 'placeEnd' });
 	}
 
 	/** A pane got a new id: the store has it already, the webview's layout follows. */
@@ -824,6 +862,20 @@ export class LayoutPanel extends TilesPanel {
 			case 'renameLayout':
 				this.rename(this.layoutId);
 				break;
+			case 'placeHover':
+				this.deps.placement?.hover(this);
+				break;
+			case 'placed':
+				this.gainPane(msg.sessionKey, msg.paneId);
+				this.deps.placement?.ended(this);
+				break;
+			case 'placeCancel':
+				this.deps.placement?.ended(this);
+				break;
+			case 'tileMovedIn':
+				this.gainPane(msg.sessionKey, msg.paneId);
+				this.deps.tileMovedIn?.(this, makePaneKey(msg.sessionKey, msg.paneId), msg.fromLayoutId);
+				break;
 		}
 	}
 }
@@ -842,14 +894,29 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 	private readonly linkEmitter = new vscode.EventEmitter<{ paneKey: string; text: string }>();
 	/** A path printed in a tile was clicked. */
 	readonly onDidRequestLink = this.linkEmitter.event;
+	/** A pane row dragged towards the Layout panels. */
+	readonly placement: PanePlacement;
 
 	constructor(deps: TilesDeps) {
+		this.placement = new PanePlacement({
+			panels: () => [...this.layoutPanels.values()],
+			setContext: (placing) => void vscode.commands.executeCommand('setContext', PLACING_PANE_KEY, placing),
+		});
 		this.deps = {
 			...deps,
 			tilesChanged: () => this.tilesEmitter.fire(),
 			openLink: (paneKey, text) => this.linkEmitter.fire({ paneKey, text }),
+			placement: this.placement,
+			tileMovedIn: (panel, paneKey, fromLayoutId) => {
+				const from = this.layoutPanels.get(fromLayoutId);
+				if (from && from !== panel) {
+					const { sessionKey, paneId } = splitPaneKey(paneKey);
+					from.removeTile(sessionKey, paneId);
+				}
+			},
 		};
 		this.disposables.push(
+			this.placement,
 			this.tilesEmitter,
 			this.linkEmitter,
 			vscode.workspace.onDidChangeConfiguration((e) => {
@@ -902,6 +969,7 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 		});
 		layoutPanel.onDidDispose(() => {
 			viewState.dispose();
+			this.placement.panelDisposed(layoutPanel);
 			if (this.layoutPanels.get(layoutId) === layoutPanel) {
 				this.layoutPanels.delete(layoutId);
 				this.recentLayouts = this.recentLayouts.filter((id) => id !== layoutId);

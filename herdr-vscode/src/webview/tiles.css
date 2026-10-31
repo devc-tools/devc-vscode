@@ -284,3 +284,62 @@ body.kind-layout .lm_header .lm_tab.lm_active {
 	background: var(--vscode-editor-background);
 	opacity: 0.95;
 }
+
+/* Dragging panes in: placing mode, and tile grips */
+
+#place-overlay {
+	grid-row: 2;
+	grid-column: 1;
+	position: relative;
+	z-index: 50;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 20px;
+	text-align: center;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--vscode-editor-background) 80%, transparent);
+	border: 1px solid var(--vscode-focusBorder);
+}
+
+#place-title {
+	font-weight: bold;
+}
+
+#place-hint {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+	color: var(--vscode-tab-activeForeground);
+}
+
+body.placing #tiles {
+	cursor: copy;
+}
+
+body.placing #tiles * {
+	cursor: inherit !important;
+}
+
+/* Six dots, 6 × 12 px, drawn with gradients. */
+.tile-grip {
+	flex: none;
+	width: 6px;
+	height: 12px;
+	cursor: grab;
+	opacity: 0.6;
+	background-image: radial-gradient(circle, var(--vscode-tab-inactiveForeground) 1px, transparent 1.2px);
+	background-size: 3px 4px;
+	background-position: 0 0;
+}
+
+.tile-grip:hover {
+	opacity: 1;
+}
+
+.tile-grip:active {
+	cursor: grabbing;
+}

@@ -3,11 +3,11 @@ import * as vscode from 'vscode';
 import { HerdrEvent } from '../bridge';
 import { FocusTracker } from '../focus';
 import { componentStates, GlItem } from '../layoutMapping';
-import { LayoutState, LayoutStore } from '../layouts';
+import { emptyLayoutConfig, LayoutState, LayoutStore, layoutPaneKeys } from '../layouts';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { LayoutPanel, MirrorPanel, TILES_VIEW_TYPE, TilesPanels } from '../tilesPanel';
-import { makePaneKey, TileProbe } from '../tilesProtocol';
+import { DropPoint, makePaneKey, TileProbe, WebviewMessage } from '../tilesProtocol';
 import { snapshot } from './fixtures';
 
 /**
@@ -375,5 +375,208 @@ suite('layout panels in a webview', function () {
 		assert.strictEqual(panels.renameLayout(panel.layoutId, 'second'), true);
 		assert.strictEqual(panel.panel.title, 'second');
 		await waitFor('toolbar', async () => (await panel.probe()).breadcrumb === '"second" · layout');
+	});
+	// ── Dragging panes in ───────────────────────────────────────────────────
+
+	/** P1…P5: panes of session A; P5 is added to its snapshot here. */
+	const [P1, P2, P3, P4, P5] = ['w2:p1', 'w2:p2', 'w1:p1', 'w1:p2', 'w1:p3'];
+	const key = (paneId: string) => makePaneKey(A, paneId);
+	const withP5 = () => {
+		const snap = model.snapshots.get(A)!;
+		model.snapshots.set(A, { ...snap, panes: [...snap.panes, { ...snap.panes.find((p) => p.pane_id === P4)!, pane_id: P5 }] });
+		model.changed.fire();
+	};
+	/** Records what a panel's webview posts. */
+	const record = (panel: LayoutPanel | MirrorPanel): WebviewMessage[] => {
+		const seen: WebviewMessage[] = [];
+		const original = panel.onMessage.bind(panel);
+		panel.onMessage = (msg: WebviewMessage) => {
+			seen.push(msg);
+			original(msg);
+		};
+		return seen;
+	};
+	const types = (seen: WebviewMessage[]) => seen.map((m) => m.type).filter((t) => t.startsWith('place') || t === 'tileMovedIn');
+	const savedIs = (id: string, want: unknown) =>
+		waitFor(`saved ${JSON.stringify(want)}`, () => JSON.stringify(savedShape(id)) === JSON.stringify(want));
+	const place = async (panel: LayoutPanel, paneId: string, at: DropPoint) => {
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId }, `title ${paneId}`), 'armed');
+		await panel.probe({ kind: 'placeAt', at });
+		assert.strictEqual(panels.placement.placing, undefined, 'placed');
+	};
+	/** A Layout panel beside the active one, so both are on screen. */
+	const besideLayout = async (name: string, root?: GlItem): Promise<LayoutPanel> => {
+		const saved = store.create(name, { ...emptyLayoutConfig(), ...(root ? { root } : {}) });
+		const raw = vscode.window.createWebviewPanel(TILES_VIEW_TYPE, name, vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
+		await panels.deserializeWebviewPanel(raw, { kind: 'layout', layoutId: saved.id });
+		const panel = track(panels.openLayout(saved.id));
+		assert.strictEqual(panel.panel, raw);
+		await waitFor(`${name} up`, async () => (await panel.probe()).breadcrumb === `"${name}" · layout`);
+		return panel;
+	};
+	const stackOf = (...paneIds: string[]): GlItem => ({
+		type: 'stack',
+		content: paneIds.map((paneId) => ({ type: 'component', componentType: 'pane', componentState: { sessionKey: A, paneId }, title: paneId })),
+	});
+
+	test('placing: Golden Layout\'s zones, a pane already there moves or is focused, an edge, an empty layout', async () => {
+		withP5();
+		const panel = add(A, P1);
+		await tiled(panel, 1);
+		const seen = record(panel);
+
+		await place(panel, P2, { paneKey: key(P1), segment: 'right' });
+		await savedIs(panel.layoutId, { row: [[P1], [P2]] });
+		assert.strictEqual(focus.lastFocused, key(P2));
+		assert.deepStrictEqual(types(seen), ['placeHover', 'placed']);
+
+		await place(panel, P3, { paneKey: key(P2), segment: 'header' });
+		await savedIs(panel.layoutId, { row: [[P1], [P2, P3]] });
+
+		await place(panel, P4, { paneKey: key(P1), segment: 'top' });
+		await savedIs(panel.layoutId, { row: [{ column: [[P4], [P1]] }, [P2, P3]] });
+
+		const before = tile((await tiled(panel, 4)).tiles, A, P1)!.serial;
+		await place(panel, P1, { paneKey: key(P3), segment: 'bottom' });
+		await savedIs(panel.layoutId, { row: [[P4], { column: [[P2, P3], [P1]] }] });
+		assert.strictEqual(tile((await tiled(panel, 4)).tiles, A, P1)?.serial, before, 'the terminal was not re-created');
+		assert.strictEqual(focus.lastFocused, key(P1));
+
+		add(A, P2); // P2 in front of its stack, so that P3 has to come forward.
+		await waitFor('P2 in front', async () => (tile((await panel.probe()).tiles, A, P3)?.width ?? 1) === 0);
+		await place(panel, P3, { paneKey: key(P3), segment: 'header' });
+		await waitFor('P3 in front', async () => (tile((await panel.probe()).tiles, A, P3)?.width ?? 0) > 0);
+		await sleep(600);
+		assert.deepStrictEqual(savedShape(panel.layoutId), { row: [[P4], { column: [[P2, P3], [P1]] }] }, 'unchanged');
+		assert.strictEqual(focus.lastFocused, key(P3));
+
+		await place(panel, P5, { edge: 'left' });
+		await waitFor('P5 first in the root row', () => {
+			const root = savedShape(panel.layoutId) as { row?: unknown[] };
+			return JSON.stringify(root.row?.[0]) === JSON.stringify([P5]) && root.row?.length === 3;
+		});
+		assert.strictEqual((await panel.probe()).tiles.length, 5);
+
+		const empty = track(panels.newLayout('empty'));
+		await waitFor('empty up', async () => (await empty.probe()).breadcrumb === '"empty" · layout');
+		await place(empty, P1, { center: true });
+		await savedIs(empty.layoutId, [P1]);
+		assert.ok(panels.showsPane(A, P1));
+	});
+
+	test('placing: Escape, placeEnd and herdr.cancelPlacement cancel; the press is swallowed', async () => {
+		const panel = add(A, P1);
+		await tiled(panel, 1);
+		const seen = record(panel);
+
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId: P2 }, 'p2'));
+		await panel.probe({ kind: 'press', paneKey: key(P1), key: 'Escape', keyCode: 27 });
+		assert.deepStrictEqual(types(seen), ['placeCancel']);
+		assert.strictEqual(panels.placement.placing, undefined);
+		await panel.probe({ kind: 'placeAt', at: { paneKey: key(P1), segment: 'right' } });
+
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId: P2 }, 'p2'));
+		panels.placement.cancel(); // placeEnd
+		await panel.probe({ kind: 'placeAt', at: { paneKey: key(P1), segment: 'right' } });
+
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId: P2 }, 'p2'));
+		await vscode.commands.executeCommand('herdr.cancelPlacement'); // The extension's own placement: not this one.
+		panels.placement.cancel();
+		await panel.probe({ kind: 'placeAt', at: { paneKey: key(P1), segment: 'left' } });
+
+		await sleep(600);
+		assert.deepStrictEqual(shape((await panel.probe()).config?.root), [P1], 'nothing placed');
+		assert.deepStrictEqual(types(seen), ['placeCancel']);
+
+		// Placing over a tile: its xterm does not take the focus first, and Golden Layout starts no drag.
+		await place(panel, P3, { paneKey: key(P1), segment: 'right' });
+		await savedIs(panel.layoutId, { row: [[P1], [P3]] });
+		const focused: string[] = [];
+		const sub = focus.onDidChangeLastFocused((k) => focused.push(k ?? ''));
+		try {
+			await place(panel, P2, { paneKey: key(P1), segment: 'header' });
+			const after = await panel.probe();
+			assert.strictEqual(after.dragging, false, 'no .lm_dragProxy');
+			assert.deepStrictEqual(focused, [key(P2)]);
+		} finally {
+			sub.dispose();
+		}
+		await savedIs(panel.layoutId, { row: [[P1, P2], [P3]] });
+
+		// placed: the panel shows the pane at once, before the next save.
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId: P4 }, 'p4'));
+		assert.strictEqual(panels.showsPane(A, P4), false);
+		panel.onMessage({ type: 'placed', sessionKey: A, paneId: P4 });
+		assert.strictEqual(panels.showsPane(A, P4), true);
+		assert.strictEqual(panels.placement.placing, undefined);
+	});
+
+	test('grip: a tile moves between Layout tabs, never duplicated', async () => {
+		const l1 = add(A, P1);
+		add(A, P2);
+		await tiled(l1, 2);
+		await savedIs(l1.layoutId, [P1, P2]);
+		const l2 = await besideLayout('L2', stackOf(P3));
+		await tiled(l2, 1);
+		const seen2 = record(l2);
+		const grip = (from: string, paneId = P1) => JSON.stringify({ sessionKey: A, paneId, title: 'claude', layoutId: from });
+
+		assert.ok((await l1.probe()).tiles.every((t) => t.grip), 'Layout tiles have a grip');
+
+		await l2.probe({ kind: 'dropTileAt', at: { paneKey: key(P3), segment: 'right' }, data: grip(l1.layoutId) });
+		await savedIs(l2.layoutId, { row: [[P3], [P1]] });
+		await savedIs(l1.layoutId, [P2]);
+		assert.strictEqual(l1.showsPane(A, P1), false);
+		assert.strictEqual(l2.showsPane(A, P1), true);
+		assert.deepStrictEqual(types(seen2), ['tileMovedIn']);
+
+		await l2.probe({ kind: 'dropTileAt', at: { paneKey: key(P3), segment: 'left' }, data: grip(l1.layoutId) });
+		await savedIs(l2.layoutId, { row: [[P1], [P3]] });
+		const keys = layoutPaneKeys(store.get(l2.layoutId)!.config);
+		assert.strictEqual(keys.filter((k) => k === key(P1)).length, 1, 'P1 once');
+		assert.strictEqual((await l2.probe()).tiles.length, 2);
+
+		const shapeBefore = savedShape(l2.layoutId);
+		await l2.probe({ kind: 'dropTileAt', at: { paneKey: key(P3), segment: 'top' }, data: '' });
+		await sleep(600);
+		assert.deepStrictEqual(savedShape(l2.layoutId), shapeBefore, 'a tree drag\'s "" with nothing armed does nothing');
+
+		seen2.length = 0;
+		await l2.probe({ kind: 'dropTileAt', at: { paneKey: key(P3), segment: 'header' }, data: grip(l2.layoutId) });
+		await savedIs(l2.layoutId, [P3, P1]);
+		assert.deepStrictEqual(types(seen2), [], 'a move within the layout posts no tileMovedIn');
+		assert.deepStrictEqual(savedShape(l1.layoutId), [P2]);
+
+		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
+		const m = await waitFor('mirror tiles', async () => {
+			const p = await mirror.probe();
+			return p.tiles.length === 2 && p;
+		});
+		assert.ok(m.tiles.every((t) => !t.grip), 'mirrored tiles have no grip');
+	});
+
+	test('mirrors: never armed, and a grip drop on one changes nothing', async () => {
+		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
+		await waitFor('mirror tiles', async () => (await mirror.probe()).tiles.length === 2);
+		const posted: string[] = [];
+		const spy = mirror as unknown as { post(msg: { type: string }): void };
+		const post = spy.post.bind(mirror);
+		spy.post = (msg) => {
+			posted.push(msg.type);
+			post(msg);
+		};
+		assert.strictEqual(panels.placement.arm({ sessionKey: A, paneId: P3 }, 'p3'), false, 'no Layout panel on screen');
+
+		const layout = await besideLayout('L', stackOf(P3));
+		assert.ok(panels.placement.arm({ sessionKey: A, paneId: P4 }, 'p4'), 'the Layout panel is armed');
+		panels.placement.cancel();
+		assert.ok(!posted.includes('placePane'), 'the mirror never is');
+
+		const before = shape((await mirror.probe()).config?.root);
+		const data = JSON.stringify({ sessionKey: A, paneId: P3, title: 'x', layoutId: layout.layoutId });
+		await mirror.probe({ kind: 'dropTileAt', at: { paneKey: key(P1), segment: 'right' }, data });
+		await sleep(300);
+		assert.deepStrictEqual(shape((await mirror.probe()).config?.root), before);
+		assert.deepStrictEqual(savedShape(layout.layoutId), [P3], 'the source keeps its tile');
 	});
 });

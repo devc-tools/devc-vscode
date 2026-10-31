@@ -61,8 +61,25 @@ export type HostMessage =
 	| { type: 'addTile'; sessionKey: string; paneId: string; title: string }
 	/** Layout tabs: a pane got a new id. */
 	| { type: 'paneMoved'; sessionKey: string; from: string; to: string }
-	/** Test support (the opt-in live suite): answer with `probeResult`, after an optional key press or click. */
+	/** Layout tabs: a tree drag armed placing this pane. */
+	| { type: 'placePane'; sessionKey: string; paneId: string; title: string }
+	/** Layout tabs: placing ends without placing. */
+	| { type: 'placeEnd' }
+	/** Layout tabs: the pane moved to another Layout tab; close its tile. */
+	| { type: 'removeTile'; paneKey: string }
+	/** Test support: answer with `probeResult`, after an optional key press, click or drop. */
 	| { type: 'probe'; id: number; action?: ProbeAction };
+
+/**
+ * A point in a Layout panel, worked out by the webview from its live layout: in
+ * the stack holding a pane (`header`: 5 px right of its last tab; `left`/`right`:
+ * 10% / 90% of the body's width at mid height; `top`/`bottom`: mid width at 20% /
+ * 80% height), 20 px inside an edge of the tile area, or its centre.
+ */
+export type DropPoint =
+	| { paneKey: string; segment: 'header' | 'left' | 'right' | 'top' | 'bottom' }
+	| { edge: 'left' | 'right' | 'top' | 'bottom' }
+	| { center: true };
 
 export type ProbeAction =
 	| { kind: 'press'; paneKey: string; key: string; keyCode: number }
@@ -75,7 +92,11 @@ export type ProbeAction =
 	/** A press and release where the mouse is, as a click on a link needs. */
 	| { kind: 'clickCell'; paneKey: string; col: number; row: number }
 	/** Drags a tile's tab to the right edge of the tile area with synthetic pointer events. */
-	| { kind: 'dragToRightEdge'; paneKey: string };
+	| { kind: 'dragToRightEdge'; paneKey: string }
+	/** Placing mode: `pointermove` then `pointerdown` at the point. */
+	| { kind: 'placeAt'; at: DropPoint }
+	/** `dragenter`, `dragover`, `drop` at the point, carrying `application/vnd.herdr.pane` = `data`. */
+	| { kind: 'dropTileAt'; at: DropPoint; data: string };
 
 export interface TileProbe {
 	paneKey: string;
@@ -92,6 +113,8 @@ export interface TileProbe {
 	overlay: string;
 	/** Whether the terminal shows the pointer cursor, as it does over a link. */
 	overLink: boolean;
+	/** Whether the tile's tab has a drag grip. */
+	grip: boolean;
 }
 
 export type WebviewMessage =
@@ -114,4 +137,20 @@ export type WebviewMessage =
 	| { type: 'clipboardCopy'; text: string }
 	/** A path printed in a tile was clicked: `text` is the link, with any `:line[:col]`. */
 	| { type: 'openLink'; paneKey: string; text: string }
-	| { type: 'probeResult'; id: number; tiles: TileProbe[]; breadcrumb: string; message: string; config: StoredLayoutConfig };
+	/** Placing mode: the pointer reached this panel. */
+	| { type: 'placeHover' }
+	/** Placing mode ended by placing the pane (new, moved, or only focused). */
+	| { type: 'placed'; sessionKey: string; paneId: string }
+	| { type: 'placeCancel' }
+	/** A grip drop from another Layout tab landed here. */
+	| { type: 'tileMovedIn'; sessionKey: string; paneId: string; fromLayoutId: string }
+	| {
+			type: 'probeResult';
+			id: number;
+			tiles: TileProbe[];
+			breadcrumb: string;
+			message: string;
+			config: StoredLayoutConfig;
+			/** A Golden Layout tab drag is under way. */
+			dragging: boolean;
+	  };
