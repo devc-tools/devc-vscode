@@ -15,14 +15,6 @@
 				"kind": "build",
 				"isDefault": true
 			}
-		},
-		{
-			"type": "npm",
-			"script": "build",
-			"path": "herdr-vscode",
-			"label": "herdr-vscode: build",
-			"problemMatcher": "$tsc",
-			"group": "build"
 		}
 	]
 }

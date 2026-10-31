@@ -197,7 +197,7 @@ missing → "This herdr tab was closed.".
 
 - `herdr-vscode/package.json` (dependencies, commands, menus, activation `onWebviewPanel:herdr.tiles`)
 - `herdr-vscode/esbuild.mjs` (second entry)
-- `herdr-vscode/.vscodeignore` (ship `dist/webview/**`)
+- `herdr-vscode/.vscodeignore` (ship `dist/webview/**`; the scaffold whitelists only `!dist/**/*.js`, so add `!dist/**/*.css` for `tiles.css`)
 - `herdr-vscode/src/extension.ts`
 - `herdr-vscode/src/streams.ts` (new: pane stream manager)
 - `herdr-vscode/src/tilesPanel.ts` (new: panel creation, messaging, serializer, toolbar actions)

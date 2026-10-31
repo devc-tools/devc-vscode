@@ -6,7 +6,7 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Run devc-vscode",
+			"name": "Run Extension",
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
@@ -16,18 +16,6 @@
 				"${workspaceFolder}/out/**/*.js"
 			],
 			"preLaunchTask": "${defaultBuildTask}"
-		},
-		{
-			"name": "Run herdr-vscode",
-			"type": "extensionHost",
-			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/herdr-vscode"
-			],
-			"outFiles": [
-				"${workspaceFolder}/herdr-vscode/dist/**/*.js"
-			],
-			"preLaunchTask": "herdr-vscode: build"
 		}
 	]
 }

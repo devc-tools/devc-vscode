@@ -66,7 +66,7 @@ The pane's directory is `foreground_cwd ?? cwd`.
 
 ### `herdr-container` and `herdr-ssh` providers (read-write, ported)
 
-- Copy devc-vscode's `src/devcontainerFs.ts` (`CoreutilsFileSystemProvider` and the container
+- Copy `devc-vscode/src/devcontainerFs.ts` (`CoreutilsFileSystemProvider` and the container
   provider) and the `SshFileSystemProvider` class from `src/sshFs.ts` into
   `herdr-vscode/src/remoteFs.ts`, starting with
   `// Ported from devc-vscode src/devcontainerFs.ts and src/sshFs.ts at <short commit>; maintained separately.`
@@ -162,7 +162,7 @@ Added to `views.herdr` after Agents. Rows:
       upstream ahead/behind, detached, no upstream, rename record skipping, `??` untracked);
       repo-row description strings; link regex on `src/a.ts:12:3`, `./x/y.md`, `~/n.txt`,
       `README.md`, and not on `http://x.y/z` or `1.2.3`; provider argv for each operation
-      (ported tests from devc-vscode's `src/test/containerTree.test.ts` / `sshFs.test.ts` where
+      (ported tests from `devc-vscode/src/test/containerTree.test.ts` / `sshFs.test.ts` where
       they cover the provider); unknown container and unconfigured SSH authorities rejected
       without spawning; change polling fires `Changed` once per mtime change and stops on close
 - [ ] Manual, host: focus a tile whose pane is in a git repo with changes; Pane Context shows the
@@ -198,8 +198,8 @@ Added to `views.herdr` after Agents. Rows:
 - `herdr-vscode/src/paneContext.ts` (new: followed pane, view)
 - `herdr-vscode/src/paths.ts` (new: bind mounts, URI mapping, `$HOME` cache)
 - `herdr-vscode/src/remoteFs.ts` (new: ported read-write providers, authority checks, change polling)
-- `src/devcontainerFs.ts`, `src/sshFs.ts`, `src/test/containerTree.test.ts`,
-  `src/test/sshFs.test.ts` (devc-vscode, read only: the source of the port)
+- `devc-vscode/src/devcontainerFs.ts`, `devc-vscode/src/sshFs.ts`, `devc-vscode/src/test/containerTree.test.ts`,
+  `devc-vscode/src/test/sshFs.test.ts` (read only: the source of the port)
 - `herdr-vscode/src/git.ts` (new: toplevel, porcelain parsing, `herdr-git` content provider)
 - `herdr-vscode/src/focus.ts` (expose TUI focus fallback)
 - `herdr-vscode/src/tilesPanel.ts` (route `openLink`)

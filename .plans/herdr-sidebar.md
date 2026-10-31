@@ -18,13 +18,13 @@ Contracts.
 
 ## Checklist
 
-- [ ] 1. Copy devc-vscode's `src/docker.ts` and `src/remoteShell.ts` to `herdr-vscode/src/docker.ts`
+- [ ] 1. Copy `devc-vscode/src/docker.ts` and `devc-vscode/src/remoteShell.ts` to `herdr-vscode/src/docker.ts`
       and `herdr-vscode/src/remoteShell.ts`, each starting with the comment
-      `// Copied from devc-vscode src/<file> at <short commit>; maintained separately.`; add
+      `// Copied from devc-vscode/src/<file> at <short commit>; maintained separately.`; add
       `LocalShell implements RemoteShell` (runs argv on this machine with `child_process`, same
       semantics as `DockerShell`). devc-vscode's files are not changed.
 - [ ] 2. `herdr-vscode/src/devcontainer.ts`: copies of `remoteUserFromMetadata` and `getRemoteUser`
-      from devc-vscode's `src/herdr.ts` (same comment), plus `listDevcontainers()`
+      from `devc-vscode/src/herdr.ts` (same comment), plus `listDevcontainers()`
 - [ ] 3. Environments: discover host, SSH and container environments; rediscover on Docker
       events, on a 30 s timer for SSH, and on **Refresh**
 - [ ] 4. Sessions per environment from `herdr session list --json`
@@ -230,7 +230,7 @@ background `statusBarItem.warningBackground`; click runs `herdr.agents.showBlock
       contextValues, ordering, focused expansion); pane label fallback order; counts description
       (`2 blocked · 1 working`, `idle`); Agents sort and each filter; worst-status rollup;
       session key format; the herdr wrapper argv for each environment kind
-- [ ] `git diff --stat -- src package.json` at the repo root is empty (devc-vscode untouched)
+- [ ] `git diff --stat -- devc-vscode` is empty (devc-vscode untouched)
 - [ ] Manual, host: `herdr --session hv-test` in a terminal, split a pane, start `claude` in one.
       In an Extension Development Host: Sessions → This machine shows `hv-test` with
       `1 working` (or `idle`) and the right icon; selecting it fills Spaces with its workspace,
