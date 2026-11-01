@@ -338,7 +338,7 @@ suite('layout panels in a webview', function () {
 	});
 
 	test('mirrored panel: tiles do not drag locally (the drop goes to herdr), and Copy as Layout copies the arrangement, draggable', async () => {
-		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
+		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1')!);
 		const up = await waitFor('two tiles', async () => {
 			const p = await mirror.probe();
 			return p.tiles.length === 2 && p;
@@ -553,7 +553,7 @@ suite('layout panels in a webview', function () {
 		assert.deepStrictEqual(types(seen2), [], 'a move within the layout posts no tileMovedIn');
 		assert.deepStrictEqual(savedShape(l1.layoutId), [P2]);
 
-		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
+		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1')!);
 		const m = await waitFor('mirror tiles', async () => {
 			const p = await mirror.probe();
 			return p.tiles.length === 2 && p;
@@ -562,7 +562,7 @@ suite('layout panels in a webview', function () {
 	});
 
 	test('mirrors: never armed, and a grip drop on one changes nothing', async () => {
-		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1'));
+		const mirror: MirrorPanel = track(panels.openTab(A, 'w2:t1')!);
 		await waitFor('mirror tiles', async () => (await mirror.probe()).tiles.length === 2);
 		const posted: string[] = [];
 		const spy = mirror as unknown as { post(msg: { type: string }): void };

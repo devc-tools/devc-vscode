@@ -144,7 +144,7 @@ function controllers(): string[] {
 	});
 
 	test('a pane also open in its mirrored tab has one controller', async () => {
-		const mirror = panels.openTab(key, tabId);
+		const mirror = panels.openTab(key, tabId)!;
 		await waitFor('mirror painted', 15000, async () => {
 			const t = (await mirror.probe()).tiles;
 			return t.length === 2 && t.every((x) => x.text.length > 0);

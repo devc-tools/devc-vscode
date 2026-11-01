@@ -13,6 +13,7 @@ export interface PaneRef {
 }
 
 export const FOCUS_PANE_COMMAND = 'herdr.focusPane';
+export const OPEN_SPACE_COMMAND = 'herdr.openSpace';
 export const OPEN_TAB_COMMAND = 'herdr.openTab';
 export const OPEN_PANE_TAB_COMMAND = 'herdr.openPaneTab';
 export const ADD_TO_LAYOUT_COMMAND = 'herdr.addToLayout';
@@ -27,7 +28,7 @@ export function openPaneIn(): OpenPaneIn {
 /** What clicking a pane or agent row runs. */
 export function paneClickCommand(target: OpenPaneIn, ref: PaneRef): vscode.Command {
 	return target === 'herdr'
-		? { command: OPEN_PANE_TAB_COMMAND, title: 'Open in herdr Tab', arguments: [ref.sessionKey, ref.paneId] }
+		? { command: OPEN_PANE_TAB_COMMAND, title: 'Open in herdr Space', arguments: [ref.sessionKey, ref.paneId] }
 		: { command: ADD_TO_LAYOUT_COMMAND, title: 'Add to Layout', arguments: [ref.sessionKey, ref.paneId] };
 }
 
@@ -204,6 +205,7 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			item.tooltip = node.tooltip;
 			item.iconPath = node.noIcon ? undefined : statusIcon(node.status);
 			item.contextValue = 'herdr.space';
+			item.command = { command: OPEN_SPACE_COMMAND, title: 'Open herdr Space', arguments: [node.sessionKey, node.workspaceId] };
 			return item;
 		}
 		case 'tab': {

@@ -62,6 +62,7 @@ function controllers(): string[] {
 	const req = (method: string, params: unknown) => bridgeRequest(shell, SESSION, method, params);
 	const pk = (id: string) => makePaneKey(key, id);
 	const tile = (tiles: TileProbe[], id: string) => tiles.find((t) => t.paneKey === pk(id));
+	const spaceLabel = () => model.connection(key)!.snapshot!.workspaces[0].label;
 
 	suiteSetup(async () => {
 		realHome = process.env.HOME;
@@ -106,15 +107,16 @@ function controllers(): string[] {
 	});
 
 	test('opens with the same arrangement and live output in each tile', async () => {
-		panel = panels.openTab(key, tabId);
-		assert.match(panel.panel.title, /^mirror · /);
+		panel = panels.openTab(key, tabId)!;
+		assert.strictEqual(panel.panel.title, spaceLabel(), 'titled with the space');
 		assert.strictEqual(panels.openTab(key, tabId), panel, 'the same tab reveals the same panel');
 		const { value, after } = await waitFor('three painted tiles', 15000, async () => {
 			const p = await panel.probe();
 			return p.tiles.length === 3 && p.tiles.every((t) => t.text.length > 0) && p;
 		});
 		console.log(`[live-tiles] three painted tiles after ${after} ms`, JSON.stringify(value.tiles.map((t) => [t.title, t.x, t.y, t.width, t.height, t.cols, t.rows])));
-		assert.match(value.breadcrumb, /^hv-row › .+ › mirror$/);
+		assert.strictEqual(value.breadcrumb, `hv-row › ${spaceLabel()}`);
+		assert.ok(value.strip.includes('*mirror'), `strip ${value.strip}`);
 		const [a, b, c] = [tile(value.tiles, p1)!, tile(value.tiles, p2)!, tile(value.tiles, p3)!];
 		assert.ok(b.x > a.x, 'p2 is right of p1');
 		assert.strictEqual(c.x, b.x, 'p3 is under p2');
@@ -178,7 +180,12 @@ function controllers(): string[] {
 	test('tile headers follow the model without a re-layout', async () => {
 		await req('pane.report_agent', { pane_id: p1, source: 'herdr-vscode-test', agent: 'claude', state: 'blocked' });
 		const before = await panel.probe();
-		await waitFor('agent label', 3000, async () => tile((await panel.probe()).tiles, p1)?.title.includes('claude'));
+		await waitFor('agent label', 3000, async () => tile((await panel.probe()).tiles, p1)?.title.includes('claude')).catch(async (err) => {
+			const pane = model.connection(key)?.snapshot?.panes.find((p) => p.pane_id === p1);
+			const raw = (await req('pane.get', { pane_id: p1 }).catch((e: Error) => e.message)) as unknown;
+			console.log(`[live-tiles] DIAG model pane ${JSON.stringify(pane)}; herdr ${JSON.stringify(raw).slice(0, 400)}; tile title ${tile((await panel.probe()).tiles, p1)?.title}`);
+			throw err;
+		});
 		const after = await panel.probe();
 		assert.strictEqual(tile(after.tiles, p1)?.serial, tile(before.tiles, p1)?.serial);
 		await req('pane.release_agent', { pane_id: p1, source: 'herdr-vscode-test', agent: 'claude' }).catch(() => undefined);
@@ -229,21 +236,26 @@ function controllers(): string[] {
 			enableScripts: true,
 			retainContextWhenHidden: true,
 		});
-		await panels.deserializeWebviewPanel(restored, { kind: 'mirror', sessionKey: key, tabId });
-		panel = panels.openTab(key, tabId);
+		const workspaceId = model.connection(key)!.snapshot!.workspaces[0].workspace_id;
+		await panels.deserializeWebviewPanel(restored, { kind: 'space', sessionKey: key, workspaceId });
+		panel = panels.openSpace(key, workspaceId);
 		assert.strictEqual(panel.panel, restored);
 		await waitFor('tiles back', 15000, async () => {
 			const p = await panel.probe();
 			return p.tiles.length === 3 && p.tiles.every((t) => t.text.length > 0);
 		});
-		assert.match(restored.title, /^mirror · /);
+		assert.strictEqual(restored.title, spaceLabel());
 	});
 
-	test('the herdr tab closed: the panel says so and releases its streams', async () => {
+	test('the shown herdr tab closed: the panel shows the space\'s next active tab and releases the old streams', async () => {
+		const mine = new Set([p1, p2, p3].map(pk));
 		await req('tab.close', { tab_id: tabId });
-		await waitFor('closed message', 5000, async () => (await panel.probe()).message === 'This herdr tab was closed.');
-		await waitFor('controllers gone', 5000, () => controllers().length === 0);
-		assert.strictEqual((await panel.probe()).tiles.length, 0);
+		const { value } = await waitFor('another tab shown', 5000, async () => {
+			const p = await panel.probe();
+			return p.tiles.length > 0 && p.tiles.every((t) => !mine.has(t.paneKey)) && p;
+		});
+		assert.ok(!value.strip.some((e) => e.endsWith('mirror')), `strip ${value.strip}`);
+		await waitFor('one controller per shown tile', 5000, () => controllers().length === value.tiles.length);
 	});
 
 	test('a new panel on a pane focuses its tile once the webview is up', async () => {
@@ -255,16 +267,17 @@ function controllers(): string[] {
 		const id = created.root_pane.pane_id;
 		await waitFor('new pane', 5000, () => model.connection(key)?.snapshot?.panes.some((p) => p.pane_id === id));
 		const opened = panels.openPaneTab(key, id)!;
-		assert.match(opened.panel.title, /^third · /);
+		assert.strictEqual(opened.panel.title, spaceLabel());
+		await waitFor('third shown', 5000, async () => (await opened.probe()).strip.includes('*third'));
 		await waitFor('focus report', 10000, () => focus.lastFocused === pk(id));
 		opened.panel.dispose();
 		await req('tab.close', { tab_id: created.tab.tab_id });
 	});
 
 	test('a session that does not connect: Connecting…, then closed after 10 s', async () => {
-		const stranded = panels.openTab('host/nosuch', 'w1:t1');
+		const stranded = panels.openSpace('host/nosuch', 'w1');
 		await waitFor('connecting message', 5000, async () => (await stranded.probe()).message === 'Connecting to hv-row…');
-		await waitFor('closed message', 12000, async () => (await stranded.probe()).message === 'This herdr tab was closed.');
+		await waitFor('closed message', 12000, async () => (await stranded.probe()).message === 'This herdr space was closed.');
 		stranded.panel.dispose();
 	});
 
@@ -275,7 +288,7 @@ function controllers(): string[] {
 		await waitFor('new tab', 5000, () => model.connection(key)?.snapshot?.tabs.some((t) => t.tab_id === created.tab.tab_id));
 		tabId = created.tab.tab_id;
 		panel.panel.dispose();
-		const second = panels.openTab(key, tabId);
+		const second = panels.openTab(key, tabId)!;
 		await waitFor('stream', 15000, () => controllers().length === 1);
 		second.panel.dispose();
 		const { after } = await waitFor('no controller', 5000, () => controllers().length === 0);

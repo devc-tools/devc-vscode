@@ -133,7 +133,7 @@ suite('mirrored panels edit herdr', function () {
 		streams = new PaneStreams(() => undefined, () => undefined);
 		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
 		panels = new TilesPanels({ extensionUri: ext.extensionUri, model: fake, streams, focus, layouts: noLayouts, rowLabel: (k) => `row ${k}`, log: () => undefined });
-		mirror = panels.openTab(S, TAB);
+		mirror = panels.openTab(S, TAB)!;
 		posted = [];
 		const webview = mirror.panel.webview;
 		const postMessage = webview.postMessage.bind(webview);

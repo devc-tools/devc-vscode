@@ -5,14 +5,14 @@ import { focusedPaneStatus } from '../focus';
 import { LocalShell } from '../remoteShell';
 import { EnvState, SessionConnection } from '../sessions';
 import { countsDescription, statusIconSpec, statusRank, worstStatus } from '../status';
-import { eventTouchesTab, panelTitle, tileMetas } from '../tilesPanel';
+import { activeTabOf, eventTouchesTab, stripTabs, tileMetas } from '../tilesPanel';
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
 import { effectiveSelection, groupOf, sessionItemContext, sessionRows } from '../views/sessionsView';
 import { agentTooltip, buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
-import { snapshot } from './fixtures';
+import { RAW_SNAPSHOT, snapshot } from './fixtures';
 
 const shell = new LocalShell();
 const hostEnv: Environment = { key: 'host', kind: 'host', label: 'this machine', shell };
@@ -119,7 +119,7 @@ suite('pane row clicks', () => {
 
 	test('per herdr.openPaneIn', () => {
 		assert.deepStrictEqual(paneClickCommand('layout', ref), { command: 'herdr.addToLayout', title: 'Add to Layout', arguments: ['host/s', 'w1:p1'] });
-		assert.deepStrictEqual(paneClickCommand('herdr', ref), { command: 'herdr.openPaneTab', title: 'Open in herdr Tab', arguments: ['host/s', 'w1:p1'] });
+		assert.deepStrictEqual(paneClickCommand('herdr', ref), { command: 'herdr.openPaneTab', title: 'Open in herdr Space', arguments: ['host/s', 'w1:p1'] });
 	});
 
 	test('a row takes the setting when it is built', () => {
@@ -128,10 +128,10 @@ suite('pane row clicks', () => {
 		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref, 'layout').command?.command, 'herdr.addToLayout');
 	});
 
-	test('tab rows open the mirrored tab whatever the setting', () => {
-		const tab = buildSpaces(snapshot(), 'host/s')[0].children[0];
-		assert.strictEqual(spacesTreeItem(tab).command?.command, 'herdr.openTab');
-		assert.strictEqual(spacesTreeItem(buildSpaces(snapshot(), 'host/s')[0]).command, undefined, 'space rows only expand');
+	test('tab rows open their space on that tab; space rows open the space', () => {
+		const space = buildSpaces(snapshot(), 'host/s')[0];
+		assert.strictEqual(spacesTreeItem(space.children[0]).command?.command, 'herdr.openTab');
+		assert.deepStrictEqual(spacesTreeItem(space).command, { command: 'herdr.openSpace', title: 'Open herdr Space', arguments: ['host/s', space.workspaceId] });
 	});
 });
 
@@ -444,10 +444,34 @@ suite('Sessions rows', () => {
 		assert.strictEqual(on('pane.updated', { pane_id: 'mine' }), false);
 	});
 
-	test('panel title and tile headers', () => {
+	test('a space\'s active tab: active_tab_id, else the first tab', () => {
 		const s = snapshot();
-		assert.strictEqual(panelTitle(s, 'w2:t1'), 'main · api');
-		assert.strictEqual(panelTitle(s, 'gone'), undefined);
+		assert.strictEqual(s.workspaces.find((w) => w.workspace_id === 'w1')?.activeTabId, 'w1:t1');
+		assert.strictEqual(activeTabOf(s, 'w1'), 'w1:t1');
+		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT));
+		delete raw.workspaces[1].active_tab_id;
+		assert.strictEqual(activeTabOf(snapshot(raw), 'w1'), 'w1:t2', 'missing: first in snapshot order');
+		raw.workspaces[1].active_tab_id = 'w9:t9';
+		assert.strictEqual(activeTabOf(snapshot(raw), 'w1'), 'w1:t2', 'unknown: first in snapshot order');
+		raw.workspaces[1].active_tab_id = 'w2:t1';
+		assert.strictEqual(activeTabOf(snapshot(raw), 'w1'), 'w1:t2', 'another space\'s tab: first');
+		assert.strictEqual(activeTabOf(s, 'gone'), undefined);
+	});
+
+	test('tab strip: this space\'s tabs in snapshot order, worst status, the shown tab active', () => {
+		const s = snapshot();
+		assert.deepStrictEqual(stripTabs(s, 'w1', 'w1:t1'), [
+			{ tabId: 'w1:t2', label: 'logs', status: 'done', active: false },
+			{ tabId: 'w1:t1', label: '1', status: 'blocked', active: true },
+		]);
+		assert.deepStrictEqual(stripTabs(s, 'w2', 'w2:t1'), [{ tabId: 'w2:t1', label: 'main', status: 'working', active: true }]);
+		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT));
+		raw.panes = raw.panes.filter((p: { agent?: string }) => !p.agent);
+		assert.strictEqual(stripTabs(snapshot(raw), 'w2', undefined)[0].status, 'shell');
+	});
+
+	test('tile headers', () => {
+		const s = snapshot();
 		assert.deepStrictEqual(tileMetas(s, 'host/s', 'w2:t1'), [
 			{ paneKey: 'host/s|w2:p1', label: 'api-fixer', detail: 'Refactoring', status: 'working' },
 			{ paneKey: 'host/s|w2:p2', label: 'test', detail: undefined, status: 'shell' },

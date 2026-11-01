@@ -32,6 +32,8 @@
 
 - [herdr Sidebar Config](herdr-sidebar-config.md) — Spaces and Agents rows follow the `[ui.sidebar.*]` rows in this machine's herdr config.toml, mapping herdr's row tokens onto labels, icons and descriptions.
 
+- [herdr Space Tabs](herdr-space-tabs.md) — an editor tab mirrors a herdr space instead of a herdr tab: the space's active tab as tiles, a tab strip synced both ways with herdr's active tab, and + / × / rename on the strip.
+
 - [herdr SSH](herdr-ssh.md) — live checks and fixes for SSH hosts across every herdr-vscode feature, plus Start / Stop on SSH sessions. Blocked until a reachable SSH host with herdr is available.
 
 ### Completed
@@ -74,3 +76,4 @@
 | 22 | [herdr-mirror-fidelity.md](herdr-mirror-fidelity.md) | Mirrored tabs: split ratios, pane moves and zoom both ways (depends on phase 15) | implemented, manual checks pending |
 | 23 | [herdr-sidebar-config.md](herdr-sidebar-config.md) | Sidebar rows from herdr's `[ui.sidebar.*]` config (depends on phase 19) | implemented, manual checks pending |
 | 24 | [herdr-ssh.md](herdr-ssh.md) | SSH hosts verified live and fixed; SSH session Start / Stop (blocked on a reachable host) | |
+| 25 | [herdr-space-tabs.md](herdr-space-tabs.md) | Editor tab = herdr space: active tab's tiles, two-way tab strip with create / close / rename (depends on phases 15 and 22) | implemented, manual checks pending |

@@ -4,6 +4,12 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- An editor tab now mirrors a herdr **space** instead of one herdr tab. It shows the space's active tab,
+  with a strip of the space's tabs in the toolbar that follows herdr's active tab both ways. **+** creates
+  a tab, **×** closes one (after asking), and double-click renames one. Clicking a space row opens the space
+  (**Open herdr Space**), and a tab row opens its space on that tab. **Open in herdr Tab** is now **Open in herdr
+  Space**. Editor tabs saved by earlier builds come back as their tab's space.
+
 - Spaces and Agents rows follow the `[ui.sidebar.spaces]` / `[ui.sidebar.agents]` rows (and `rows_by_agent`)
   in this machine's herdr `config.toml`: herdr's row tokens, `$name` tokens from `report-metadata`
   included, become the rows' labels, icons and descriptions. Without such rows nothing changes; a mistake in

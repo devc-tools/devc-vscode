@@ -72,6 +72,8 @@ export interface SnapshotWorkspace {
 	label: string;
 	number: number;
 	focused: boolean;
+	/** `active_tab_id`: the tab herdr shows in this space. */
+	activeTabId?: string;
 	repoName?: string;
 	/** `worktree.checkout_path`: where the space's checkout is. */
 	checkoutPath?: string;
@@ -174,6 +176,7 @@ export function parseSnapshot(raw: unknown): Snapshot | undefined {
 			label: str(w.label) ?? id,
 			number: num(w.number),
 			focused: w.focused === true,
+			activeTabId: str(w.active_tab_id),
 			repoName: str(worktree?.repo_name),
 			checkoutPath: str(worktree?.checkout_path),
 			tokens: stringMap(w.tokens),

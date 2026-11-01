@@ -94,13 +94,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "herdr.openSpace",
+        "title": "Open herdr Space",
+        "category": "herdr"
+      },
+      {
         "command": "herdr.openTab",
         "title": "Open herdr Tab",
         "category": "herdr"
       },
       {
         "command": "herdr.openPaneTab",
-        "title": "Open in herdr Tab",
+        "title": "Open in herdr Space",
         "category": "herdr"
       },
       {
@@ -521,6 +526,10 @@
       ],
       "commandPalette": [
         {
+          "command": "herdr.openSpace",
+          "when": "false"
+        },
+        {
           "command": "herdr.openTab",
           "when": "false"
         },
@@ -692,7 +701,7 @@
           ],
           "enumDescriptions": [
             "Add the pane to a Layout tab.",
-            "Open the pane's herdr tab."
+            "Open the pane's herdr space, showing its tab."
           ],
           "default": "layout",
           "scope": "window",

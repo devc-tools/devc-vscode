@@ -207,9 +207,11 @@ and `ui.sidebar.agents` are looked at; unknown keys are ignored.
   report-metadata` emits `workspace.metadata_updated` and `pane report-metadata` emits `pane.updated`
   (measured, herdr 0.9.5), both subscribed, so a new snapshot carries them.
 
-## Mirrored tabs
+## Mirrored spaces
 
-One editor tab (`WebviewPanel`, view type `herdr.tiles`, `src/tilesPanel.ts`) mirrors one herdr tab.
+One editor tab (`WebviewPanel`, view type `herdr.tiles`, `src/tilesPanel.ts`) mirrors one herdr
+**space**, and shows one of its tabs at a time: the **shown tab**. "Mirrored tab" below means the
+shown tab of a space panel.
 The webview (`src/webview/tiles.ts`, bundled with its CSS into `dist/webview/`; Golden Layout and
 xterm load from there, no CDN) gets its layout, frames and tile headers from the extension host and
 sends back fits, input and actions; the messages are typed in `src/tilesProtocol.ts`.
@@ -245,11 +247,48 @@ an element that is moved into the new component, and restores the keyboard focus
 pane no longer in the layout has its terminal disposed and its stream closed.
 
 A session that is not connected shows *Connecting to …*; after 10 s, or when the session has no
-such tab (`tab.closed`, a snapshot without it, `layout_not_found`), the panel shows *This herdr tab
-was closed.* with every terminal gone and its streams released. If the session or tab comes back,
-so does the layout. This one path also serves restoring after a reload: the webview keeps
-`{"kind":"mirror","sessionKey","tabId"}` with `setState`, and the serializer hands that to a new
-panel.
+such space (`workspace.closed`, a snapshot without it), the panel shows *This herdr space was
+closed.* with every terminal gone and its streams released. If the session or space comes back, so
+does the layout. This one path also serves restoring after a reload: the webview keeps
+`{"kind":"space","sessionKey","workspaceId"}` with `setState`, and the serializer hands that to a
+new panel. A second restored panel of a space already open is disposed. State saved by builds where
+an editor tab was one herdr tab, `{"kind":"mirror","sessionKey","tabId"}`, is restored as that
+tab's space once the session is connected (without `tab.focus`); the next `setState` writes the new
+shape.
+
+### The shown tab and the strip
+
+Each snapshot workspace carries `active_tab_id` (herdr 0.9.5, protocol 22). The shown tab is that tab,
+or the space's first tab in the snapshot's `tabs` order when it is missing or not one of the space's.
+On every snapshot the panel compares; a different tab is switched to: the split state (structure key,
+ratios, in-flight ratios, zoom, focused tile) is dropped and a fresh `layout.export` loads the new
+tab, which moves its tiles in and the old ones out through the usual paths, so the old panes' streams
+are released. Clearing the structure key matters: two single-pane tabs have equal structure keys.
+An export, `set_split_ratio` or `pane.zoom` answer for a tab that is no longer shown is dropped.
+`layout_not_found` (the shown tab closed) is only logged; the next snapshot names herdr's new
+active tab.
+
+The strip (`meta.strip`) lists the space's tabs in the snapshot's `tabs` order (herdr's order,
+`tab.move` included, not `number`), each with the worst agent status of its panes (`shell` without
+agents). The webview updates its entries in place while the tab ids are unchanged, so a re-render
+cannot split a double-click across two elements.
+
+- Click on an entry that is not shown: `focusTab`. The host shows the tab at once and sends
+  `tab.focus {"tab_id"}`; the clicked tab stays shown until the snapshot's `active_tab_id` agrees,
+  for at most 2 s, then herdr's wins. An error from `tab.focus` goes back to herdr's tab at once.
+  Measured on herdr 0.9.5: `tab.focus` also makes the tab's space herdr's focused workspace
+  (`focused_workspace_id` moved to it), so the herdr TUI follows; the snapshot agreed 200–410 ms after
+  the click, and a `tab.focus` from outside switched the tiles in 380–490 ms.
+- **+** (`newTab`): `tab.create {"workspace_id","cwd","focus":true}`, `cwd` from the focused tile's
+  pane (`foreground_cwd`, else `cwd`), else the shown tab's first pane, else left out.
+- **×** (`closeTab`): a modal, then `tab.close {"tab_id"}`. Closing a space's last tab closes the
+  space (measured: `tab.close` answers ok and the workspace is gone from the next snapshot).
+- Double-click (`renameTab`): an input box, then `tab.rename {"tab_id","label"}`.
+
+`herdr.openSpace` opens or reveals the space's panel. `herdr.openTab` does the same for the tab's
+space and then selects the tab as a strip click does; `herdr.openPaneTab` also focuses the pane's
+tile once its tab is shown. A panel shows a pane (for `revealPane`, the status bar and Pane Context)
+only while the pane is in its shown tab.
 
 ### Pane streams
 

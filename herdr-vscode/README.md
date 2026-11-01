@@ -9,8 +9,9 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   it.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
-  their panes (`claude, copilot`, `2 shells`). Click a tab to open it in the editor
-  area (below); click a pane to put it in a Layout tab (below, or see `herdr.openPaneIn`).
+  their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or
+  a tab to open its space on that tab; click a pane to put it in a Layout tab (below, or see `herdr.openPaneIn`).
+  Space rows expand with their arrow.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
   tooltip); click it to go to Sessions.
 
@@ -28,17 +29,26 @@ reload; a state that began while VS Code was closed shows no time until it next 
   all sessions.
 - **Pane Context**: the repo, changes and files of the pane you are working with (below).
 
-## herdr tabs in the editor area
+## herdr spaces in the editor area
 
-Clicking a tab in **Spaces**, or **Open in herdr Tab** on a pane or agent row (the click itself when
-`herdr.openPaneIn` is `herdr`), opens that herdr tab as an editor tab: its split layout, with every pane a live terminal tile. One editor tab is one
-herdr tab, titled `<tab> · <space>`.
+Clicking a space in **Spaces** opens it as an editor tab, titled with the space's name. One editor tab is one
+herdr space. It shows the space's active herdr tab: its split layout, with every pane a live terminal
+tile. The toolbar's strip lists the space's tabs in herdr's order, each with its worst agent status.
+
+- The strip and herdr's active tab follow each other. Clicking a strip entry makes that tab herdr's active
+  tab, and a tab switch in the herdr TUI switches the editor tab within a second. herdr's tab focus also
+  moves the TUI to that space.
+- **+** on the strip creates a tab in the space, in the focused tile's directory, and shows it. **×** on an
+  entry closes that tab in herdr, after asking, because its processes end. Double-click an entry to rename it.
+  Closing a space's last tab closes the space; the editor tab then says *This herdr space was closed.*
+- Clicking a tab in **Spaces** opens its space on that tab. **Open in herdr Space** on a pane or agent row
+  (the click itself when `herdr.openPaneIn` is `herdr`) does the same for the pane's tab and focuses its tile.
 
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
   Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
 - **New Space** (Spaces title bar), **New Tab** (a space's row), and **Split Right** / **Split Down** (a tab's or
-  pane's row) create them in herdr and open the herdr tab they landed in.
+  pane's row) create them in herdr and open their space on the tab they landed in.
 - **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
   because every pane in the session closes. A started session has no spaces until you add one.
   **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
@@ -57,7 +67,8 @@ herdr tab, titled `<tab> · <space>`.
 - A pane has one viewer at a time, per herdr: opening it in a second VS Code window shows
   *Opened in another viewer.* in the first, with **Reconnect** to take it back.
 - The status bar shows the last focused tile's pane and state; click it to reveal the tile.
-- Editor tabs come back after a window reload.
+- Editor tabs come back after a window reload. Ones saved before editor tabs became spaces come back as
+  the space of the tab they showed.
 
 **Pane size:** a tile's size becomes the pane's real pty size, and it stays that way after the
 tile closes. A herdr TUI showing the same pane draws it at VS Code's size until the TUI resizes it
@@ -251,7 +262,7 @@ id; an agents section with only `rows_by_agent` leaves other agents' rows as the
 | `herdr.sshPath` | `"ssh"` | ssh client (application scope) |
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
 | `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
-| `herdr.openPaneIn` | `"layout"` | what clicking a pane or agent row does: `layout` adds it to a Layout tab, `herdr` opens its mirrored herdr tab |
+| `herdr.openPaneIn` | `"layout"` | what clicking a pane or agent row does: `layout` adds it to a Layout tab, `herdr` opens its herdr space on the pane's tab |
 | `herdr.useHerdrSidebarConfig` | `true` | lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).

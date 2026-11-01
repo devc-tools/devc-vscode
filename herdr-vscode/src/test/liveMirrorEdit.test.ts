@@ -98,7 +98,7 @@ function text(node: LayoutNode): string {
 		p2 = await split(p1, 'right');
 		p3 = await split(p2, 'down');
 		await waitFor('tab in snapshot', 5000, () => model.connection(key)?.snapshot?.panes.filter((p) => p.tab_id === tabId).length === 3);
-		panel = panels.openTab(key, tabId);
+		panel = panels.openTab(key, tabId)!;
 		await waitFor('three painted tiles', 15000, async () => {
 			const p = await panel.probe();
 			return p.tiles.length === 3 && p.tiles.every((t) => t.text.length > 0) && p;

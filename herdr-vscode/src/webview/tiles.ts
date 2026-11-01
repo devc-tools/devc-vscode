@@ -7,7 +7,7 @@ import './tiles.css';
 import { componentStates, PaneComponentState, SPLIT_ID_PREFIX, StoredLayoutConfig } from '../layoutMapping';
 import { changedRatios, dropZone, DropZone, offeredZone, sameRatio } from '../mirrorEdit';
 import { addPaneAtRoot, addPlacement, layoutPaneKeys, PANE_MIME, parseTileDrag, rewritePane } from '../layouts';
-import { DropPoint, HostMessage, makePaneKey, PanelState, ProbeAction, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
+import { DropPoint, HostMessage, makePaneKey, ProbeAction, StripTab, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
 import { GlDrop } from './glDrop';
 import { createWheelAccumulator, wrapPaste } from './input';
 import { findPathLinks } from './links';
@@ -56,13 +56,14 @@ let lastStack: Stack | undefined;
 let pendingFocus: string | undefined;
 let nextSerial = 0;
 let font: { fontFamily: string; fontSize: number } | undefined;
-let kind: PanelState['kind'] | undefined;
+let kind: 'mirror' | 'layout' | undefined;
 /** A Layout panel's layout id, for grip drags. */
 let layoutId: string | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 const breadcrumbEl = document.getElementById('breadcrumb') as HTMLElement;
 const messageEl = document.getElementById('message') as HTMLElement;
+const stripEl = document.getElementById('strip') as HTMLElement;
 const rootEl = document.getElementById('tiles') as HTMLElement;
 const placeOverlayEl = document.getElementById('place-overlay') as HTMLElement;
 const placeTitleEl = document.getElementById('place-title') as HTMLElement;
@@ -1196,6 +1197,18 @@ function runProbeAction(action: ProbeAction): void {
 		dragSplitter(action.splitId, action.fraction);
 	} else if (action.kind === 'dragTile') {
 		dragTile(action.paneKey, action.targetPaneKey, action.zone);
+	} else if (action.kind === 'clickStrip') {
+		const entry = stripEntry(action.tabId);
+		if (action.part === 'close') {
+			entry?.querySelector<HTMLElement>('.strip-close')?.click();
+		} else if (action.part === 'double') {
+			entry?.click();
+			entry?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+		} else {
+			entry?.click();
+		}
+	} else if (action.kind === 'clickNewTab') {
+		document.getElementById('strip-new')?.click();
 	} else if (action.kind === 'clickMaximise') {
 		tile?.host.closest('.lm_stack')?.querySelector<HTMLElement>('.lm_controls .lm_maximise')?.click();
 	} else if (action.kind === 'placeAt') {
@@ -1322,7 +1335,8 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	const msg = ev.data;
 	switch (msg.type) {
 		case 'init':
-			kind = msg.state.kind;
+			// A space panel (or one restored from a tab's state) is a mirror of herdr's layout.
+			kind = msg.state.kind === 'layout' ? 'layout' : 'mirror';
 			layoutId = msg.state.kind === 'layout' ? msg.state.layoutId : undefined;
 			document.body.classList.add(`kind-${kind}`);
 			vscode.setState(msg.state);
@@ -1380,6 +1394,9 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			break;
 		case 'meta':
 			breadcrumbEl.textContent = msg.breadcrumb;
+			if (msg.strip) {
+				renderStrip(msg.strip);
+			}
 			metas.clear();
 			for (const meta of msg.tiles) {
 				metas.set(meta.paneKey, meta);
@@ -1404,6 +1421,9 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 				id: msg.id,
 				tiles: [...tiles.values()].map(probeTile),
 				breadcrumb: breadcrumbEl.textContent ?? '',
+				strip: [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')].map(
+					(el) => `${el.classList.contains('strip-active') ? '*' : ''}${el.querySelector('.strip-label')?.textContent ?? ''}`,
+				),
 				message: messageEl.hidden ? '' : (messageEl.textContent ?? ''),
 				config: layout.saveLayout() as unknown as StoredLayoutConfig,
 				dragging: isDragging(),
@@ -1433,5 +1453,92 @@ for (const [id, send] of [
 	button.addEventListener('mousedown', (ev) => ev.preventDefault());
 	button.addEventListener('click', () => send());
 }
+
+// ── Tab strip (space panels) ─────────────────────────────────────────────────
+
+function stripEntry(tabId: string): HTMLElement | undefined {
+	return [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')].find((el) => el.dataset.tabId === tabId);
+}
+
+/**
+ * The space's herdr tabs. Entries are updated in place when the tabs are the
+ * same, so a double-click is not split across two elements by a re-render.
+ */
+function renderStrip(entries: StripTab[]): void {
+	const current = [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')];
+	const same = current.length === entries.length && current.every((el, i) => el.dataset.tabId === entries[i].tabId);
+	if (!same) {
+		stripEl.replaceChildren();
+		for (const entry of entries) {
+			const el = document.createElement('span');
+			el.className = 'strip-tab';
+			el.dataset.tabId = entry.tabId;
+			const dot = document.createElement('span');
+			const label = document.createElement('span');
+			label.className = 'strip-label';
+			const close = document.createElement('span');
+			close.className = 'strip-close';
+			close.textContent = '×';
+			close.title = 'Close Tab';
+			el.append(dot, label, close);
+			stripEl.append(el);
+		}
+		const add = document.createElement('span');
+		add.id = 'strip-new';
+		add.textContent = '+';
+		add.title = 'New Tab';
+		stripEl.append(add);
+	}
+	const els = [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')];
+	entries.forEach((entry, i) => {
+		const el = els[i];
+		el.classList.toggle('strip-active', entry.active);
+		el.title = entry.label;
+		(el.firstElementChild as HTMLElement).className = `tile-dot tile-dot-${entry.status}`;
+		const label = el.querySelector('.strip-label') as HTMLElement;
+		if (label.textContent !== entry.label) {
+			label.textContent = entry.label;
+		}
+	});
+	stripEl.querySelector<HTMLElement>('.strip-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// Keeps the keyboard focus in the tile, and a double-click from selecting text.
+stripEl.addEventListener('mousedown', (ev) => ev.preventDefault());
+stripEl.addEventListener('click', (ev) => {
+	const target = ev.target as Element;
+	if (target.closest('#strip-new')) {
+		post({ type: 'newTab' });
+		return;
+	}
+	const entry = target.closest<HTMLElement>('.strip-tab');
+	const tabId = entry?.dataset.tabId;
+	if (!entry || !tabId) {
+		return;
+	}
+	if (target.closest('.strip-close')) {
+		post({ type: 'closeTab', tabId });
+	} else if (!entry.classList.contains('strip-active')) {
+		post({ type: 'focusTab', tabId });
+	}
+});
+stripEl.addEventListener('dblclick', (ev) => {
+	const target = ev.target as Element;
+	const tabId = target.closest<HTMLElement>('.strip-tab')?.dataset.tabId;
+	if (tabId && !target.closest('.strip-close')) {
+		post({ type: 'renameTab', tabId });
+	}
+});
+// A vertical wheel scrolls the strip sideways.
+stripEl.addEventListener(
+	'wheel',
+	(ev) => {
+		if (ev.deltaY !== 0 && ev.deltaX === 0) {
+			stripEl.scrollLeft += ev.deltaY;
+			ev.preventDefault();
+		}
+	},
+	{ passive: false },
+);
 
 post({ type: 'ready' });

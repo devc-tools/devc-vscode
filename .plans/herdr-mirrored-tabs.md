@@ -5,6 +5,10 @@ as a VS Code editor tab whose content is that herdr tab's split layout, every pa
 terminal tile. One VS Code editor tab = one herdr tab; the space and session are context only
 (breadcrumb, title). Splits, closes and focus go to herdr; herdr's layout changes come back.
 
+> **Superseded scope (2026-11-01):** an editor tab now mirrors a herdr **space**, not a tab —
+> see [herdr-space-tabs](herdr-space-tabs.md). The rest of this plan (streams, tiles, layout
+> mapping) still applies to the space's shown tab.
+
 This plan also builds what [herdr-layout-tabs](herdr-layout-tabs.md) reuses: the webview bundle
 (Golden Layout + xterm), the pane stream manager, and focus tracking.
 

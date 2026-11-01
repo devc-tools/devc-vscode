@@ -17,6 +17,13 @@ export function splitPaneKey(paneKey: string): { sessionKey: string; paneId: str
 }
 
 /** What a webview keeps with `setState` to come back after a reload. */
+export interface SpacePanelState {
+	kind: 'space';
+	sessionKey: string;
+	workspaceId: string;
+}
+
+/** Saved by builds where an editor tab mirrored one herdr tab; restored as that tab's space. */
 export interface MirrorPanelState {
 	kind: 'mirror';
 	sessionKey: string;
@@ -28,7 +35,17 @@ export interface LayoutPanelState {
 	layoutId: string;
 }
 
-export type PanelState = MirrorPanelState | LayoutPanelState;
+export type PanelState = SpacePanelState | MirrorPanelState | LayoutPanelState;
+
+/** A space panel's tab strip entry: one of the space's herdr tabs. */
+export interface StripTab {
+	tabId: string;
+	label: string;
+	/** The worst agent status of the tab's panes; `shell` with no agents. */
+	status: TileMeta['status'];
+	/** The tab the panel shows. */
+	active: boolean;
+}
 
 /** A tile header: label, faded detail, and the status dot (`shell` for no agent). */
 export interface TileMeta {
@@ -54,7 +71,8 @@ export type HostMessage =
 	| { type: 'layout'; config: StoredLayoutConfig }
 	/** No layout: every tile goes away and `text` is shown instead. */
 	| { type: 'empty'; text: string }
-	| { type: 'meta'; breadcrumb: string; tiles: TileMeta[] }
+	/** `strip`: space panels only, the space's tabs in herdr's order. */
+	| { type: 'meta'; breadcrumb: string; tiles: TileMeta[]; strip?: StripTab[] }
 	| { type: 'frame'; paneKey: string; full: boolean; cols: number; rows: number; bytes: string }
 	| { type: 'tileState'; paneKey: string; state: TileStreamState }
 	| { type: 'focusTile'; paneKey: string }
@@ -107,7 +125,10 @@ export type ProbeAction =
 	/** Mirrored tabs: drags a tile's tab to a point inside `zone` of another tile, with synthetic pointer events. */
 	| { kind: 'dragTile'; paneKey: string; targetPaneKey: string; zone: DropZone }
 	/** The maximise control of a tile's stack. */
-	| { kind: 'clickMaximise'; paneKey: string };
+	| { kind: 'clickMaximise'; paneKey: string }
+	/** Space panels: a click on a tab strip entry (or its ×, or a double-click), or the strip's +. */
+	| { kind: 'clickStrip'; tabId: string; part: 'tab' | 'close' | 'double' }
+	| { kind: 'clickNewTab' };
 
 export interface TileProbe {
 	paneKey: string;
@@ -143,6 +164,14 @@ export type WebviewMessage =
 	/** A Layout panel's Golden Layout config, 500 ms after it last changed. */
 	| { type: 'layoutChanged'; config: StoredLayoutConfig }
 	| { type: 'renameLayout' }
+	/** Space panels: show this herdr tab (herdr's `tab.focus`). */
+	| { type: 'focusTab'; tabId: string }
+	/** Space panels: the strip's +. */
+	| { type: 'newTab' }
+	/** Space panels: a strip entry's ×. */
+	| { type: 'closeTab'; tabId: string }
+	/** Space panels: a strip entry was double-clicked. */
+	| { type: 'renameTab'; tabId: string }
 	| { type: 'reconnect'; paneKey: string }
 	| { type: 'clipboardPaste'; paneKey: string }
 	| { type: 'clipboardCopy'; text: string }
@@ -167,6 +196,8 @@ export type WebviewMessage =
 			tiles: TileProbe[];
 			breadcrumb: string;
 			message: string;
+			/** Space panels: the strip's entries as shown, `*` before the active one. */
+			strip: string[];
 			config: StoredLayoutConfig;
 			/** A Golden Layout tab drag is under way. */
 			dragging: boolean;

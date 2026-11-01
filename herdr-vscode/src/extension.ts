@@ -22,7 +22,7 @@ import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { AgentRow, AgentSource, AgentsView } from './views/agentsView';
 import { SessionRowNode, SessionsView } from './views/sessionsView';
-import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesNode, SpacesView, TabNode } from './views/spacesView';
+import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -328,6 +328,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				await m.request(ref.sessionKey, 'pane.focus', { pane_id: ref.paneId });
 			} catch (err) {
 				void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+			}
+		}),
+		vscode.commands.registerCommand(OPEN_SPACE_COMMAND, (sessionKey?: string, workspaceId?: string) => {
+			if (sessionKey && workspaceId) {
+				panels.openSpace(sessionKey, workspaceId);
 			}
 		}),
 		vscode.commands.registerCommand(OPEN_TAB_COMMAND, (sessionKey?: string, tabId?: string) => {

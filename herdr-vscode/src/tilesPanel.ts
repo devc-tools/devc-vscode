@@ -6,6 +6,7 @@ import { asLayoutConfig, copyLayoutName, layoutPaneKeys, LayoutStore, nextLayout
 import { changedRatios, clampRatio, dropRequests, herdrPath, refusal, sameRatio, zoomedAfter, zoomRequests } from './mirrorEdit';
 import { PanePlacement, PlacementPanel, PLACING_PANE_KEY } from './paneDrag';
 import { hasAgent, paneLabel, SessionModel, SessionConnection, Snapshot } from './sessions';
+import { worstStatus } from './status';
 import { PaneFrame, PaneStreams, PaneViewer } from './streams';
 import {
 	HostMessage,
@@ -13,6 +14,7 @@ import {
 	PanelState,
 	ProbeAction,
 	splitPaneKey,
+	StripTab,
 	TileMeta,
 	TileProbe,
 	TileStreamState,
@@ -23,7 +25,7 @@ import { wrapPaste } from './webview/input';
 export const TILES_VIEW_TYPE = 'herdr.tiles';
 
 const REEXPORT_DEBOUNCE_MS = 100;
-/** How long a panel waits for its session before saying the tab is gone. */
+/** How long a panel waits for its session before saying the space is gone. */
 const CONNECT_WAIT_MS = 10000;
 
 /** The events that can change a tab's split tree or labels. */
@@ -64,14 +66,24 @@ export function eventTouchesTab(ev: HerdrEvent, tabId: string, tabOfPane: (paneI
 	return known === undefined || known === tabId;
 }
 
-/** `<tab label> · <space label>`. */
-export function panelTitle(snapshot: Snapshot, tabId: string): string | undefined {
-	const tab = snapshot.tabs.find((t) => t.tab_id === tabId);
-	if (!tab) {
-		return undefined;
-	}
-	const space = snapshot.workspaces.find((w) => w.workspace_id === tab.workspace_id);
-	return `${tab.label} · ${space?.label ?? tab.workspace_id}`;
+/**
+ * The tab herdr shows in a space: its `active_tab_id`, else (missing, or not
+ * one of the space's tabs) the space's first tab in snapshot order.
+ */
+export function activeTabOf(snapshot: Snapshot, workspaceId: string): string | undefined {
+	const tabs = snapshot.tabs.filter((t) => t.workspace_id === workspaceId);
+	const active = snapshot.workspaces.find((w) => w.workspace_id === workspaceId)?.activeTabId;
+	return tabs.find((t) => t.tab_id === active)?.tab_id ?? tabs[0]?.tab_id;
+}
+
+/** A space panel's tab strip: the space's tabs in herdr's (snapshot) order, `shown` marked active. */
+export function stripTabs(snapshot: Snapshot, workspaceId: string, shown: string | undefined): StripTab[] {
+	return snapshot.tabs
+		.filter((t) => t.workspace_id === workspaceId)
+		.map((t) => {
+			const agents = snapshot.panes.filter((p) => p.tab_id === t.tab_id && hasAgent(p)).map((p) => p.agent_status);
+			return { tabId: t.tab_id, label: t.label, status: worstStatus(agents) ?? 'shell', active: t.tab_id === shown };
+		});
 }
 
 /** The tile headers of a tab's panes. */
@@ -138,6 +150,7 @@ function panelHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
 <body>
 <div id="toolbar">
 <span id="breadcrumb"></span>
+<div id="strip" class="mirror-only"></div>
 <button id="copy-layout" class="mirror-only">Copy as Layout</button>
 <button id="split-right" class="mirror-only">Split Right</button>
 <button id="split-down" class="mirror-only">Split Down</button>
@@ -198,6 +211,8 @@ type ProbeResult = {
 	tiles: TileProbe[];
 	breadcrumb: string;
 	message: string;
+	/** Space panels: the strip's entries, `*` before the active one. */
+	strip: string[];
 	config: StoredLayoutConfig | undefined;
 	dragging?: boolean;
 	ratios?: Record<string, number>;
@@ -267,7 +282,7 @@ abstract class TilesPanel implements PaneViewer {
 	/** Test support: what the webview shows, optionally after a key press or click in a tile. */
 	probe(action?: ProbeAction): Promise<ProbeResult> {
 		if (!this.ready) {
-			return Promise.resolve({ tiles: [], breadcrumb: '', message: '', config: undefined });
+			return Promise.resolve({ tiles: [], breadcrumb: '', message: '', strip: [], config: undefined });
 		}
 		const id = ++this.nextProbe;
 		return new Promise((resolve) => {
@@ -375,8 +390,19 @@ abstract class TilesPanel implements PaneViewer {
 	protected onDispose(): void {}
 }
 
-/** One editor tab mirroring one herdr tab. */
+/** How long a strip click's tab stays shown while herdr's snapshot catches up with its `tab.focus`. */
+const PENDING_TAB_MS = 2000;
+
+/**
+ * One editor tab mirroring one herdr space: the space's active tab as tiles,
+ * and a strip of its tabs synced both ways with herdr's active tab.
+ */
 export class MirrorPanel extends TilesPanel {
+	/** The tab whose tiles are shown: the space's active tab, or a strip click's while herdr catches up. */
+	tabId: string | undefined;
+	/** A strip click's tab, until the snapshot's `active_tab_id` agrees or `until` passes. */
+	private pendingTab: { id: string; until: number } | undefined;
+	private pendingTimer: NodeJS.Timeout | undefined;
 	/** The structure of the split tree in `view` (no ratios); undefined when none is loaded. */
 	private structure: string | undefined;
 	/** herdr's split ratios by path key, from the last export or `set_split_ratio` answer. */
@@ -394,18 +420,28 @@ export class MirrorPanel extends TilesPanel {
 	private exporting = false;
 	private exportDirty = false;
 	private connectTimer: NodeJS.Timeout | undefined;
-	private tabClosed = false;
-	private focusOnReady: string | undefined;
+	private spaceClosed = false;
+	/** A pane to focus once its tile is on screen. */
+	private focusWhenShown: string | undefined;
+	private readonly resolveEmitter = new vscode.EventEmitter<void>();
+	/** A panel restored from a tab's saved state found its space. */
+	readonly onDidResolveSpace = this.resolveEmitter.event;
 
+	/**
+	 * `workspaceId` undefined: restored from an older build's state, which names
+	 * only `legacyTabId`; the space is that tab's, once the session is connected.
+	 */
 	constructor(
 		panel: vscode.WebviewPanel,
 		readonly sessionKey: string,
-		readonly tabId: string,
+		public workspaceId: string | undefined,
 		deps: TilesDeps,
 		private readonly copyAsLayout: (config: StoredLayoutConfig, tabLabel: string, spaceLabel: string) => void,
+		private readonly legacyTabId?: string,
 	) {
 		super(panel, deps, 'herdr.svg');
 		this.disposables.push(
+			this.resolveEmitter,
 			deps.model.onDidChange(() => this.sync()),
 			deps.model.onDidEvent((e) => {
 				if (e.sessionKey === sessionKey) {
@@ -429,13 +465,14 @@ export class MirrorPanel extends TilesPanel {
 		this.reveal(paneId);
 	}
 
-	/** Brings the panel forward, optionally focusing a pane's tile. */
+	/** Brings the panel forward, optionally focusing a pane's tile (once its tab is shown). */
 	reveal(paneId?: string): void {
 		this.panel.reveal(undefined, false);
-		if (paneId && this.ready) {
+		if (paneId && this.ready && this.paneIds.has(paneId)) {
+			this.focusWhenShown = undefined;
 			this.post({ type: 'focusTile', paneKey: makePaneKey(this.sessionKey, paneId) });
 		} else if (paneId) {
-			this.focusOnReady = paneId;
+			this.focusWhenShown = paneId;
 		}
 	}
 
@@ -450,6 +487,7 @@ export class MirrorPanel extends TilesPanel {
 		this.structure = undefined;
 		this.ratios = {};
 		this.zoomedPane = undefined;
+		this.tabId = undefined;
 		this.paneIds = new Set();
 		this.deps.tilesChanged?.();
 		this.focusedPane = undefined;
@@ -459,8 +497,8 @@ export class MirrorPanel extends TilesPanel {
 	}
 
 	private showClosed(): void {
-		this.tabClosed = true;
-		this.showEmpty('This herdr tab was closed.');
+		this.spaceClosed = true;
+		this.showEmpty('This herdr space was closed.');
 	}
 
 	/** Brings the panel in line with the session model. */
@@ -470,7 +508,7 @@ export class MirrorPanel extends TilesPanel {
 		}
 		const snapshot = this.snapshot;
 		if (!snapshot) {
-			if (this.connectTimer === undefined && !this.tabClosed) {
+			if (this.connectTimer === undefined && !this.spaceClosed) {
 				this.connectTimer = setTimeout(() => this.showClosed(), CONNECT_WAIT_MS);
 				this.showEmpty(`Connecting to ${this.deps.rowLabel(this.sessionKey) ?? this.sessionKey.split('/').pop()}…`);
 			}
@@ -478,42 +516,134 @@ export class MirrorPanel extends TilesPanel {
 		}
 		clearTimeout(this.connectTimer);
 		this.connectTimer = undefined;
-		if (!snapshot.tabs.some((t) => t.tab_id === this.tabId)) {
+		if (this.workspaceId === undefined) {
+			const tab = snapshot.tabs.find((t) => t.tab_id === this.legacyTabId);
+			if (!tab) {
+				this.showClosed();
+				return;
+			}
+			this.workspaceId = tab.workspace_id;
+			this.post({ type: 'init', state: this.panelState() });
+			this.resolveEmitter.fire();
+			if (this.disposedFlag) {
+				return;
+			}
+		}
+		const workspaceId = this.workspaceId;
+		const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
+		if (!space) {
 			this.showClosed();
 			return;
 		}
-		this.tabClosed = false;
-		const title = panelTitle(snapshot, this.tabId);
-		if (title && this.panel.title !== title) {
-			this.panel.title = title;
+		this.spaceClosed = false;
+		if (this.panel.title !== space.label) {
+			this.panel.title = space.label;
+		}
+		const active = activeTabOf(snapshot, workspaceId);
+		let shown = active;
+		const pending = this.pendingTab;
+		if (pending) {
+			const stillThere = snapshot.tabs.some((t) => t.tab_id === pending.id && t.workspace_id === workspaceId);
+			if (active === pending.id || !stillThere || Date.now() >= pending.until) {
+				this.clearPending();
+			} else {
+				shown = pending.id;
+			}
+		}
+		if (shown === undefined) {
+			this.showClosed();
+			return;
+		}
+		if (shown !== this.tabId) {
+			this.switchTo(shown);
 		}
 		this.sendMeta(snapshot);
 		// Whatever the events said: a tab whose panes are not the ones on screen needs a new layout.
-		const panes = snapshot.panes.filter((p) => p.tab_id === this.tabId).map((p) => p.pane_id);
+		const panes = snapshot.panes.filter((p) => p.tab_id === shown).map((p) => p.pane_id);
 		if (this.structure === undefined || panes.length !== this.paneIds.size || panes.some((id) => !this.paneIds.has(id))) {
 			this.scheduleExport();
 		}
 	}
 
+	/** Shows another of the space's tabs: its own split state, its tiles from a fresh export. */
+	private switchTo(tabId: string): void {
+		this.tabId = tabId;
+		clearTimeout(this.exportTimer);
+		this.exportTimer = undefined;
+		this.structure = undefined;
+		this.ratios = {};
+		this.ratiosInFlight.clear();
+		this.zoomedPane = undefined;
+		this.focusedPane = undefined;
+		this.herdrFocusedPane = undefined;
+		this.paneIds = new Set();
+		this.deps.tilesChanged?.();
+		this.scheduleExport();
+	}
+
+	private clearPending(): void {
+		this.pendingTab = undefined;
+		clearTimeout(this.pendingTimer);
+		this.pendingTimer = undefined;
+	}
+
+	/**
+	 * Shows `tabId` at once and makes it herdr's active tab (`tab.focus`). The
+	 * snapshot confirms it; on an error the panel goes back to herdr's.
+	 */
+	async selectTab(tabId: string): Promise<void> {
+		const snapshot = this.snapshot;
+		const workspaceId = this.workspaceId;
+		if (!snapshot || workspaceId === undefined || this.pendingTab?.id === tabId) {
+			return;
+		}
+		if (!snapshot.tabs.some((t) => t.tab_id === tabId && t.workspace_id === workspaceId)) {
+			return;
+		}
+		if (activeTabOf(snapshot, workspaceId) === tabId) {
+			this.clearPending();
+			this.sync();
+			return;
+		}
+		this.clearPending();
+		this.pendingTab = { id: tabId, until: Date.now() + PENDING_TAB_MS };
+		this.pendingTimer = setTimeout(() => this.sync(), PENDING_TAB_MS + 10);
+		this.sync();
+		try {
+			await this.deps.model.request(this.sessionKey, 'tab.focus', { tab_id: tabId });
+		} catch (err) {
+			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+			if (this.pendingTab?.id === tabId) {
+				this.clearPending();
+				this.sync();
+			}
+		}
+	}
+
 	private sendMeta(snapshot: Snapshot): void {
-		const tab = snapshot.tabs.find((t) => t.tab_id === this.tabId);
-		const space = snapshot.workspaces.find((w) => w.workspace_id === tab?.workspace_id);
+		const workspaceId = this.workspaceId;
+		const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
 		const row = this.deps.rowLabel(this.sessionKey) ?? this.sessionKey;
 		this.post({
 			type: 'meta',
-			breadcrumb: `${row} › ${space?.label ?? ''} › ${tab?.label ?? ''}`,
-			tiles: tileMetas(snapshot, this.sessionKey, this.tabId),
+			breadcrumb: `${row} › ${space?.label ?? ''}`,
+			tiles: this.tabId ? tileMetas(snapshot, this.sessionKey, this.tabId) : [],
+			strip: workspaceId !== undefined ? stripTabs(snapshot, workspaceId, this.tabId) : [],
 		});
 	}
 
 	private onEvent(ev: HerdrEvent): void {
-		if (ev.event === 'tab.closed' && ev.data.tab_id === this.tabId) {
+		if (ev.event === 'workspace.closed' && this.workspaceId !== undefined && ev.data.workspace_id === this.workspaceId) {
 			this.showClosed();
+			return;
+		}
+		const tabId = this.tabId;
+		if (tabId === undefined) {
 			return;
 		}
 		const snapshot = this.snapshot;
 		const tabOfPane = (id: string) => snapshot?.panes.find((p) => p.pane_id === id)?.tab_id;
-		if (ev.event === 'events_lost' || eventTouchesTab(ev, this.tabId, tabOfPane)) {
+		if (ev.event === 'events_lost' || eventTouchesTab(ev, tabId, tabOfPane)) {
 			this.scheduleExport();
 		}
 	}
@@ -532,25 +662,23 @@ export class MirrorPanel extends TilesPanel {
 			this.exportDirty = true;
 			return;
 		}
+		const tabId = this.tabId;
+		if (tabId === undefined) {
+			return;
+		}
 		this.exporting = true;
 		try {
-			const result = await this.deps.model.request(
-				this.sessionKey,
-				'layout.export',
-				{ tab_id: this.tabId },
-			);
-			if (!this.disposedFlag) {
+			const result = await this.deps.model.request(this.sessionKey, 'layout.export', { tab_id: tabId });
+			// The panel may have switched tabs meanwhile: an old tab's answer is not this tab's layout.
+			if (!this.disposedFlag && tabId === this.tabId) {
 				this.applyExport(result);
 			}
 		} catch (err) {
 			if (this.disposedFlag) {
 				return;
 			}
-			if (err instanceof BridgeError && err.code === 'layout_not_found') {
-				this.showClosed();
-			} else {
-				this.deps.log(`${this.sessionKey}: layout.export ${this.tabId} failed: ${(err as Error).message}`);
-			}
+			// `layout_not_found`: the tab closed; the snapshot will name the space's next active tab.
+			this.deps.log(`${this.sessionKey}: layout.export ${tabId} failed: ${(err as Error).message}`);
 		} finally {
 			this.exporting = false;
 			if (this.exportDirty) {
@@ -566,7 +694,9 @@ export class MirrorPanel extends TilesPanel {
 			this.deps.log(`${this.sessionKey}: layout.export ${this.tabId}: unexpected reply`);
 			return;
 		}
-		this.tabClosed = false;
+		if (layout.tab_id && layout.tab_id !== this.tabId) {
+			return;
+		}
 		this.herdrFocusedPane = layout.focused_pane_id;
 		this.paneIds = new Set(layoutPaneIds(layout.root));
 		this.deps.tilesChanged?.();
@@ -575,7 +705,7 @@ export class MirrorPanel extends TilesPanel {
 		const snapshot = this.snapshot;
 		const config = this.configOf(layout);
 		if (structure !== this.structure) {
-			// Panes added, removed, moved, swapped: a new Golden Layout tree, then herdr's zoom on it.
+			// Panes added, removed, moved, swapped, or another tab: a new Golden Layout tree, then herdr's zoom on it.
 			this.structure = structure;
 			this.ratios = ratios;
 			this.setView({ type: 'layout', config });
@@ -586,6 +716,7 @@ export class MirrorPanel extends TilesPanel {
 			if (snapshot) {
 				this.sendMeta(snapshot);
 			}
+			this.focusPending();
 			return;
 		}
 		// The same tree: splitters move in place, terminals and focus stay.
@@ -604,6 +735,16 @@ export class MirrorPanel extends TilesPanel {
 			this.zoomedPane = zoomed;
 			this.postZoom();
 		}
+		this.focusPending();
+	}
+
+	/** Focuses the tile `reveal` asked for, once it is on screen. */
+	private focusPending(): void {
+		const paneId = this.focusWhenShown;
+		if (paneId && this.ready && this.paneIds.has(paneId)) {
+			this.focusWhenShown = undefined;
+			this.post({ type: 'focusTile', paneKey: makePaneKey(this.sessionKey, paneId) });
+		}
 	}
 
 	private configOf(layout: LayoutExport): StoredLayoutConfig {
@@ -621,7 +762,11 @@ export class MirrorPanel extends TilesPanel {
 
 	/** Splitter drags in the webview: each changed split to herdr, one request at a time. */
 	private async setRatios(ratios: Record<string, number>): Promise<void> {
+		const tabId = this.tabId;
 		for (const [key, wanted] of Object.entries(ratios)) {
+			if (tabId === undefined || tabId !== this.tabId) {
+				return;
+			}
 			if (this.structure === undefined || this.ratios[key] === undefined || this.ratiosInFlight.has(key)) {
 				continue;
 			}
@@ -629,10 +774,13 @@ export class MirrorPanel extends TilesPanel {
 			this.ratiosInFlight.add(key);
 			try {
 				const result = await this.deps.model.request(this.sessionKey, 'layout.set_split_ratio', {
-					tab_id: this.tabId,
+					tab_id: tabId,
 					path: herdrPath(key),
 					ratio,
 				});
+				if (tabId !== this.tabId) {
+					return;
+				}
 				const layout = parseLayoutExport(result);
 				const got = layout ? ratiosByPath(layout.root)[key] : undefined;
 				if (got !== undefined && !this.disposedFlag) {
@@ -643,14 +791,19 @@ export class MirrorPanel extends TilesPanel {
 					}
 				}
 			} catch (err) {
-				this.deps.log(`${this.sessionKey}: layout.set_split_ratio ${this.tabId} ${key} failed: ${(err as Error).message}`);
+				this.deps.log(`${this.sessionKey}: layout.set_split_ratio ${tabId} ${key} failed: ${(err as Error).message}`);
+				if (tabId !== this.tabId) {
+					return;
+				}
 				const stored = this.ratios[key];
 				if (stored !== undefined) {
 					this.post({ type: 'ratios', ratios: { [key]: stored } });
 				}
 				this.scheduleExport();
 			} finally {
-				this.ratiosInFlight.delete(key);
+				if (tabId === this.tabId) {
+					this.ratiosInFlight.delete(key);
+				}
 			}
 		}
 	}
@@ -659,7 +812,9 @@ export class MirrorPanel extends TilesPanel {
 	private async movePane(msg: Extract<WebviewMessage, { type: 'movePane' }>): Promise<void> {
 		const source = splitPaneKey(msg.paneKey);
 		const target = splitPaneKey(msg.targetPaneKey);
+		const tabId = this.tabId;
 		if (
+			tabId === undefined ||
 			source.sessionKey !== this.sessionKey ||
 			target.sessionKey !== this.sessionKey ||
 			!this.paneIds.has(source.paneId) ||
@@ -668,7 +823,7 @@ export class MirrorPanel extends TilesPanel {
 		) {
 			return;
 		}
-		for (const { method, params } of dropRequests(msg.zone, source.paneId, target.paneId, this.tabId)) {
+		for (const { method, params } of dropRequests(msg.zone, source.paneId, target.paneId, tabId)) {
 			try {
 				const reason = refusal(await this.deps.model.request(this.sessionKey, method, params));
 				if (reason) {
@@ -698,6 +853,7 @@ export class MirrorPanel extends TilesPanel {
 		if (requests.length === 0 || this.zoomBusy) {
 			return;
 		}
+		const tabId = this.tabId;
 		this.zoomBusy = true;
 		let last: unknown;
 		try {
@@ -706,13 +862,18 @@ export class MirrorPanel extends TilesPanel {
 			}
 		} catch (err) {
 			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
-			this.postZoom();
+			if (tabId === this.tabId) {
+				this.postZoom();
+			}
 			return;
 		} finally {
 			this.zoomBusy = false;
 		}
+		if (tabId !== this.tabId || this.disposedFlag) {
+			return;
+		}
 		const after = zoomedAfter(last);
-		if (after === undefined || this.disposedFlag) {
+		if (after === undefined) {
 			this.scheduleExport();
 			return;
 		}
@@ -733,13 +894,21 @@ export class MirrorPanel extends TilesPanel {
 		return this.paneIds.values().next().value;
 	}
 
+	/** The working directory a new pane or tab starts in: the action pane's. */
+	private actionCwd(): string | undefined {
+		const paneId = this.actionPane();
+		const snapshot = this.snapshot;
+		const pane =
+			snapshot?.panes.find((p) => p.pane_id === paneId) ?? snapshot?.panes.find((p) => p.tab_id === this.tabId);
+		return pane?.foreground_cwd ?? pane?.cwd;
+	}
+
 	private async split(direction: 'right' | 'down'): Promise<void> {
 		const paneId = this.actionPane();
 		if (!paneId) {
 			return;
 		}
-		const pane = this.snapshot?.panes.find((p) => p.pane_id === paneId);
-		const cwd = pane?.foreground_cwd ?? pane?.cwd;
+		const cwd = this.actionCwd();
 		try {
 			await this.deps.model.request(this.sessionKey, 'pane.split', {
 				target_pane_id: paneId,
@@ -772,8 +941,77 @@ export class MirrorPanel extends TilesPanel {
 		}
 	}
 
+	/** The strip's +: a new tab in this space, made herdr's active tab; the snapshot brings it here. */
+	async newTab(): Promise<void> {
+		if (this.workspaceId === undefined) {
+			return;
+		}
+		const cwd = this.actionCwd();
+		try {
+			await this.deps.model.request(this.sessionKey, 'tab.create', {
+				workspace_id: this.workspaceId,
+				...(cwd ? { cwd } : {}),
+				focus: true,
+			});
+		} catch (err) {
+			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+		}
+	}
+
+	private tabLabel(tabId: string): string | undefined {
+		return this.snapshot?.tabs.find((t) => t.tab_id === tabId)?.label;
+	}
+
+	/** A strip entry's ×, after asking. */
+	async closeTab(tabId: string, confirm = true): Promise<void> {
+		const label = this.tabLabel(tabId);
+		if (label === undefined) {
+			return;
+		}
+		try {
+			if (confirm) {
+				const answer = await vscode.window.showWarningMessage(
+					`Close tab "${label}" in herdr? Its processes end.`,
+					{ modal: true },
+					'Close Tab',
+				);
+				if (answer !== 'Close Tab') {
+					return;
+				}
+			}
+			await this.deps.model.request(this.sessionKey, 'tab.close', { tab_id: tabId });
+		} catch (err) {
+			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+		}
+	}
+
+	/** A strip entry's double-click; `name` skips the input box (tests). */
+	async renameTab(tabId: string, name?: string): Promise<void> {
+		const label = this.tabLabel(tabId);
+		if (label === undefined) {
+			return;
+		}
+		const wanted =
+			name ??
+			(await vscode.window.showInputBox({
+				prompt: 'Rename herdr tab',
+				value: label,
+				validateInput: (v) => (v.trim() ? undefined : 'Enter a name.'),
+			}));
+		if (wanted === undefined || !wanted.trim()) {
+			return;
+		}
+		try {
+			await this.deps.model.request(this.sessionKey, 'tab.rename', { tab_id: tabId, label: wanted.trim() });
+		} catch (err) {
+			void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+		}
+	}
+
 	protected panelState(): PanelState {
-		return { kind: 'mirror', sessionKey: this.sessionKey, tabId: this.tabId };
+		return this.workspaceId !== undefined
+			? { kind: 'space', sessionKey: this.sessionKey, workspaceId: this.workspaceId }
+			: { kind: 'mirror', sessionKey: this.sessionKey, tabId: this.legacyTabId ?? '' };
 	}
 
 	protected onReady(): void {
@@ -784,10 +1022,7 @@ export class MirrorPanel extends TilesPanel {
 		if (this.view?.type === 'layout') {
 			this.postZoom();
 		}
-		if (this.focusOnReady) {
-			this.post({ type: 'focusTile', paneKey: makePaneKey(this.sessionKey, this.focusOnReady) });
-			this.focusOnReady = undefined;
-		}
+		this.focusPending();
 	}
 
 	protected tileFocused(paneId: string): void {
@@ -811,6 +1046,18 @@ export class MirrorPanel extends TilesPanel {
 			case 'setZoom':
 				void this.setZoom(msg.paneKey);
 				break;
+			case 'focusTab':
+				void this.selectTab(msg.tabId);
+				break;
+			case 'newTab':
+				void this.newTab();
+				break;
+			case 'closeTab':
+				void this.closeTab(msg.tabId);
+				break;
+			case 'renameTab':
+				void this.renameTab(msg.tabId);
+				break;
 			case 'copyAsLayout': {
 				const snapshot = this.snapshot;
 				const tab = snapshot?.tabs.find((t) => t.tab_id === this.tabId);
@@ -826,6 +1073,7 @@ export class MirrorPanel extends TilesPanel {
 	protected onDispose(): void {
 		clearTimeout(this.exportTimer);
 		clearTimeout(this.connectTimer);
+		clearTimeout(this.pendingTimer);
 	}
 }
 
@@ -1055,6 +1303,8 @@ export class LayoutPanel extends TilesPanel implements PlacementPanel {
 /** Every `herdr.tiles` panel of the window. */
 export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerializer {
 	private readonly panels = new Map<string, MirrorPanel>();
+	/** Panels restored from a tab's state whose space is not known yet. */
+	private readonly unresolved = new Set<MirrorPanel>();
 	private readonly layoutPanels = new Map<string, LayoutPanel>();
 	/** Open Layout panels, most recently active first. */
 	private recentLayouts: string[] = [];
@@ -1110,20 +1360,44 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 	}
 
 	private allPanels(): (MirrorPanel | LayoutPanel)[] {
-		return [...this.panels.values(), ...this.layoutPanels.values()];
+		return [...this.panels.values(), ...this.unresolved, ...this.layoutPanels.values()];
 	}
 
-	private track(panel: vscode.WebviewPanel, sessionKey: string, tabId: string): MirrorPanel {
-		const mirror = new MirrorPanel(panel, sessionKey, tabId, this.deps, (config, tabLabel, spaceLabel) =>
-			this.copyAsLayout(config, tabLabel, spaceLabel),
+	/** `workspaceId` undefined: an older build's state, resolved to `legacyTabId`'s space once connected. */
+	private track(panel: vscode.WebviewPanel, sessionKey: string, workspaceId: string | undefined, legacyTabId?: string): MirrorPanel {
+		const mirror = new MirrorPanel(
+			panel,
+			sessionKey,
+			workspaceId,
+			this.deps,
+			(config, tabLabel, spaceLabel) => this.copyAsLayout(config, tabLabel, spaceLabel),
+			legacyTabId,
 		);
-		const key = `${sessionKey}|${tabId}`;
-		this.panels.set(key, mirror);
-		mirror.onDidDispose(() => {
-			if (this.panels.get(key) === mirror) {
-				this.panels.delete(key);
-				this.tilesEmitter.fire();
+		const keyOf = () => (mirror.workspaceId !== undefined ? `${sessionKey}|${mirror.workspaceId}` : undefined);
+		const register = () => {
+			const key = keyOf();
+			if (key === undefined) {
+				this.unresolved.add(mirror);
+				return;
 			}
+			this.unresolved.delete(mirror);
+			const other = this.panels.get(key);
+			if (other && other !== mirror) {
+				// A second restored panel of one space: the first one wins.
+				mirror.panel.dispose();
+				return;
+			}
+			this.panels.set(key, mirror);
+		};
+		register();
+		mirror.onDidResolveSpace(register);
+		mirror.onDidDispose(() => {
+			this.unresolved.delete(mirror);
+			const key = keyOf();
+			if (key !== undefined && this.panels.get(key) === mirror) {
+				this.panels.delete(key);
+			}
+			this.tilesEmitter.fire();
 		});
 		return mirror;
 	}
@@ -1164,19 +1438,31 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 		return this.allPanels().some((p) => p.showsPane(sessionKey, paneId));
 	}
 
-	/** Reveals the panel showing (session, tab), else creates one in the active column. */
-	openTab(sessionKey: string, tabId: string): MirrorPanel {
-		const existing = this.panels.get(`${sessionKey}|${tabId}`);
+	/** Reveals the panel of (session, space), else creates one in the active column. Leaves herdr's active tab alone. */
+	openSpace(sessionKey: string, workspaceId: string): MirrorPanel {
+		const existing = this.panels.get(`${sessionKey}|${workspaceId}`);
 		if (existing) {
 			existing.reveal();
 			return existing;
 		}
 		const snapshot = this.deps.model.connection(sessionKey)?.snapshot;
-		const panel = this.createPanel((snapshot && panelTitle(snapshot, tabId)) ?? 'herdr');
-		return this.track(panel, sessionKey, tabId);
+		const label = snapshot?.workspaces.find((w) => w.workspace_id === workspaceId)?.label;
+		return this.track(this.createPanel(label ?? 'herdr'), sessionKey, workspaceId);
 	}
 
-	/** Opens the pane's tab, then focuses the pane's tile. */
+	/** Opens the tab's space, and makes the tab herdr's active tab there. */
+	openTab(sessionKey: string, tabId: string): MirrorPanel | undefined {
+		const tab = this.deps.model.connection(sessionKey)?.snapshot?.tabs.find((t) => t.tab_id === tabId);
+		if (!tab) {
+			void vscode.window.showWarningMessage('herdr: that tab is not available.');
+			return undefined;
+		}
+		const panel = this.openSpace(sessionKey, tab.workspace_id);
+		void panel.selectTab(tabId);
+		return panel;
+	}
+
+	/** Opens the pane's tab, then focuses the pane's tile once it is shown. */
 	openPaneTab(sessionKey: string, paneId: string): MirrorPanel | undefined {
 		const tabId = this.deps.model.connection(sessionKey)?.snapshot?.panes.find((p) => p.pane_id === paneId)?.tab_id;
 		if (!tabId) {
@@ -1184,7 +1470,7 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 			return undefined;
 		}
 		const panel = this.openTab(sessionKey, tabId);
-		panel.reveal(paneId);
+		panel?.reveal(paneId);
 		return panel;
 	}
 
@@ -1275,8 +1561,14 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 
 	async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
 		const s = state as Partial<PanelState> | undefined;
-		if (s?.kind === 'mirror' && s.sessionKey && s.tabId) {
-			this.track(panel, s.sessionKey, s.tabId);
+		if (s?.kind === 'space' && s.sessionKey && s.workspaceId) {
+			if (this.panels.has(`${s.sessionKey}|${s.workspaceId}`)) {
+				panel.dispose(); // the first one wins
+				return;
+			}
+			this.track(panel, s.sessionKey, s.workspaceId);
+		} else if (s?.kind === 'mirror' && s.sessionKey && s.tabId) {
+			this.track(panel, s.sessionKey, undefined, s.tabId);
 		} else if (s?.kind === 'layout' && s.layoutId && this.deps.layouts.get(s.layoutId)) {
 			this.trackLayout(panel, s.layoutId);
 		} else {

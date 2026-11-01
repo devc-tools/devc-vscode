@@ -13,9 +13,10 @@ export const RAW_SNAPSHOT = {
 			number: 2,
 			label: 'api',
 			focused: true,
+			active_tab_id: 'w2:t1',
 			worktree: { repo_key: 'api', repo_name: 'api', repo_root: '/src/api', checkout_path: '/src/api', is_linked_worktree: false },
 		},
-		{ workspace_id: 'w1', number: 1, label: 'web', focused: false, worktree: { repo_name: 'frontend' } },
+		{ workspace_id: 'w1', number: 1, label: 'web', focused: false, active_tab_id: 'w1:t1', worktree: { repo_name: 'frontend' } },
 	],
 	tabs: [
 		{ tab_id: 'w1:t2', workspace_id: 'w1', number: 2, label: 'logs', focused: false },
