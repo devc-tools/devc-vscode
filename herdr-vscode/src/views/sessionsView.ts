@@ -28,6 +28,8 @@ export interface SessionRowNode {
 	tooltip: string;
 	snapshot?: Snapshot;
 	groupId: string;
+	/** A listed session other than herdr's default one: it can be deleted. */
+	deletable?: boolean;
 }
 
 export type SessionsNode = GroupNode | SessionRowNode;
@@ -122,6 +124,7 @@ export function sessionRows(
 			tooltip: version ? `${key}\nherdr ${version}` : key,
 			snapshot: conn?.state === 'connected' ? conn.snapshot : undefined,
 			groupId,
+			deletable: !s.default,
 		});
 	}
 	if (rows.length > 0) {
@@ -133,13 +136,28 @@ export function sessionRows(
 		: [absent('herdr not running')];
 }
 
-/** A row's `contextValue`: ` host` / ` container` appended, except on rows that cannot start. */
-export function sessionItemContext(node: Pick<SessionRowNode, 'envKey' | 'contextValue'>, kind: Environment['kind'] | undefined): string {
+/**
+ * A row's `contextValue`: ` host` / ` container` appended, except on rows that
+ * cannot start; then ` deletable` on sessions other than herdr's default one.
+ */
+export function sessionItemContext(node: Pick<SessionRowNode, 'envKey' | 'contextValue' | 'deletable'>, kind: Environment['kind'] | undefined): string {
+	let value: string = node.contextValue;
 	if (node.envKey === HOST_KEY) {
-		return `${node.contextValue} host`;
+		value = `${value} host`;
+	} else if (kind === 'container' && node.contextValue !== 'herdr.session.absent') {
+		value = `${value} container`;
 	}
-	return kind === 'container' && node.contextValue !== 'herdr.session.absent' ? `${node.contextValue} container` : node.contextValue;
+	return node.deletable ? `${value} deletable` : value;
 }
+
+/** The space a click on a session row opens: its lowest-numbered one. */
+export function firstSpaceId(snapshot: Snapshot | undefined): string | undefined {
+	return snapshot?.workspaces.reduce<Snapshot['workspaces'][number] | undefined>((a, w) => (!a || w.number < a.number ? w : a), undefined)
+		?.workspace_id;
+}
+
+/** Runs on a click on a running session's row: selects it and opens its first space. */
+export const OPEN_SESSION_COMMAND = 'herdr.openSession';
 
 /**
  * The selected session: the stored one while it runs and is connected or
@@ -296,6 +314,9 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 		item.contextValue = sessionItemContext(node, this.model.environments.get(node.envKey)?.kind);
 		item.tooltip = node.tooltip;
 		item.iconPath = statusIcon(sessionRowStatus(node.snapshot));
+		if (node.contextValue === 'herdr.session.running') {
+			item.command = { command: OPEN_SESSION_COMMAND, title: 'Open Session', arguments: [node.key] };
+		}
 		return item;
 	}
 

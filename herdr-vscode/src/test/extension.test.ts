@@ -97,7 +97,17 @@ suite('herdr-vscode', () => {
 		assert.ok(re.test('herdr.session.stopped host') && re.test('herdr.session.stopped container'));
 		assert.ok(!re.test('herdr.session.absent') && !re.test('herdr.session.running container') && !re.test('herdr.session.stopped'));
 		const stop = (contributed.menus['view/item/context'] as { command: string; when: string }[]).find((m) => m.command === 'herdr.stopSession')!;
-		assert.strictEqual(stop.when, "view == herdr.sessions && viewItem == 'herdr.session.running host'");
+		const stopRe = new RegExp(/viewItem =~ \/(.*)\/$/.exec(stop.when)![1]);
+		assert.ok(stopRe.test('herdr.session.running host') && stopRe.test('herdr.session.running host deletable'));
+		assert.ok(!stopRe.test('herdr.session.running container') && !stopRe.test('herdr.session.stopped host deletable'));
+		assert.ok(re.test('herdr.session.stopped host deletable') && re.test('herdr.session.stopped container deletable'));
+		const del = (contributed.menus['view/item/context'] as { command: string; when: string; group: string }[]).find((m) => m.command === 'herdr.deleteSession')!;
+		assert.strictEqual(cmd('herdr.deleteSession')?.icon, '$(trash)');
+		assert.strictEqual(del.group, 'inline@2');
+		const delRe = new RegExp(/viewItem =~ \/(.*)\/$/.exec(del.when)![1]);
+		assert.ok(delRe.test('herdr.session.running host deletable') && delRe.test('herdr.session.stopped deletable'));
+		assert.ok(!delRe.test('herdr.session.running host') && !delRe.test('herdr.session.absent'));
+		assert.ok(palette.includes('herdr.deleteSession') && palette.includes('herdr.openSession'), 'row-only commands are hidden from the palette');
 		const welcome = (contributed.viewsWelcome as { view: string; contents: string; when: string }[]).filter((w) => w.view === 'herdr.agents');
 		assert.deepStrictEqual(welcome.map((w) => w.contents), ['Select a running session in Sessions.', 'No agents.', 'No agents match this filter.']);
 	});
@@ -127,7 +137,7 @@ suite('herdr-vscode', () => {
 		assert.deepStrictEqual(
 			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
-				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(startSession|stopSession|newTab|splitRight|splitDown)$/.test(c)),
+				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(startSession|stopSession|deleteSession|newTab|splitRight|splitDown)$/.test(c)),
 			['herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');

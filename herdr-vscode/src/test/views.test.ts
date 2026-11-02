@@ -9,7 +9,7 @@ import { activeTabOf, eventTouchesTab, stripTabs, tileMetas } from '../tilesPane
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
-import { effectiveSelection, groupOf, sessionItemContext, sessionRows, sessionRowStatus } from '../views/sessionsView';
+import { effectiveSelection, firstSpaceId, groupOf, sessionItemContext, sessionRows, sessionRowStatus } from '../views/sessionsView';
 import { agentTooltip, buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
@@ -370,14 +370,41 @@ suite('Sessions rows', () => {
 		assert.strictEqual(sessionItemContext(notInstalled, 'container'), 'herdr.session.absent');
 		assert.strictEqual(notInstalled.session, undefined);
 		const running = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'devc', default: false, running: true }] }, () => conn('connected'), false)[0];
-		assert.strictEqual(sessionItemContext(running, 'container'), 'herdr.session.running container');
+		assert.strictEqual(sessionItemContext(running, 'container'), 'herdr.session.running container deletable');
 		const stopped = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'x', default: false, running: false }] }, () => undefined, true)[0];
-		assert.strictEqual(sessionItemContext(stopped, 'container'), 'herdr.session.stopped container');
+		assert.strictEqual(sessionItemContext(stopped, 'container'), 'herdr.session.stopped container deletable');
 		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.stopped' }, 'host'), 'herdr.session.stopped host');
 		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.running' }, 'host'), 'herdr.session.running host');
 		assert.strictEqual(sessionItemContext({ envKey: 'ssh:box', contextValue: 'herdr.session.stopped' }, 'ssh'), 'herdr.session.stopped');
 		const hostNone = sessionRows({ env: hostEnv, status: 'ok', sessions: [] }, () => undefined, false)[0];
 		assert.strictEqual(hostNone.contextValue, 'herdr.session.absent', "this machine's empty row is unchanged");
+	});
+
+	test('Delete: every listed session but the default one', () => {
+		const rows = sessionRows(
+			okHost([
+				{ name: 'default', default: true, running: true },
+				{ name: 'work', default: false, running: true },
+				{ name: 'old', default: false, running: false },
+			]),
+			() => conn('connected'),
+			false,
+		);
+		assert.deepStrictEqual(
+			rows.map((r) => sessionItemContext(r, 'host')),
+			['herdr.session.running host', 'herdr.session.running host deletable', 'herdr.session.stopped host deletable'],
+		);
+		const [placeholder] = sessionRows({ env: containerEnv, status: 'ok', sessions: [] }, () => undefined, false);
+		assert.strictEqual(sessionItemContext(placeholder, 'container'), 'herdr.session.stopped container', 'the herdr not running row lists no session');
+		assert.strictEqual(sessionItemContext({ envKey: 'ssh:box', contextValue: 'herdr.session.running', deletable: true }, 'ssh'), 'herdr.session.running deletable');
+	});
+
+	test('a click opens the lowest-numbered space', () => {
+		const snap = (numbers: number[]) =>
+			({ workspaces: numbers.map((n) => ({ workspace_id: `w${n}`, number: n })), tabs: [], panes: [] }) as unknown as Snapshot;
+		assert.strictEqual(firstSpaceId(snap([3, 1, 2])), 'w1');
+		assert.strictEqual(firstSpaceId(snap([])), undefined);
+		assert.strictEqual(firstSpaceId(undefined), undefined);
 	});
 
 	test('session status bar item: host, container, SSH', () => {

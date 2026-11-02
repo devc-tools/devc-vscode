@@ -166,8 +166,6 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		const changes = (await view.getChildren(await group('changes'))) as ChangeNode[];
 		assert.deepStrictEqual(changes.map((c) => [c.label, c.description]), [['middleware.ts', 'src/auth · M']]);
 		assert.strictEqual(changes[0].uri.fsPath, path.join(repo, 'src', 'auth', 'middleware.ts'));
-		const others = await view.getChildren(await group('panes'));
-		assert.deepStrictEqual(others.map((n) => n.type === 'pane' && n.ref.paneId), [p2]);
 	});
 
 	test('following the pane recorded a baseline; a change from before is only in All Changes', async () => {

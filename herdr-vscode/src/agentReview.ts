@@ -355,7 +355,7 @@ export type ChoiceSource = 'thread' | 'followed' | 'only' | 'remembered' | 'pick
 export async function chooseAgent(input: {
 	candidates: readonly Candidate[];
 	thread?: PaneRef;
-	/** Pane Context's followed pane key. */
+	/** Active Pane's followed pane key. */
 	followed?: string;
 	remembered?: PaneRef;
 	pick(candidates: readonly Candidate[]): Promise<Candidate | undefined>;
@@ -406,7 +406,7 @@ export interface AgentReviewDeps {
 	mounts: MountsOf;
 	/** A session's row label in Sessions. */
 	rowLabel(sessionKey: string): string | undefined;
-	/** Pane Context's followed pane key. */
+	/** Active Pane's followed pane key. */
 	followed(): string | undefined;
 	/** The picker; a QuickPick by default. */
 	pick?(candidates: readonly Candidate[]): Promise<Candidate | undefined>;

@@ -6,7 +6,7 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
 - **Sessions**: every herdr session on this machine, on the SSH hosts in `herdr.sshHosts`, and
   in every running dev container. Each running session shows its agents' counts
   (`2 blocked · 1 working`) and an icon for its worst status. Click a running session to select
-  it.
+  it and open its first space in an editor tab (or focus that tab if it is already open).
 
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
@@ -31,7 +31,7 @@ reload; a state that began while VS Code was closed shows no time until it next 
   (`blocked 2 of 7`). The number of blocked agents shows as a badge on the herdr icon and as a
   `<n> blocked` warning in the status bar; clicking the status bar item shows the blocked agents of
   all sessions.
-- **Pane Context**: the repo, changes and files of the pane you are working with (below).
+- **Active Pane**: the repo, changes and files of the pane you are working with (below).
 
 ## herdr spaces in the editor area
 
@@ -57,6 +57,8 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
 - **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
   because every pane in the session closes. A started session has no spaces until you add one.
   **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
+- **Delete Session** (trash icon) on every session row except herdr's default session runs
+  `herdr session delete` in that session's environment, after asking. A running session is stopped first.
 - Right-click a tile for **Split Right**, **Split Down** (a new shell in the tile's directory), **Zoom** /
   **Unzoom** and **Close Pane**. Closing, there or with the tile's close button, asks first, because the
   pane's process ends. Changes made in a herdr TUI come back within a second, and splitters move in place
@@ -91,9 +93,9 @@ back.
 Other than maximising (zoom) and swapping (herdr focuses the dragged pane), focusing a tile does not
 move herdr's own focus; **Focus in herdr TUI** on a pane row does.
 
-## Pane Context
+## Active Pane
 
-The **Pane Context** view shows the repo, changes and file tree of the pane you last clicked into, so
+The **Active Pane** view shows the repo, changes and file tree of the pane you last clicked into, so
 VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
 herdr's own focus in the selected session; after that only tiles count. Clicking into a file editor or
 another view changes nothing, and **Pin** stops it following. The header says which pane it is, and when
@@ -109,17 +111,15 @@ no tile in this window shows it, which **Show Pane** on the repo row fixes.
   followed the pane there, with `A`, `M` or `D` and ` · 2 commits` when HEAD moved on. Git cannot say which
   process changed a file, so this is everything changed in that worktree since then, **whoever changed it**: two
   agents in one worktree see each other's edits. The time is kept across reloads, per pane and repo, until the pane
-  closes or a week passes. **Reset Baseline** starts it again from now. Click to open; **Open Changes** shows a
-  `since 10:31 ↔ working tree` diff. Taking the baseline writes git objects into the repo (unreferenced, so `git gc`
+  closes or a week passes. **Reset Baseline** starts it again from now. Click for a
+  `since 10:31 ↔ working tree` diff; **Open File** opens the file as it is now. Taking the baseline writes git objects into the repo (unreferenced, so `git gc`
   prunes them) and never touches its index, working tree or refs.
-- **All Changes** (collapsed): the repo's whole `git status`. Click to open; **Open Changes** shows a
-  `HEAD ↔ working tree` diff.
+- **All Changes** (collapsed): the repo's whole `git status`. Click for a `HEAD ↔ working tree` diff;
+  **Open File** opens the file as it is now.
 - **Files:** the tree; click to open. Git markers (`M`, `A`, `U`, `D`, `R`, `!`) in Git's colours, and a dot on
   folders holding changes; the same badges show on editor tabs of those files. For a local repo that VS Code's own
   Git has open (a workspace folder, or after **Open in Source Control**), Git's badges are shown instead of a second
   set. **New File…**, **New Folder…**, **Rename…** and **Delete…** are on the rows. Delete is permanent.
-- **Other Panes in This Space:** as in Spaces, with `same worktree` or `other worktree` (another worktree of
-  the same repo) before the description.
 - **Paths printed in a tile are links.** `src/auth/middleware.ts:19`, `./x/y.md`, `~/n.txt` and `README.md`
   are underlined on hover, and resolved where the pane runs, against its directory. Clicking opens the file
   beside the tile at that line, reveals a directory in Files, and does nothing for a path that does not exist.
@@ -148,10 +148,10 @@ provider picker), write the question and **Ask Agent**. The thread is titled
 `Ask agent · claude (v3_auth) · lines 19–21`: the question shows as yours, then `claude` · *Waiting for reply…*,
 which the agent's answer replaces. Follow-ups in the thread go to the same agent.
 
-- **Where:** files on this machine, VS Code Git and GitHub Pull Request diff sides, and Pane Context's container,
+- **Where:** files on this machine, VS Code Git and GitHub Pull Request diff sides, and Active Pane's container,
   SSH and `HEAD` documents, whenever an agent in a connected session can see the file: one on this machine, one in a
   dev container that bind-mounts it (or whose own file it is), or one on that SSH host. Other files get no `+`.
-- **Which agent:** the thread's own while its pane is there; else the pane Pane Context follows, if it is an agent
+- **Which agent:** the thread's own while its pane is there; else the pane Active Pane follows, if it is an agent
   that can see the file; else the only one that can; else the one you picked last in this window; else a picker
   (**Which agent should answer?**).
 - **What is sent:** the question goes straight into the agent's pane (herdr's `agent.prompt`), with the file's path
@@ -268,7 +268,7 @@ over a made-up model, so they need the build, and reach no herdr. `src/test/pane
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, split ratios, swaps, edge and strip drops and zoom in space tabs, Pane Context,
+  takeover, restore, split ratios, swaps, edge and strip drops and zoom in space tabs, Active Pane,
   and it stops and restarts that session's server.
   Ask Agent runs a fake `claude` (a `sh` loop) in a pane of `hv-test` and prompts only that pane; its replies go to
   this machine's `/tmp/herdr-vscode/review`, and are removed afterwards. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100

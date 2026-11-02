@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import { containerStartArgs, createdTabId, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
+import { containerStartArgs, createdTabId, sessionDeleteArgv, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
 import { Snapshot, SessionModel } from '../sessions';
 import { spacesTreeItem, SpaceNode } from '../views/spacesView';
 import { sessionRows } from '../views/sessionsView';
@@ -14,6 +14,7 @@ suite('session control', () => {
 	test('start and stop argv', () => {
 		assert.deepStrictEqual(sessionServerArgv('s').slice(-4), ['herdr', '--session', 's', 'server']);
 		assert.deepStrictEqual(sessionStopArgv('s').slice(-4), ['herdr', 'session', 'stop', 's']);
+		assert.deepStrictEqual(sessionDeleteArgv('s').slice(-4), ['herdr', 'session', 'delete', 's']);
 	});
 
 	test('starts detached, with no stdio tying it to this window', async () => {

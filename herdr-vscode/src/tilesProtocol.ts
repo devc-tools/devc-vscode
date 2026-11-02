@@ -87,8 +87,8 @@ export type ProbeAction =
 	| { kind: 'dragSplitter'; splitId: string; fraction: number }
 	/** Mirrored tabs: drags a tile's tab to a point inside `zone` of another tile, with synthetic pointer events. */
 	| { kind: 'dragTile'; paneKey: string; targetPaneKey: string; zone: DropZone }
-	/** Drags a tile's tab onto a strip entry (`tabId`) or the strip's + (null). */
-	| { kind: 'dragTileToStrip'; paneKey: string; tabId: string | null }
+	/** Drags a tile's tab onto a strip entry (`tabId`) or the strip's + (null); `blank`: the toolbar's blank area right of the + instead. */
+	| { kind: 'dragTileToStrip'; paneKey: string; tabId: string | null; blank?: boolean }
 	/** The maximise control of a tile's stack. */
 	| { kind: 'clickMaximise'; paneKey: string }
 	/** Space panels: a click on a tab strip entry (or its ×, or a double-click), or the strip's +. */

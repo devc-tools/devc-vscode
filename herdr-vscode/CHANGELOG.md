@@ -4,6 +4,13 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Pane Context is now Active Pane**, and its **Other Panes in This Space** section is gone.
+- Clicking a file under **Changed in This Pane** or **All Changes** opens its diff; the row's **Open File** action
+  opens the file itself (these were the other way round).
+- Dropping a tile anywhere in the tab strip's blank area right of **+** moves its pane to a new tab, as on the +.
+- Clicking a running session in Sessions opens its first space in an editor tab, or focuses that tab.
+- **Delete Session** (trash icon) on Sessions rows, except herdr's default session: asks first, stops a running
+  session, then runs `herdr session delete`.
 - **Layout tabs are gone.** herdr's layout is the only one, and dragging tiles edits it: onto another tile's
   middle swaps the panes; near its edge splits that tile with the dragged pane on that side (through a passing
   tab, since herdr cannot move a pane within its tab; the terminal keeps running); onto another tab in the strip

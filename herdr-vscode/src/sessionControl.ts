@@ -21,6 +21,11 @@ export function sessionStopArgv(session: string): string[] {
 	return herdrArgv(['session', 'stop', session]);
 }
 
+/** `herdr session delete` only takes a stopped session. */
+export function sessionDeleteArgv(session: string): string[] {
+	return herdrArgv(['session', 'delete', session]);
+}
+
 /** Runs `argv` on this machine in its own process group, so it outlives this window. */
 export function startDetached(argv: string[], spawnFn: typeof cp.spawn = cp.spawn): Promise<void> {
 	return new Promise((resolve, reject) => {

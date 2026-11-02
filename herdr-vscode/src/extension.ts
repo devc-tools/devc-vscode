@@ -10,7 +10,7 @@ import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView, SinceNode } from './paneContext';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
-import { createdTabId, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
+import { createdTabId, sessionDeleteArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
 import { SessionModel, sessionKey } from './sessions';
 import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
@@ -19,7 +19,7 @@ import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { AgentSource, AgentsView } from './views/agentsView';
-import { SessionRowNode, SessionsView } from './views/sessionsView';
+import { firstSpaceId, OPEN_SESSION_COMMAND, SessionRowNode, SessionsView } from './views/sessionsView';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
@@ -274,6 +274,68 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			await m.relist(HOST_KEY);
 		}),
+		vscode.commands.registerCommand(OPEN_SESSION_COMMAND, async (key?: string) => {
+			if (!key) {
+				return;
+			}
+			sessions.select(key);
+			const snapshot = () => m.connection(key)?.snapshot;
+			if (!snapshot()) {
+				// Still connecting: the first snapshot takes an event to arrive.
+				await new Promise<void>((resolve) => {
+					const finish = () => {
+						clearTimeout(timer);
+						sub.dispose();
+						resolve();
+					};
+					const timer = setTimeout(finish, 3000);
+					const sub = m.onDidChange(() => snapshot() && finish());
+				});
+			}
+			const workspaceId = firstSpaceId(snapshot());
+			if (workspaceId) {
+				panels.openSpace(key, workspaceId);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.deleteSession', async (row?: SessionRowNode) => {
+			const session = row?.session;
+			const env = row && environments.get(row.envKey);
+			if (!session || !env || !row.deletable) {
+				return;
+			}
+			const running = row.contextValue === 'herdr.session.running';
+			const del = 'Delete Session';
+			const answer = await vscode.window.showWarningMessage(
+				`Delete herdr session "${session}"?`,
+				{
+					modal: true,
+					detail: running
+						? 'The session is stopped first: every pane in it closes, and the agents and programs running there end. Its spaces and layout are then deleted.'
+						: 'Its spaces and layout are deleted.',
+				},
+				del,
+			);
+			if (answer !== del) {
+				return;
+			}
+			try {
+				await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, async () => {
+					if (running) {
+						const stopped = await env.shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
+						if (stopped.exitCode !== 0) {
+							throw new Error(stopped.stderr.toString().trim() || `could not stop session "${session}".`);
+						}
+					}
+					const res = await env.shell.run(sessionDeleteArgv(session), { timeoutMs: 15000 });
+					if (res.exitCode !== 0) {
+						throw new Error(res.stderr.toString().trim() || `could not delete session "${session}".`);
+					}
+				});
+			} catch (err) {
+				warn(err);
+			}
+			await m.relist(env.key);
+		}),
 		vscode.commands.registerCommand('herdr.newSpace', async () => {
 			const key = sessions.selected;
 			if (!key) {
@@ -350,6 +412,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('herdr.paneContext.splitPane', () => paneContext.splitPane()),
 		vscode.commands.registerCommand('herdr.paneContext.showPane', () => paneContext.showPane()),
 		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode | SinceNode) => paneContext.openChanges(node)),
+		vscode.commands.registerCommand('herdr.paneContext.openFile', (node?: ChangeNode | SinceNode) => paneContext.openFile(node)),
 		vscode.commands.registerCommand('herdr.paneContext.resetBaseline', () => paneContext.resetBaseline()),
 		vscode.commands.registerCommand('herdr.paneContext.openSourceControl', () => paneContext.openSourceControl()),
 		vscode.commands.registerCommand('herdr.paneContext.openTerminal', () => paneContext.openTerminal()),

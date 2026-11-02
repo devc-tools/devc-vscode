@@ -54,6 +54,7 @@ let font: { fontFamily: string; fontSize: number } | undefined;
 
 const messageEl = document.getElementById('message') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
+const toolbarEl = document.getElementById('toolbar') as HTMLElement;
 const rootEl = document.getElementById('tiles') as HTMLElement;
 
 // ── Theme ───────────────────────────────────────────────────────────────────
@@ -670,9 +671,15 @@ let mirrorDrag:
 
 /**
  * The strip entry (another tab's) or + under a point, with the tab it stands
- * for (null: a new tab). The shown tab's own entry is no target.
+ * for (null: a new tab). The shown tab's own entry is no target. The toolbar's
+ * blank area right of the + counts as the +.
  */
 function stripDropTarget(x: number, y: number): { el: HTMLElement; tabId: string | null } | undefined {
+	const add = document.getElementById('strip-new');
+	const bar = toolbarEl.getBoundingClientRect();
+	if (add && y >= bar.top && y < bar.bottom && x >= add.getBoundingClientRect().left && x < bar.right) {
+		return { el: add, tabId: null };
+	}
 	const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.strip-tab, #strip-new');
 	if (!el || !stripEl.contains(el)) {
 		return undefined;
@@ -920,7 +927,11 @@ function runProbeAction(action: ProbeAction): void {
 	} else if (action.kind === 'dragTileToStrip') {
 		const el = action.tabId === null ? document.getElementById('strip-new') : stripEntry(action.tabId);
 		const r = el?.getBoundingClientRect();
-		if (r) {
+		if (r && action.blank) {
+			// The toolbar's blank area, near its right edge.
+			const bar = toolbarEl.getBoundingClientRect();
+			dragTabTo(action.paneKey, { x: bar.right - 4, y: bar.top + bar.height / 2 });
+		} else if (r) {
 			dragTabTo(action.paneKey, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
 		}
 	} else if (action.kind === 'clickStrip') {

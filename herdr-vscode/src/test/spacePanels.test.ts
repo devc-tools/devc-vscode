@@ -343,20 +343,24 @@ suite('space panels', function () {
 			method: 'pane.move',
 			params: { pane_id: 'w2:p2', destination: { type: 'new_tab', workspace_id: 'w2' }, focus: false },
 		});
+		// The toolbar's blank area right of the + is the + too.
+		await api.probe({ kind: 'dragTileToStrip', paneKey: pk('w2:p2'), tabId: null, blank: true });
+		await waitFor('the blank-area drop', () => herdr.edits().length === 5);
+		assert.deepStrictEqual(herdr.edits()[4], herdr.edits()[3]);
 
 		// One tile is enough to drag: onto another tab's entry.
 		const web = panels.openSpace(S, 'w1');
 		await showing(web, 'w1:p1');
 		await web.probe({ kind: 'dragTileToStrip', paneKey: pk('w1:p1'), tabId: 'w1:t2' });
-		await waitFor('the entry drop', () => herdr.edits().length === 5);
-		assert.deepStrictEqual(herdr.edits()[4], {
+		await waitFor('the entry drop', () => herdr.edits().length === 6);
+		assert.deepStrictEqual(herdr.edits()[5], {
 			method: 'pane.move',
 			params: { pane_id: 'w1:p1', destination: { type: 'tab', tab_id: 'w1:t2', split: 'right' }, focus: false },
 		});
 		// The shown tab's own entry is no target.
 		await web.probe({ kind: 'dragTileToStrip', paneKey: pk('w1:p1'), tabId: 'w1:t1' });
 		await sleep(300);
-		assert.strictEqual(herdr.edits().length, 5);
+		assert.strictEqual(herdr.edits().length, 6);
 	});
 
 	test('a Layout tab saved by an earlier build is closed on restore', async () => {

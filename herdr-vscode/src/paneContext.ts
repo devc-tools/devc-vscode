@@ -12,21 +12,20 @@ import {
 	gitRevisionUri,
 	readStatus,
 	readToplevel,
-	readWorktreeId,
 	SinceChange,
 	SinceStatus,
 	takeSnapshot,
-	WorktreeId,
-	worktreeMarker,
 } from './git';
 import { environmentUri, EnvironmentPaths, isUnder, parseLinkText, resolveLinkPath } from './paths';
 import { paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPane } from './sessions';
 import { TilesPanels } from './tilesPanel';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 import { SessionsView } from './views/sessionsView';
-import { paneClickCommand, paneDescription, paneTreeItem, PaneRef } from './views/spacesView';
+import { paneClickCommand, PaneRef } from './views/spacesView';
 
 export const PANE_CONTEXT_VIEW = 'herdr.paneContext';
+/** A click on a change row: its diff. */
+export const OPEN_CHANGES_COMMAND = 'herdr.paneContext.openChanges';
 /** Context key: whether the view is pinned. */
 export const PANE_CONTEXT_PINNED_KEY = 'herdr.paneContextPinned';
 export const NO_PANE_MESSAGE = 'Click into a herdr pane to see its files.';
@@ -105,7 +104,7 @@ export interface RootNode {
 export interface GroupNode {
 	type: 'group';
 	/** `since`: Changed in This Pane; `changes`: All Changes. */
-	group: 'since' | 'changes' | 'files' | 'panes';
+	group: 'since' | 'changes' | 'files';
 	id: string;
 	label: string;
 	description?: string;
@@ -153,15 +152,6 @@ export interface EntryNode {
 	parent: GroupNode | EntryNode;
 }
 
-export interface PaneRowNode {
-	type: 'pane';
-	id: string;
-	label: string;
-	description?: string;
-	pane: SnapshotPane;
-	ref: PaneRef;
-}
-
 /** A directory that could not be read, a snapshot that failed (warning); or plain text (`plain`). */
 export interface NoteNode {
 	type: 'note';
@@ -170,7 +160,7 @@ export interface NoteNode {
 	plain?: boolean;
 }
 
-export type PaneContextNode = RootNode | GroupNode | ChangeNode | SinceNode | EntryNode | PaneRowNode | NoteNode;
+export type PaneContextNode = RootNode | GroupNode | ChangeNode | SinceNode | EntryNode | NoteNode;
 
 /** The Repo row's context value, which the inline actions' `when` clauses read. */
 export function rootContextValue(node: Pick<RootNode, 'canAdd' | 'showable' | 'scm' | 'terminal'>): string {
@@ -204,7 +194,7 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			return item;
 		}
 		case 'group': {
-			const collapsed = node.group === 'panes' || node.group === 'changes';
+			const collapsed = node.group === 'changes';
 			const item = new vscode.TreeItem(node.label, collapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
 			item.id = node.id;
 			item.description = node.description;
@@ -219,7 +209,7 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			item.iconPath = vscode.ThemeIcon.File;
 			item.tooltip = node.tooltip;
 			item.contextValue = 'herdr.paneContext.sinceChange';
-			item.command = { command: 'vscode.open', title: 'Open', arguments: [node.status === 'D' ? node.baseUri : node.fileUri] };
+			item.command = { command: OPEN_CHANGES_COMMAND, title: 'Open Changes', arguments: [node] };
 			return item;
 		}
 		case 'change': {
@@ -231,7 +221,7 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			item.tooltip = node.uri.path;
 			if (!node.directory) {
 				item.contextValue = 'herdr.paneContext.change';
-				item.command = { command: 'vscode.open', title: 'Open', arguments: [node.deleted ? node.headUri : node.uri] };
+				item.command = { command: OPEN_CHANGES_COMMAND, title: 'Open Changes', arguments: [node] };
 			}
 			return item;
 		}
@@ -246,8 +236,6 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			}
 			return item;
 		}
-		case 'pane':
-			return paneTreeItem(node.id, node.label, node.description, node.pane, node.ref);
 		case 'note': {
 			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
 			item.id = node.id;
@@ -310,7 +298,7 @@ function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** The Pane Context view: the repo, changes and files of the followed pane. */
+/** The Active Pane view: the repo, changes and files of the followed pane. */
 export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>, vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<PaneContextNode | undefined | void>();
 	readonly onDidChangeTreeData = this.emitter.event;
@@ -324,9 +312,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	/** Entry nodes of the current root: `reveal` needs its parents to be the tree's own. */
 	private readonly entries = new Map<string, EntryNode>();
 	private filesGroup: GroupNode | undefined;
-	private panesGroup: GroupNode | undefined;
-	/** What Other Panes last showed, and whether the Repo row last offered Show Pane. */
-	private otherPanesShown = '';
+	/** Whether the Repo row last offered Show Pane. */
 	private showableShown: boolean | undefined;
 	private watcher: vscode.FileSystemWatcher | undefined;
 	private watchedRoot: string | undefined;
@@ -339,7 +325,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	/** Snapshots run one at a time. */
 	private sinceQueue: Promise<unknown> = Promise.resolve();
 	/** `<env key>\n<dir>` → its worktree, until the next load or Refresh. */
-	private worktrees = new Map<string, Promise<WorktreeId | undefined>>();
 
 	constructor(private readonly deps: PaneContextDeps) {
 		this.store = deps.baselines ?? new BaselineStore(memoryMemento());
@@ -451,19 +436,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		if (this.host.visible && this.loadedFor !== `${key}\n${dir}`) {
 			void this.load(key, found.env, dir);
 		}
-		this.refreshOtherPanes();
-	}
-
-	/** Only that section: terminal titles change all the time, and Files may be remote. */
-	private refreshOtherPanes(): void {
-		if (!this.loaded || !this.panesGroup) {
-			return;
-		}
-		const shown = JSON.stringify(this.otherPanes(this.loaded).map((p) => [p.id, p.label, p.description, p.pane.agent_status]));
-		if (shown !== this.otherPanesShown) {
-			this.otherPanesShown = shown;
-			this.emitter.fire(this.panesGroup);
-		}
 	}
 
 	/** Baselines of closed panes and old ones go. */
@@ -483,7 +455,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.setWatchedRoot(undefined);
 			this.entries.clear();
 			this.filesGroup = undefined;
-			this.panesGroup = undefined;
 			this.emitter.fire();
 		}
 	}
@@ -523,7 +494,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.entries.clear();
 			this.filesGroup = undefined;
 		}
-		this.worktrees.clear();
 		this.loaded = { paneKey, env, dir, rootPath, rootUri, toplevel, git, since, mounts };
 		this.setWatchedRoot(rootUri);
 		this.pushDecorations();
@@ -615,7 +585,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 
 	/** **Refresh**: the pane's directory, status and tree. */
 	refresh(): void {
-		this.worktrees.clear();
 		const key = this.followed;
 		const conn = key ? this.deps.model.connection(splitPaneKey(key).sessionKey) : undefined;
 		if (conn?.state === 'connected') {
@@ -730,8 +699,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 					return this.changeRows(loaded);
 				case 'files':
 					return this.entryRows(loaded.rootUri, node);
-				case 'panes':
-					return this.markedOtherPanes(loaded);
 			}
 		}
 		return node.type === 'entry' && node.directory ? this.entryRows(node.uri, node) : [];
@@ -766,11 +733,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		if (loaded.git?.changes.length) {
 			rows.push({ type: 'group', group: 'changes', id: `${prefix}changes`, label: 'All Changes', description: String(loaded.git.changes.length) });
 		}
-		const panesId = `${loaded.paneKey}|panes`;
-		if (this.panesGroup?.id !== panesId) {
-			this.panesGroup = { type: 'group', group: 'panes', id: panesId, label: 'Other Panes in This Space' };
-		}
-		rows.push(this.files(loaded), this.panesGroup);
+		rows.push(this.files(loaded));
 		return rows;
 	}
 
@@ -857,50 +820,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		return node;
 	}
 
-	private otherPanes(loaded: Loaded): PaneRowNode[] {
-		const found = this.find(loaded.paneKey);
-		if (!found) {
-			return [];
-		}
-		const { pane, snapshot, ref } = found;
-		return snapshot.panes
-			.filter((p) => p.workspace_id === pane.workspace_id && p.pane_id !== pane.pane_id)
-			.map((p) => ({
-				type: 'pane',
-				id: `${ref.sessionKey}|pane|${p.pane_id}`,
-				label: paneLabel(p, snapshot),
-				description: paneDescription(p),
-				pane: p,
-				ref: { sessionKey: ref.sessionKey, paneId: p.pane_id },
-			}));
-	}
-
-	private worktreeOf(env: Environment, dir: string): Promise<WorktreeId | undefined> {
-		const key = `${env.key}\n${dir}`;
-		let cached = this.worktrees.get(key);
-		if (!cached) {
-			cached = readWorktreeId(env.shell, dir).catch(() => undefined);
-			this.worktrees.set(key, cached);
-		}
-		return cached;
-	}
-
-	/** Other Panes, each saying `same worktree` / `other worktree` when it is. */
-	private async markedOtherPanes(loaded: Loaded): Promise<PaneRowNode[]> {
-		const rows = this.otherPanes(loaded);
-		if (rows.length === 0) {
-			return rows;
-		}
-		const mine = this.worktreeOf(loaded.env, loaded.dir);
-		const markers = await Promise.all(
-			rows.map(async (row) => {
-				const dir = row.pane.foreground_cwd ?? row.pane.cwd;
-				return dir ? worktreeMarker(await mine, await this.worktreeOf(loaded.env, dir)) : undefined;
-			}),
-		);
-		return rows.map((row, i) => (markers[i] ? { ...row, description: markedDescription(markers[i], row.description) } : row));
-	}
-
 	// ── Actions ─────────────────────────────────────────────────────────────
 
 	/** Never automatic: workspace folders change only here. */
@@ -949,6 +868,15 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			return;
 		}
 		await vscode.commands.executeCommand('vscode.diff', node.headUri, node.uri, `${node.label} (HEAD ↔ working tree)`);
+	}
+
+	/** **Open File** on a change row: the file as it is now; a deleted one as it was. */
+	async openFile(node?: ChangeNode | SinceNode): Promise<void> {
+		if (!node) {
+			return;
+		}
+		const uri = node.type === 'since' ? (node.status === 'D' ? node.baseUri : node.fileUri) : node.deleted ? node.headUri : node.uri;
+		await vscode.commands.executeCommand('vscode.open', uri);
 	}
 
 	/** **Reset Baseline**: a new baseline for the loaded (pane, toplevel), now. */
