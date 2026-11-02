@@ -4,7 +4,7 @@ import { hasAgent, paneFolder, paneLabel, Snapshot, SnapshotPane } from '../sess
 import { customToken, renderRow, SidebarRows, SidebarRowsSource } from '../sidebarConfig';
 import { SpaceGit, spaceDirectory, splitGitDescription } from '../spaceGit';
 import { agentIcon, countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
-import { SessionsView } from './sessionsView';
+import { SessionList } from './sessionsView';
 
 /** A pane across every session. */
 export interface PaneRef {
@@ -249,7 +249,7 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 	private contextSelected: boolean | undefined;
 
 	constructor(
-		private readonly sessions: SessionsView,
+		private readonly sessions: SessionList,
 		private readonly snapshotOf: (key: string) => Snapshot | undefined,
 		onModelChange: vscode.Event<void>,
 		/** Branch and git status of space rows; none without it. */

@@ -26,7 +26,7 @@ import { hasAgent, paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPa
 import { TilesPanels } from './tilesPanel';
 import { memoryMemento, TouchedStore } from './touched';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
-import { SessionsView } from './views/sessionsView';
+import { SessionList } from './views/sessionsView';
 import { paneClickCommand, PaneRef } from './views/spacesView';
 import { gitDescription } from './spaceGit';
 
@@ -38,6 +38,8 @@ export const PANE_CONTEXT_PINNED_KEY = 'herdr.paneContextPinned';
 /** Context key and workspaceState key: change sections show only the followed pane's files. */
 export const PANE_FILES_ONLY_KEY = 'herdr.paneContext.paneFilesOnly';
 export const NO_PANE_MESSAGE = 'Click into a herdr pane to see its files.';
+/** The Changes section of a clean working tree. */
+export const NO_CHANGES = 'No uncommitted changes';
 /** A change section with nothing this pane touched. */
 export const NOTHING_RECORDED = 'Nothing recorded for this pane';
 /** First row of each change section for a shell pane in pane mode. */
@@ -137,7 +139,7 @@ export interface RootNode {
 
 export interface GroupNode {
 	type: 'group';
-	/** `changes`: Uncommitted; `commits`: Commits. */
+	/** `changes`: Changes; `commits`: Commits. */
 	group: 'changes' | 'commits' | 'files';
 	id: string;
 	label: string;
@@ -321,7 +323,7 @@ export type PaneContextHost = Pick<vscode.TreeView<PaneContextNode>, 'message' |
 export interface PaneContextDeps {
 	model: Pick<SessionModel, 'connection' | 'onDidChange' | 'onDidEvent' | 'request'>;
 	focus: Pick<FocusTracker, 'lastFocused' | 'onDidChangeLastFocused' | 'herdrFocused'>;
-	sessions: Pick<SessionsView, 'selected' | 'onDidChangeSelected'>;
+	sessions: Pick<SessionList, 'selected' | 'onDidChangeSelected'>;
 	panels: Pick<TilesPanels, 'showsPane' | 'onDidChangeTiles' | 'onDidRequestLink'>;
 	paths: Pick<EnvironmentPaths, 'mounts' | 'uriFor' | 'home'>;
 	createHost(provider: vscode.TreeDataProvider<PaneContextNode>): PaneContextHost;
@@ -755,10 +757,10 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		const rows: PaneContextNode[] = [root];
 		const filter = this.filterFor(loaded);
 		const changes = loaded.git?.changes ?? [];
-		if (loaded.toplevel && loaded.git && (changes.length > 0 || filter.kind === 'pane')) {
+		if (loaded.toplevel && loaded.git) {
 			const description =
 				filter.kind === 'pane' ? `${changes.filter((c) => touchedChange(c.path, filter.touched)).length} of ${changes.length}` : String(changes.length);
-			rows.push({ type: 'group', group: 'changes', id: `${prefix}changes`, label: 'Uncommitted', description });
+			rows.push({ type: 'group', group: 'changes', id: `${prefix}changes`, label: 'Changes', description });
 		}
 		if (loaded.toplevel && loaded.commits) {
 			const description = `${loaded.commits.description}${filter.kind === 'pane' ? ' · this pane' : ''}`;
@@ -801,6 +803,9 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			return [this.note(`${prefix}|none`, NOTHING_RECORDED)];
 		}
 		const head: NoteNode[] = filter.kind === 'shell' ? [this.note(`${prefix}|shell`, NO_AGENT_NOTE)] : [];
+		if (changes.length === 0) {
+			return [...head, this.note(`${prefix}|clean`, NO_CHANGES)];
+		}
 		return [...head, ...changes.map((change): ChangeNode => {
 			const directory = change.path.endsWith('/');
 			const file = change.path.replace(/\/+$/, '');

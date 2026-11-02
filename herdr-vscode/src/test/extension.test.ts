@@ -14,12 +14,12 @@ suite('herdr-vscode', () => {
 		assert.strictEqual(ext.isActive, true);
 	});
 
-	test('contributes and registers the Sessions, Spaces and Agents views', async () => {
+	test('contributes and registers the Spaces, Agents and Active Pane views', async () => {
 		const ext = extension();
 		const views = ext.packageJSON.contributes.views.herdr as { id: string }[];
 		assert.deepStrictEqual(
 			views.map((v) => v.id),
-			['herdr.sessions', 'herdr.spaces', 'herdr.agents', 'herdr.paneContext'],
+			['herdr.spaces', 'herdr.agents', 'herdr.paneContext'],
 		);
 		await ext.activate();
 		// Opening a view resolves its registered provider; an unregistered view would fail to focus.
@@ -90,26 +90,8 @@ suite('herdr-vscode', () => {
 		for (const c of ['herdr.agents.filter', 'herdr.agents.showDone', 'herdr.agents.scopeSession', 'herdr.agents.scopeAll']) {
 			assert.ok(!palette.includes(c), `${c} is in the palette`);
 		}
-		const start = (contributed.menus['view/item/context'] as { command: string; when: string; group: string }[]).find((m) => m.command === 'herdr.startSession')!;
-		assert.strictEqual(start.group, 'inline@1');
-		const startWhen = /viewItem =~ \/(.*)\/$/.exec(start.when)![1];
-		const re = new RegExp(startWhen);
-		assert.ok(re.test('herdr.session.stopped host') && re.test('herdr.session.stopped container'));
-		assert.ok(!re.test('herdr.session.absent') && !re.test('herdr.session.running container') && !re.test('herdr.session.stopped'));
-		const stop = (contributed.menus['view/item/context'] as { command: string; when: string }[]).find((m) => m.command === 'herdr.stopSession')!;
-		const stopRe = new RegExp(/viewItem =~ \/(.*)\/$/.exec(stop.when)![1]);
-		assert.ok(stopRe.test('herdr.session.running host') && stopRe.test('herdr.session.running host deletable'));
-		assert.ok(!stopRe.test('herdr.session.running container') && !stopRe.test('herdr.session.stopped host deletable'));
-		assert.ok(re.test('herdr.session.stopped host deletable') && re.test('herdr.session.stopped container deletable'));
-		const del = (contributed.menus['view/item/context'] as { command: string; when: string; group: string }[]).find((m) => m.command === 'herdr.deleteSession')!;
-		assert.strictEqual(cmd('herdr.deleteSession')?.icon, '$(trash)');
-		assert.strictEqual(del.group, 'inline@2');
-		const delRe = new RegExp(/viewItem =~ \/(.*)\/$/.exec(del.when)![1]);
-		assert.ok(delRe.test('herdr.session.running host deletable') && delRe.test('herdr.session.stopped deletable'));
-		assert.ok(!delRe.test('herdr.session.running host') && !delRe.test('herdr.session.absent'));
-		assert.ok(palette.includes('herdr.deleteSession') && palette.includes('herdr.openSession'), 'row-only commands are hidden from the palette');
 		const welcome = (contributed.viewsWelcome as { view: string; contents: string; when: string }[]).filter((w) => w.view === 'herdr.agents');
-		assert.deepStrictEqual(welcome.map((w) => w.contents), ['Select a running session in Sessions.', 'No agents.', 'No agents match this filter.']);
+		assert.deepStrictEqual(welcome.map((w) => w.contents), ['No session selected.\n[Select Session](command:herdr.sessions.switch)', 'No agents.', 'No agents match this filter.']);
 	});
 
 	test('mirrored tabs: commands, serializer activation, no Attach in Terminal', async () => {
@@ -137,7 +119,7 @@ suite('herdr-vscode', () => {
 		assert.deepStrictEqual(
 			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
-				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(startSession|stopSession|deleteSession|newTab|splitRight|splitDown)$/.test(c)),
+				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(newTab|splitRight|splitDown)$/.test(c)),
 			['herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');

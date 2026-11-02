@@ -14,7 +14,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:herdr.sessions",
     "onView:herdr.spaces",
     "onView:herdr.agents",
     "onView:herdr.paneContext",
@@ -38,11 +37,6 @@
     "views": {
       "herdr": [
         {
-          "id": "herdr.sessions",
-          "name": "Sessions",
-          "when": "herdr.sessionsShown"
-        },
-        {
           "id": "herdr.spaces",
           "name": "Spaces"
         },
@@ -58,12 +52,8 @@
     },
     "viewsWelcome": [
       {
-        "view": "herdr.sessions",
-        "contents": "Looking for herdr sessions…"
-      },
-      {
         "view": "herdr.spaces",
-        "contents": "Select a running session in Sessions.",
+        "contents": "No session selected.\n[Select Session](command:herdr.sessions.switch)",
         "when": "!herdr.sessionSelected"
       },
       {
@@ -73,7 +63,7 @@
       },
       {
         "view": "herdr.agents",
-        "contents": "Select a running session in Sessions.",
+        "contents": "No session selected.\n[Select Session](command:herdr.sessions.switch)",
         "when": "herdr.agentsScope == session && !herdr.sessionSelected"
       },
       {
@@ -251,29 +241,6 @@
         "category": "herdr"
       },
       {
-        "command": "herdr.startSession",
-        "title": "Start Session",
-        "category": "herdr",
-        "icon": "$(play)"
-      },
-      {
-        "command": "herdr.stopSession",
-        "title": "Stop Session",
-        "category": "herdr",
-        "icon": "$(debug-stop)"
-      },
-      {
-        "command": "herdr.deleteSession",
-        "title": "Delete Session",
-        "category": "herdr",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "herdr.openSession",
-        "title": "Open Session",
-        "category": "herdr"
-      },
-      {
         "command": "herdr.newSpace",
         "title": "New Space",
         "category": "herdr",
@@ -354,18 +321,6 @@
         "title": "Switch Session",
         "category": "herdr",
         "icon": "$(arrow-swap)"
-      },
-      {
-        "command": "herdr.sessions.manage",
-        "title": "Manage Sessions",
-        "category": "herdr",
-        "icon": "$(gear)"
-      },
-      {
-        "command": "herdr.sessions.doneManaging",
-        "title": "Done",
-        "category": "herdr",
-        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -373,16 +328,6 @@
         {
           "command": "herdr.sessions.switch",
           "when": "view == herdr.spaces",
-          "group": "navigation@0"
-        },
-        {
-          "command": "herdr.sessions.manage",
-          "when": "view == herdr.spaces",
-          "group": "9_manage@1"
-        },
-        {
-          "command": "herdr.sessions.doneManaging",
-          "when": "view == herdr.sessions && herdr.sessionsManaging",
           "group": "navigation@0"
         },
         {
@@ -394,11 +339,6 @@
           "command": "herdr.newSpace",
           "when": "view == herdr.spaces && herdr.sessionSelected",
           "group": "navigation@1"
-        },
-        {
-          "command": "herdr.refresh",
-          "when": "view == herdr.sessions",
-          "group": "navigation@2"
         },
         {
           "command": "herdr.agents.scopeSession",
@@ -447,21 +387,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "herdr.startSession",
-          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.stopped (host|container)( deletable)?$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "herdr.stopSession",
-          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running host( deletable)?$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "herdr.deleteSession",
-          "when": "view == herdr.sessions && viewItem =~ / deletable$/",
-          "group": "inline@2"
-        },
         {
           "command": "herdr.newTab",
           "when": "view == herdr.spaces && viewItem == herdr.space",
@@ -577,14 +502,6 @@
       ],
       "commandPalette": [
         {
-          "command": "herdr.openSession",
-          "when": "false"
-        },
-        {
-          "command": "herdr.deleteSession",
-          "when": "false"
-        },
-        {
           "command": "herdr.openSpace",
           "when": "false"
         },
@@ -653,14 +570,6 @@
           "when": "false"
         },
         {
-          "command": "herdr.startSession",
-          "when": "false"
-        },
-        {
-          "command": "herdr.stopSession",
-          "when": "false"
-        },
-        {
           "command": "herdr.newSpace",
           "when": "herdr.sessionSelected"
         },
@@ -714,10 +623,6 @@
         },
         {
           "command": "herdr.tile.close",
-          "when": "false"
-        },
-        {
-          "command": "herdr.sessions.doneManaging",
           "when": "false"
         }
       ],

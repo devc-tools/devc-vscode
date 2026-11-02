@@ -130,7 +130,7 @@ export class BlockedStatusBar implements vscode.Disposable {
 /** The selected session, as the session status bar item shows it. */
 export interface SessionStatusInput {
 	sessionKey: string;
-	/** The session's row label in Sessions. */
+	/** The session's row label (as in Switch Session). */
 	rowLabel: string;
 	envKind: 'host' | 'ssh' | 'container';
 	alias?: string;

@@ -28,7 +28,7 @@ export function toScope(value: unknown): AgentsScope {
 /** A connected session, as the Agents view reads it. */
 export interface AgentSource {
 	sessionKey: string;
-	/** The session's row label in Sessions. */
+	/** The session's row label (as in Switch Session). */
 	rowLabel: string;
 	snapshot: Snapshot;
 	/** The session's environment, for the `machine` token. */

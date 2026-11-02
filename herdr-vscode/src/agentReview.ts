@@ -404,7 +404,7 @@ export interface AgentReviewDeps {
 	};
 	/** An environment's bind mounts (`EnvironmentPaths.mounts`). */
 	mounts: MountsOf;
-	/** A session's row label in Sessions. */
+	/** A session's row label (as in Switch Session). */
 	rowLabel(sessionKey: string): string | undefined;
 	/** Active Pane's followed pane key. */
 	followed(): string | undefined;

@@ -13,22 +13,21 @@ import { createdTabId, sessionDeleteArgv, sessionStopArgv, spaceCwd, splitTarget
 import { SessionModel, sessionKey } from './sessions';
 import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
-import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './status';
+import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar, statusIcon } from './status';
 import { PaneStreams } from './streams';
 import { activeTabOf, TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { TouchedRecorder, TouchedStore } from './touched';
 import { AgentSource, AgentsView } from './views/agentsView';
 import {
-	DONE_MANAGING_COMMAND,
-	firstSpaceId,
-	MANAGE_SESSIONS_COMMAND,
-	NO_RUNNING_SESSIONS,
-	OPEN_SESSION_COMMAND,
+	NewSessionPlace,
+	newSessionPlaces,
+	SessionList,
+	SessionPickButton,
+	SessionPickEntry,
 	SessionRowNode,
-	SessionsView,
 	SWITCH_SESSION_COMMAND,
-	SwitchSessionItem,
+	validateSessionName,
 } from './views/sessionsView';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
@@ -79,7 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const m = model;
 	context.subscriptions.push(m, agentStates);
 
-	const sessions = new SessionsView(m, context.workspaceState);
+	const sessions = new SessionList(m, context.workspaceState);
 	const rowLabel = (key: string) => sessions.row(key)?.label;
 	const focus = new FocusTracker(m, rowLabel);
 	streams = new PaneStreams((key) => {
@@ -212,6 +211,124 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(agentReview, ...agentReview.registerCommands());
 
 	const warn = (err: unknown) => void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
+
+	/** Starts a stopped session on this machine or in a dev container, then selects it. */
+	const startSession = async (envKey: string, session: string): Promise<void> => {
+		const env = environments.get(envKey);
+		if (!env || (env.kind !== 'host' && env.kind !== 'container')) {
+			return;
+		}
+		try {
+			const started = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `herdr: starting session "${session}"…` },
+				() => (env.kind === 'host' ? startHostSession(m, session) : startContainerSession(m, env, session, readSettings().dockerPath)),
+			);
+			if (started) {
+				sessions.select(sessionKey(env.key, session));
+			} else {
+				const where = env.kind === 'container' ? ` in ${env.label}` : '';
+				void vscode.window.showWarningMessage(`herdr: session "${session}" did not start${where}. Its herdr-server.log says why.`);
+			}
+		} catch (err) {
+			warn(err);
+		}
+	};
+	const sessionActions: SessionActions = {
+		sessions,
+		refresh: () => m.refresh(),
+		start: async (row) => {
+			if (row.session) {
+				await startSession(row.envKey, row.session);
+			}
+		},
+		stop: async (row) => {
+			const session = row.session;
+			const shell = environments.get(HOST_KEY)?.shell;
+			if (!session || row.envKey !== HOST_KEY || !shell) {
+				return;
+			}
+			const stop = 'Stop Session';
+			const answer = await vscode.window.showWarningMessage(
+				`Stop herdr session "${session}"?`,
+				{ modal: true, detail: 'Every pane in it closes, and the agents and programs running there end.' },
+				stop,
+			);
+			if (answer !== stop) {
+				return;
+			}
+			try {
+				const res = await shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
+				if (res.exitCode !== 0) {
+					throw new Error(res.stderr.toString().trim() || `could not stop session "${session}".`);
+				}
+			} catch (err) {
+				warn(err);
+			}
+			await m.relist(HOST_KEY);
+		},
+		remove: async (row) => {
+			const session = row.session;
+			const env = environments.get(row.envKey);
+			if (!session || !env || !row.deletable) {
+				return;
+			}
+			const running = row.contextValue === 'herdr.session.running';
+			const del = 'Delete Session';
+			const answer = await vscode.window.showWarningMessage(
+				`Delete herdr session "${session}"?`,
+				{
+					modal: true,
+					detail: running
+						? 'The session is stopped first: every pane in it closes, and the agents and programs running there end. Its spaces and layout are then deleted.'
+						: 'Its spaces and layout are deleted.',
+				},
+				del,
+			);
+			if (answer !== del) {
+				return;
+			}
+			try {
+				await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `herdr: deleting session "${session}"…` }, async () => {
+					if (running) {
+						const stopped = await env.shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
+						if (stopped.exitCode !== 0) {
+							throw new Error(stopped.stderr.toString().trim() || `could not stop session "${session}".`);
+						}
+					}
+					const res = await env.shell.run(sessionDeleteArgv(session), { timeoutMs: 15000 });
+					if (res.exitCode !== 0) {
+						throw new Error(res.stderr.toString().trim() || `could not delete session "${session}".`);
+					}
+				});
+			} catch (err) {
+				warn(err);
+			}
+			await m.relist(env.key);
+		},
+		create: async () => {
+			const states = m.states();
+			const places = newSessionPlaces(states);
+			let place: NewSessionPlace | undefined = places[0];
+			if (places.length > 1) {
+				place = await vscode.window.showQuickPick(
+					places.map((p) => ({ label: p.label, description: p.description, place: p })),
+					{ title: 'New herdr Session', placeHolder: 'Where should the session run?' },
+				).then((picked) => picked?.place);
+			}
+			if (!place) {
+				return;
+			}
+			const existing = states.find((s) => s.env.key === place.envKey)?.sessions.map((s) => s.name) ?? [];
+			const name = await vscode.window.showInputBox({
+				title: 'New herdr Session',
+				prompt: 'Session name',
+				validateInput: (value) => validateSessionName(value, existing),
+			});
+			if (name !== undefined && validateSessionName(name, existing) === undefined) {
+				await startSession(place.envKey, name);
+			}
+		},
+	};
 	/** Opens a tab that was just created, once the snapshot has it. */
 	const openCreatedTab = async (key: string, result: unknown) => {
 		const tabId = createdTabId(result);
@@ -255,126 +372,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
-		vscode.commands.registerCommand('herdr.startSession', async (row?: SessionRowNode) => {
-			const session = row?.session;
-			const env = row && environments.get(row.envKey);
-			if (!session || !env || (env.kind !== 'host' && env.kind !== 'container')) {
-				return;
-			}
-			try {
-				const started = await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, () =>
-					env.kind === 'host' ? startHostSession(m, session) : startContainerSession(m, env, session, readSettings().dockerPath),
-				);
-				if (started) {
-					sessions.select(sessionKey(env.key, session));
-				} else {
-					const where = env.kind === 'container' ? ` in ${env.label}` : '';
-					void vscode.window.showWarningMessage(`herdr: session "${session}" did not start${where}. Its herdr-server.log says why.`);
-				}
-			} catch (err) {
-				warn(err);
-			}
-		}),
-		vscode.commands.registerCommand('herdr.stopSession', async (row?: SessionRowNode) => {
-			const session = row?.session;
-			const shell = environments.get(HOST_KEY)?.shell;
-			if (!session || row.envKey !== HOST_KEY || !shell) {
-				return;
-			}
-			const stop = 'Stop Session';
-			const answer = await vscode.window.showWarningMessage(
-				`Stop herdr session "${session}"?`,
-				{ modal: true, detail: 'Every pane in it closes, and the agents and programs running there end.' },
-				stop,
-			);
-			if (answer !== stop) {
-				return;
-			}
-			try {
-				const res = await shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
-				if (res.exitCode !== 0) {
-					throw new Error(res.stderr.toString().trim() || `could not stop session "${session}".`);
-				}
-			} catch (err) {
-				warn(err);
-			}
-			await m.relist(HOST_KEY);
-		}),
-		vscode.commands.registerCommand(SWITCH_SESSION_COMMAND, async () => {
-			const picked = await pickSession(sessions.switchItems(), sessions.selected);
-			if (picked?.manage) {
-				await vscode.commands.executeCommand(MANAGE_SESSIONS_COMMAND);
-			} else if (picked?.key) {
-				sessions.select(picked.key);
-			}
-		}),
-		vscode.commands.registerCommand(MANAGE_SESSIONS_COMMAND, async () => {
-			sessions.setManaging(true);
-			await vscode.commands.executeCommand('herdr.sessions.focus');
-		}),
-		vscode.commands.registerCommand(DONE_MANAGING_COMMAND, () => sessions.setManaging(false)),
-		vscode.commands.registerCommand(OPEN_SESSION_COMMAND, async (key?: string) => {
-			if (!key) {
-				return;
-			}
-			sessions.select(key);
-			const snapshot = () => m.connection(key)?.snapshot;
-			if (!snapshot()) {
-				// Still connecting: the first snapshot takes an event to arrive.
-				await new Promise<void>((resolve) => {
-					const finish = () => {
-						clearTimeout(timer);
-						sub.dispose();
-						resolve();
-					};
-					const timer = setTimeout(finish, 3000);
-					const sub = m.onDidChange(() => snapshot() && finish());
-				});
-			}
-			const workspaceId = firstSpaceId(snapshot());
-			if (workspaceId) {
-				panels.openSpace(key, workspaceId);
-			}
-		}),
-		vscode.commands.registerCommand('herdr.deleteSession', async (row?: SessionRowNode) => {
-			const session = row?.session;
-			const env = row && environments.get(row.envKey);
-			if (!session || !env || !row.deletable) {
-				return;
-			}
-			const running = row.contextValue === 'herdr.session.running';
-			const del = 'Delete Session';
-			const answer = await vscode.window.showWarningMessage(
-				`Delete herdr session "${session}"?`,
-				{
-					modal: true,
-					detail: running
-						? 'The session is stopped first: every pane in it closes, and the agents and programs running there end. Its spaces and layout are then deleted.'
-						: 'Its spaces and layout are deleted.',
-				},
-				del,
-			);
-			if (answer !== del) {
-				return;
-			}
-			try {
-				await vscode.window.withProgress({ location: { viewId: 'herdr.sessions' } }, async () => {
-					if (running) {
-						const stopped = await env.shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
-						if (stopped.exitCode !== 0) {
-							throw new Error(stopped.stderr.toString().trim() || `could not stop session "${session}".`);
-						}
-					}
-					const res = await env.shell.run(sessionDeleteArgv(session), { timeoutMs: 15000 });
-					if (res.exitCode !== 0) {
-						throw new Error(res.stderr.toString().trim() || `could not delete session "${session}".`);
-					}
-				});
-			} catch (err) {
-				warn(err);
-			}
-			await m.relist(env.key);
-		}),
+		vscode.commands.registerCommand(SWITCH_SESSION_COMMAND, () => pickSession(sessionActions)),
 		vscode.commands.registerCommand('herdr.newSpace', async () => {
 			const key = sessions.selected;
 			if (!key) {
@@ -494,32 +492,100 @@ export function deactivate(): void {
 	model = undefined;
 }
 
-/** Switch Session's quick pick; the chosen entry, or undefined on Escape. */
-async function pickSession(entries: SwitchSessionItem[], selected: string | undefined): Promise<SwitchSessionItem | undefined> {
-	type Item = vscode.QuickPickItem & { entry: SwitchSessionItem };
-	const items: Item[] = entries.map((e) => ({
-		label: e.label,
-		description: e.description,
-		kind: e.kind === 'separator' ? vscode.QuickPickItemKind.Separator : vscode.QuickPickItemKind.Default,
-		entry: e,
-	}));
+/** What the Switch Session picker does to sessions; `extension.ts` binds it to the model. */
+interface SessionActions {
+	sessions: Pick<SessionList, 'pickEntries' | 'selected' | 'select' | 'onDidChange'>;
+	refresh(): void;
+	start(row: SessionRowNode): Promise<void>;
+	stop(row: SessionRowNode): Promise<void>;
+	remove(row: SessionRowNode): Promise<void>;
+	create(): Promise<void>;
+}
+
+const BUTTONS: Record<SessionPickButton, { iconPath: vscode.ThemeIcon; tooltip: string }> = {
+	stop: { iconPath: new vscode.ThemeIcon('debug-stop'), tooltip: 'Stop Session' },
+	delete: { iconPath: new vscode.ThemeIcon('trash'), tooltip: 'Delete Session' },
+};
+const NEW_SESSION_BUTTON = { iconPath: new vscode.ThemeIcon('add'), tooltip: 'New Session…' };
+const REFRESH_BUTTON = { iconPath: new vscode.ThemeIcon('refresh'), tooltip: 'Refresh' };
+
+/**
+ * Switch Session: the sessions by place. Accepting selects a running one or
+ * starts a stopped one; item buttons stop and delete, and keep the picker open.
+ */
+function pickSession(actions: SessionActions): Promise<void> {
+	type Item = vscode.QuickPickItem & { entry?: Extract<SessionPickEntry, { kind: 'session' }>; buttonKinds?: SessionPickButton[] };
 	const qp = vscode.window.createQuickPick<Item>();
 	qp.title = 'Switch herdr Session';
-	qp.items = items;
-	qp.placeholder = entries.some((e) => e.key) ? 'Select a session to show in Spaces' : NO_RUNNING_SESSIONS;
-	const current = items.find((i) => i.entry.key !== undefined && i.entry.key === selected);
-	if (current) {
-		qp.activeItems = [current];
-	}
+	qp.buttons = [NEW_SESSION_BUTTON, REFRESH_BUTTON];
+	qp.matchOnDescription = true;
+	const fill = () => {
+		const activeKey = qp.activeItems[0]?.entry?.row.key ?? actions.sessions.selected;
+		const items: Item[] = actions.sessions.pickEntries().map((e) =>
+			e.kind === 'separator'
+				? { label: e.label, kind: vscode.QuickPickItemKind.Separator }
+				: {
+						label: e.label,
+						description: e.description,
+						iconPath: statusIcon(e.status),
+						buttons: e.buttons.map((b) => BUTTONS[b]),
+						buttonKinds: e.buttons,
+						entry: e,
+					},
+		);
+		qp.items = items;
+		qp.placeholder = items.some((i) => i.entry) ? 'Select a session' : 'No herdr sessions';
+		const active = items.find((i) => i.entry && i.entry.row.key === activeKey);
+		if (active) {
+			qp.activeItems = [active];
+		}
+	};
+	const busy = async (run: () => Promise<void>) => {
+		qp.ignoreFocusOut = true;
+		qp.busy = true;
+		try {
+			await run();
+		} finally {
+			qp.busy = false;
+			qp.ignoreFocusOut = false;
+		}
+	};
+	const sub = actions.sessions.onDidChange(fill);
+	fill();
 	return new Promise((resolve) => {
-		let result: SwitchSessionItem | undefined;
 		qp.onDidAccept(() => {
-			result = qp.selectedItems[0]?.entry;
+			const entry = qp.selectedItems[0]?.entry;
+			if (!entry || entry.action === 'none') {
+				return;
+			}
 			qp.hide();
+			if (entry.action === 'select') {
+				actions.sessions.select(entry.row.key);
+			} else if (entry.action === 'start') {
+				void actions.start(entry.row);
+			} else {
+				void vscode.window.showWarningMessage('herdr: starting sessions on SSH hosts is not supported yet.');
+			}
+		});
+		qp.onDidTriggerItemButton((e) => {
+			const entry = e.item.entry;
+			const kind = e.item.buttonKinds?.[(e.item.buttons ?? []).indexOf(e.button)];
+			if (entry && kind) {
+				void busy(() => (kind === 'stop' ? actions.stop(entry.row) : actions.remove(entry.row)));
+			}
+		});
+		qp.onDidTriggerButton((button) => {
+			if (button === REFRESH_BUTTON) {
+				actions.refresh();
+			} else if (button === NEW_SESSION_BUTTON) {
+				qp.hide();
+				void actions.create();
+			}
 		});
 		qp.onDidHide(() => {
+			sub.dispose();
 			qp.dispose();
-			resolve(result);
+			resolve();
 		});
 		qp.show();
 	});

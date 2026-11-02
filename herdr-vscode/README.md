@@ -1,16 +1,20 @@
 # herdr-vscode
 
 herdr sessions, spaces, agents and panes in VS Code, for people who already use
-[herdr](https://herdr.dev). The **herdr** activity-bar container has four views:
+[herdr](https://herdr.dev). The **herdr** activity-bar container has three views (Spaces, Agents, Active Pane),
+and sessions are picked from **Switch Session**:
 
-- **Sessions**: every herdr session on this machine, on the SSH hosts in `herdr.sshHosts`, and
-  in every running dev container. Each running session shows its agents' counts
-  (`2 blocked · 1 working`) and an icon for its worst status. Click a running session to select
-  it and open its first space in an editor tab (or focus that tab if it is already open).
-  The view is shown only when it is needed: while no session is selected, or after **Manage Sessions**
-  (the Spaces `…` menu, or the command palette) until you click **Done** in its title bar. To change
-  session day to day, use **Switch Session** (`$(arrow-swap)` in the Spaces title bar, or click the
-  session in the status bar): a list of the running sessions by place, and **Manage Sessions…**.
+- **Switch Session** (`$(arrow-swap)` in the Spaces title bar, the session in the status bar, **Select Session**
+  in Spaces while none is selected, or the command palette): every herdr session on this machine, on the SSH
+  hosts in `herdr.sshHosts`, and in every running dev container, under *This machine*, *SSH · &lt;alias&gt;* and
+  *Dev containers*. Each running session shows its agents' counts (`2 blocked · 1 working`) and an icon for its
+  worst status.
+  - Click a running session to select it; click a stopped one (this machine or a dev container) to start and
+    select it. Starting SSH hosts' sessions is not supported yet.
+  - **Stop** (this machine's running sessions) and **Delete** (any session but herdr's default one) are buttons on
+    the row; both ask first, and the list updates in place.
+  - **New Session…** (`+` in the picker's title bar) asks where (this machine, or a dev container whose herdr is
+    reachable) and a name, then starts and selects it. **Refresh** re-lists every place.
 
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
@@ -66,11 +70,10 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
   Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
 - **New Space** (Spaces title bar), **New Tab** (a space's row), and **Split Right** / **Split Down** (a tab's or
   pane's row) create them in herdr and open their space on the tab they landed in.
-- **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
-  because every pane in the session closes. A started session has no spaces until you add one.
-  **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
-- **Delete Session** (trash icon) on every session row except herdr's default session runs
-  `herdr session delete` in that session's environment, after asking. A running session is stopped first.
+- In **Switch Session**, clicking a stopped session starts it (a dev container's `herdr not running` row starts
+  `devc`); **Stop** runs this machine's `herdr session stop`, after asking, because every pane in the session closes.
+  A started session has no spaces until you add one. **Delete** runs `herdr session delete` in that session's
+  environment, after asking; a running session is stopped first.
 - Right-click a tile for **Split Right**, **Split Down** (a new shell in the tile's directory), **Zoom** /
   **Unzoom** and **Close Pane**. Closing, there or with the tile's close button, asks first, because the
   pane's process ends. Changes made in a herdr TUI come back within a second, and splitters move in place
@@ -123,13 +126,14 @@ changes nothing, and **Pin** stops it following.
   repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.
   **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area; elsewhere,
   **Split Pane Here** makes a herdr pane below, in that folder.
-- **Uncommitted:** the repo's whole `git status`. Click for a `HEAD ↔ working tree` diff;
+- **Changes:** the repo's whole `git status`, always shown (`0` and `No uncommitted changes` when clean). Click for a
+  `HEAD ↔ working tree` diff;
   **Open File** opens the file as it is now.
 - **Commits · vs origin/main** (collapsed): the commits on your branch since it left the default branch (`origin/HEAD`, else
   `main` or `master`), or the 20 most recent (`recent`) on the default branch itself. Expand a commit for its files
   (`A`, `M`, `D` against its first parent); click one for its diff in that commit, and **Open File** for the file as
   it is now (or as the commit has it, when it is gone).
-- **Show Only This Pane's Files** (the filter in the title bar; **Show All Files** turns it off) narrows Uncommitted
+- **Show Only This Pane's Files** (the filter in the title bar; **Show All Files** turns it off) narrows Changes
   and Commits to the files this pane's agent changed while it was **working**: herdr-vscode snapshots the worktree
   when an agent starts and stops working, in every connected session, whether or not this view is open. Git cannot
   say which process changed a file, so two agents working in one worktree at the same time see each other's files.

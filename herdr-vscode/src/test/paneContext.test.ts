@@ -18,6 +18,7 @@ import {
 	EntryNode,
 	followedPaneKey,
 	GroupNode,
+	NO_CHANGES,
 	NO_PANE_MESSAGE,
 	paneContextItem,
 	PaneContextHost,
@@ -494,7 +495,7 @@ suite('pane context: the view over a temp repo', function () {
 
 		assert.strictEqual((await roots())[0].type, 'root', 'the repo row first');
 		const top = (await view.getChildren()).filter((n): n is GroupNode => n.type === 'group');
-		assert.deepStrictEqual(top.map((g) => g.label), ['Uncommitted', 'Commits', 'Files'], 'no Other Panes');
+		assert.deepStrictEqual(top.map((g) => g.label), ['Changes', 'Commits', 'Files'], 'no Other Panes');
 		assert.strictEqual(paneContextItem((await group('files'))!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
 	});
 
@@ -725,7 +726,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.ok(!fs.existsSync(path.join(dir, 'made-dir')));
 	});
 
-	// ── Changes: Uncommitted, Commits, this pane's files ────────────────────
+	// ── Changes, Commits, this pane's files ─────────────────────────────────
 
 	const P1 = makePaneKey(S, 'w2:p1');
 	const commitRows = async () => view.getChildren(await group('commits'));
@@ -737,13 +738,13 @@ suite('pane context: the view over a temp repo', function () {
 	};
 	const activeTab = () => vscode.window.tabGroups.activeTabGroup.activeTab;
 
-	test('sections in order: Uncommitted expanded, Commits, Files; no Changed in This Pane', async () => {
+	test('sections in order: Changes expanded, Commits, Files; no Changed in This Pane', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
 		const top = await roots();
 		assert.deepStrictEqual(
 			top.map((n) => (n.type === 'group' ? n.label : n.type)),
-			['root', 'Uncommitted', 'Commits', 'Files'],
+			['root', 'Changes', 'Commits', 'Files'],
 		);
 		const uncommitted = (await group('changes'))!;
 		assert.strictEqual(uncommitted.description, '4');
@@ -758,13 +759,16 @@ suite('pane context: the view over a temp repo', function () {
 		const last = decorated[decorated.length - 1]!;
 		assert.deepStrictEqual(Object.keys(last).sort(), ['status', 'untrackedDirs'], 'no since-markers');
 
-		// A clean tree: no Uncommitted; outside a repo: no change sections.
+		// A clean tree: Changes 0 with a note; outside a repo: no change sections.
 		commitAll('two');
 		view.dispose();
 		view = makeView();
 		await rootIs(path.basename(dir));
 		await waitFor('the clean status', async () => (await rootRow()).description === '⎇ main · clean');
-		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Commits', 'Files']);
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Changes', 'Commits', 'Files']);
+		const clean = (await group('changes'))!;
+		assert.strictEqual(clean.description, '0');
+		assert.deepStrictEqual((await view.getChildren(clean)).map((n) => (n as { label: string }).label), [NO_CHANGES]);
 		view.dispose();
 		model.snapshots.set(S, twoPanes(other, dir));
 		view = makeView();
@@ -860,10 +864,10 @@ suite('pane context: the view over a temp repo', function () {
 		commitAll('two');
 		await view.poll();
 		assert.deepStrictEqual(rowLabels(await commitRows()), ['two', 'one']);
-		assert.strictEqual(await group('changes'), undefined, 'nothing uncommitted');
+		assert.strictEqual((await group('changes'))?.description, '0', 'nothing uncommitted: Changes 0');
 	});
 
-	test("pane mode: Uncommitted and Commits filtered to the agent's touched files", async () => {
+	test("pane mode: Changes and Commits filtered to the agent's touched files", async () => {
 		commitAll('two'); // a.ts, fresh/x, gone.txt, new.txt
 		fs.writeFileSync(path.join(dir, 'README.md'), 'readme again\n');
 		const three = commitAll('three');
@@ -901,7 +905,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.deepStrictEqual(rowLabels(await commitRows()), ['three', 'two', 'one']);
 	});
 
-	test('pane mode with nothing recorded: the note in both sections, Uncommitted shown even when clean', async () => {
+	test('pane mode with nothing recorded: the note in both sections, Changes shown even when clean', async () => {
 		paneFilesOnly = true;
 		view = makeView();
 		await rootIs(path.basename(dir));

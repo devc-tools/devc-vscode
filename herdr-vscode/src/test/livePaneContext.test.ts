@@ -169,9 +169,9 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		assert.strictEqual(changes[0].uri.fsPath, path.join(repo, 'src', 'auth', 'middleware.ts'));
 	});
 
-	test('Uncommitted holds the change, Commits the one commit (recent, on main)', async () => {
+	test('Changes holds the change, Commits the one commit (recent, on main)', async () => {
 		const uncommitted = (await group('changes'))!;
-		assert.strictEqual(uncommitted.label, 'Uncommitted');
+		assert.strictEqual(uncommitted.label, 'Changes');
 		const all = (await view.getChildren(uncommitted)) as ChangeNode[];
 		assert.deepStrictEqual(all.map((c) => c.label), ['middleware.ts']);
 		const commits = (await group('commits'))!;
@@ -263,12 +263,12 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await req('pane.close', { pane_id: fresh.pane_id });
 	});
 
-	test('a file written from the pane is in Uncommitted within a poll', async () => {
+	test('a file written from the pane is in Changes within a poll', async () => {
 		await waitFor('p1 painted', 15000, async () => (await tileOf(p1))?.text.length);
 		const start = Date.now();
 		say(p1, `printf 'from pane\\n' > ${repo}/from-pane.txt`);
 		await waitFor('the change row', 8000, async () => ((await view.getChildren(await group('changes'))) as ChangeNode[]).some((n) => n.label === 'from-pane.txt'));
-		console.log(`[live-pane-context] file from pane to Uncommitted: ${Date.now() - start} ms`);
+		console.log(`[live-pane-context] file from pane to Changes: ${Date.now() - start} ms`);
 		assert.strictEqual(fs.readFileSync(path.join(repo, 'from-pane.txt'), 'utf8'), 'from pane\n');
 	});
 

@@ -79,10 +79,10 @@ means events were dropped; it is handled like any event.
 - A subscription that ends on its own marks the session *disconnected*. It is retried after
   2 s, 5 s, 10 s, then every 30 s; each retry re-lists the environment first, so a session that
   stopped is dropped instead of retried.
-- **Start Session** runs `herdr --session <S> server` detached in the home directory, so it outlives the
-  window, then re-lists until it runs (20 tries, 500 ms apart). **Stop Session** runs `herdr session stop <S>`,
+- **Starting** a session (a stopped row in Switch Session, or New Session) runs `herdr --session <S> server` detached in the home directory, so it outlives the
+  window, then re-lists until it runs (20 tries, 500 ms apart). **Stop** runs `herdr session stop <S>`,
   on this machine only.
-- **Start Session** in a dev container (a stopped session row, or the `herdr not running` row, which starts
+- **Starting** in a dev container (a stopped session row, the `herdr not running` row, which starts
   `devc`) runs, through `herdr.dockerPath` with a 15 s timeout, not through the container shell (whose `-i`
   does not combine with `-d`):
 
@@ -104,12 +104,13 @@ when its session stops and when its environment goes away.
 
 ## Views
 
-- **Sessions** groups rows under *This machine*, *SSH · &lt;alias&gt;* and *Dev containers*.
+- **Switch Session** (`src/views/sessionsView.ts` `sessionPickEntries`, the quick pick in `src/extension.ts`) groups
+  rows under *This machine*, *SSH · &lt;alias&gt;* and *Dev containers*.
   An environment that has no session row to show (none running, herdr not installed,
   unreachable, error) gets one row with that status: labelled `this machine`, the ssh alias or
   the container's folder name.
 - The selected session is stored in workspace state `herdr.selectedSession`. If it is not
-  running, the view falls back to this machine's default session, else the first running
+  running, the selection falls back to this machine's default session, else the first running
   session, without overwriting the stored choice, so it comes back when the session does.
 - Status icons: `circle-filled` in `charts.orange` (blocked), `charts.blue` (working),
   `charts.green` (done) and `disabledForeground` (idle, unknown). Sessions and spaces show their
@@ -134,20 +135,21 @@ when its session stops and when its environment goes away.
   scope, before the filter; the badge counts blocked agents everywhere. Rows re-render every 30 s
   while the view is visible, for the elapsed times. The blocked status bar item sets scope `all` and
   filter `blocked`.
-- **Sessions** row `contextValue`s get ` host` or ` container` appended (rows that cannot start stay
-  `herdr.session.absent`); **Start Session** shows on `herdr.session.stopped (host|container)`, **Stop Session**
-  on `herdr.session.running host` only.
+- Picker rows: accept on a running row `select`s it; on a stopped row of `host` / `container` starts it
+  (Notification progress) and selects it; on a stopped SSH row warns `starting sessions on SSH hosts is not supported
+  yet`; on an absent row (`unreachable`, `herdr not installed`, …) does nothing (`sessionPickAction`). Item buttons
+  (`sessionPickButtons`): **Stop** (`debug-stop`) on running `host` rows, **Delete** (`trash`) on `deletable` rows
+  (not herdr's default session, not absent rows). While a button's action runs, `ignoreFocusOut` and `busy` are on, so
+  its modal does not close the picker; the list rebuilds on every `SessionList.onDidChange`, keeping the active row.
+  Title buttons: **New Session…** (`add`) and **Refresh** (`refresh`, `SessionModel.refresh`).
+- **New Session**: where (`newSessionPlaces`: `This machine`, then dev containers with status `ok`; no SSH; skipped
+  with one place), then a name (`validateSessionName`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, not already listed in
+  that place), then start and select.
+- With no session selected, Spaces (and Agents in session scope) show `No session selected.` and a **Select
+  Session** link to `herdr.sessions.switch`.
 - The **session status bar item** (`herdr.session`, left, priority 101) shows `herdr: <row label>`, with
   ` (<session>)` in a container and ` (<alias>)` on an SSH host, while a session is selected; its tooltip has
   the session key, the herdr version and the counts. Clicking it runs `herdr.sessions.switch`.
-- **Sessions on demand.** `herdr.sessions` has `"when": "herdr.sessionsShown"`; the context key is
-  `managing || selected === undefined` (`sessionsShown`, `src/views/sessionsView.ts`), so the view also shows
-  during startup discovery. A view hidden by `when` is gone, so `herdr.sessions.focus` does nothing then:
-  **Manage Sessions** (`herdr.sessions.manage`) turns manage mode on (in memory, off at activation; context key
-  `herdr.sessionsManaging`) and then focuses it; **Done** (`herdr.sessions.doneManaging`) turns it off.
-  **Switch Session** (`herdr.sessions.switch`) is a quick pick of `switchSessionItems`: per group with running
-  rows a separator and those rows (label and description as in the view, the selected one active), then a
-  separator and `$(gear) Manage Sessions…`. Picking a session calls `select`, as a row click does.
 
 ### Time in state and done
 
@@ -510,7 +512,7 @@ branch)` or `## No commits yet on <branch>`. A rename or copy, in **either** sta
 in `/`, with nothing to open. A deleted path opens as HEAD has it.
 
 The left side of **Open Changes** is `herdr-git://<env key>/<toplevel>/<path>?<revision>#<length of toplevel>`:
-the revision is `HEAD` (Uncommitted), or a commit, its first parent or the empty tree (a commit's files); the provider runs
+the revision is `HEAD` (Changes), or a commit, its first parent or the empty tree (a commit's files); the provider runs
 `git -C <toplevel> show <revision>:<path>`. The query reaches argv, so anything but `HEAD` or 40–64 hex digits gets an
 empty document with nothing run, as does an unknown environment. The fragment says where the toplevel ends, and
 survives a window reload.
@@ -603,8 +605,7 @@ saw the pane go. Earlier builds' `herdr.paneContext.baselines` is cleared on act
 
 **The filter** (`herdr.paneContext.paneFilesOnly`, workspaceState and context key, default off; **Show Only This Pane's
 Files** / **Show All Files** in the title bar) applies to whichever pane is followed. For an agent pane with touched set `T`:
-Uncommitted keeps rows in `T` (an untracked `dir/` row when a path in `T` is under it) and reads `<shown> of <all>`, and is
-shown even with a clean status; Commits loads every listed commit's files (four at a time) and hides commits with none in
+Changes keeps rows in `T` (an untracked `dir/` row when a path in `T` is under it) and reads `<shown> of <all>`; Commits loads every listed commit's files (four at a time) and hides commits with none in
 `T`, its description gaining ` · this pane`. An empty section shows `Nothing recorded for this pane`. A shell pane's sections
 are unfiltered, each with the note `No agent in this pane: showing all files` first. Files is never filtered. A recording
 refreshes the view while the filter is on.

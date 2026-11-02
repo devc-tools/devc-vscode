@@ -4,6 +4,8 @@
 
 ### Pending
 
+- [herdr Session Picker](herdr-session-picker.md) — the Sessions view is removed: Switch Session's picker selects, starts (click a stopped one), stops and deletes sessions (item buttons) and creates them (+); Spaces shows Select Session with none selected; Active Pane's Uncommitted becomes an always-shown Changes.
+
 - [herdr Sidebar Clarity](herdr-sidebar-clarity.md) — Active Pane names its pane in the view header (pane row removed), tab switches from VS Code follow the new tab's pane, one git summary format, Sessions view shown only while managing or with no session selected (Switch Session quick pick).
 
 - [SSH Environments](ssh-environments.md) — an SSH host (the devc-dev agent sandbox VM) as a third environment with dev container parity: Remote Files roots, ssh terminals and links, Agents view env with herdr and terminal agents, Add Agent; plain `ssh`, no remote VS Code server, no workspace folder.
@@ -87,3 +89,4 @@
 | 27 | [herdr-pane-identity.md](archived/herdr-pane-identity.md) | Task-title pane names, agent marks as icons, Active Pane pane row (depends on phase 26) | complete |
 | 28 | [herdr-commit-changes.md](archived/herdr-commit-changes.md) | Active Pane: Uncommitted + per-commit changes, this-pane filter; baseline section removed (depends on phases 20 and 27) | complete |
 | 29 | [herdr-sidebar-clarity.md](herdr-sidebar-clarity.md) | Active Pane header identity, tab switch follows pane, one git format, Sessions on demand (depends on phases 27 and 28) | implemented, manual checks pending |
+| 30 | [herdr-session-picker.md](herdr-session-picker.md) | Sessions view removed: picker select / start / stop / delete / new; Select Session welcome; Active Pane Changes always shown (depends on phase 29) | implemented, manual checks pending |

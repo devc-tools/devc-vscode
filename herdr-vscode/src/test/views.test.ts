@@ -13,15 +13,15 @@ import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
 import {
 	effectiveSelection,
-	firstSpaceId,
 	groupOf,
-	MANAGE_SESSIONS_LABEL,
+	newSessionPlaces,
 	SessionRowNode,
-	sessionItemContext,
+	sessionPickAction,
+	sessionPickButtons,
+	sessionPickEntries,
 	sessionRows,
 	sessionRowStatus,
-	sessionsShown,
-	switchSessionItems,
+	validateSessionName,
 } from '../views/sessionsView';
 import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
@@ -427,7 +427,7 @@ suite('Sessions rows', () => {
 		);
 	});
 
-	test('Start in dev containers: the herdr not running row starts devc; suffixes', () => {
+	test('Start in dev containers: the herdr not running row starts devc', () => {
 		const [row] = sessionRows({ env: containerEnv, status: 'ok', sessions: [] }, () => undefined, false);
 		assert.deepStrictEqual([row.key, row.label, row.description, row.session, row.contextValue], [
 			'container:3f2a9c1b04de/',
@@ -436,22 +436,28 @@ suite('Sessions rows', () => {
 			'devc',
 			'herdr.session.stopped',
 		]);
-		assert.strictEqual(sessionItemContext(row, 'container'), 'herdr.session.stopped container');
+		assert.strictEqual(sessionPickAction(row, 'container'), 'start');
+		assert.deepStrictEqual(sessionPickButtons(row), [], 'not deletable');
 		const notInstalled = sessionRows({ env: containerEnv, status: 'notInstalled', sessions: [] }, () => undefined, false)[0];
-		assert.strictEqual(sessionItemContext(notInstalled, 'container'), 'herdr.session.absent');
+		assert.strictEqual(sessionPickAction(notInstalled, 'container'), 'none');
 		assert.strictEqual(notInstalled.session, undefined);
-		const running = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'devc', default: false, running: true }] }, () => conn('connected'), false)[0];
-		assert.strictEqual(sessionItemContext(running, 'container'), 'herdr.session.running container deletable');
-		const stopped = sessionRows({ env: containerEnv, status: 'ok', sessions: [{ name: 'x', default: false, running: false }] }, () => undefined, true)[0];
-		assert.strictEqual(sessionItemContext(stopped, 'container'), 'herdr.session.stopped container deletable');
-		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.stopped' }, 'host'), 'herdr.session.stopped host');
-		assert.strictEqual(sessionItemContext({ envKey: 'host', contextValue: 'herdr.session.running' }, 'host'), 'herdr.session.running host');
-		assert.strictEqual(sessionItemContext({ envKey: 'ssh:box', contextValue: 'herdr.session.stopped' }, 'ssh'), 'herdr.session.stopped');
 		const hostNone = sessionRows({ env: hostEnv, status: 'ok', sessions: [] }, () => undefined, false)[0];
 		assert.strictEqual(hostNone.contextValue, 'herdr.session.absent', "this machine's empty row is unchanged");
+		assert.strictEqual(sessionPickAction(hostNone, 'host'), 'none');
 	});
 
-	test('Delete: every listed session but the default one', () => {
+	test('picker actions: running selects, stopped starts (not on SSH), absent does nothing', () => {
+		const running = { contextValue: 'herdr.session.running' as const, session: 'a' };
+		const stopped = { contextValue: 'herdr.session.stopped' as const, session: 'a' };
+		assert.strictEqual(sessionPickAction(running, 'host'), 'select');
+		assert.strictEqual(sessionPickAction(running, 'ssh'), 'select');
+		assert.strictEqual(sessionPickAction(stopped, 'host'), 'start');
+		assert.strictEqual(sessionPickAction(stopped, 'container'), 'start');
+		assert.strictEqual(sessionPickAction(stopped, 'ssh'), 'unsupported');
+		assert.strictEqual(sessionPickAction({ contextValue: 'herdr.session.absent', session: undefined }, 'host'), 'none');
+	});
+
+	test('picker buttons: Stop on this machine\'s running sessions, Delete on all but the default one', () => {
 		const rows = sessionRows(
 			okHost([
 				{ name: 'default', default: true, running: true },
@@ -461,21 +467,15 @@ suite('Sessions rows', () => {
 			() => conn('connected'),
 			false,
 		);
-		assert.deepStrictEqual(
-			rows.map((r) => sessionItemContext(r, 'host')),
-			['herdr.session.running host', 'herdr.session.running host deletable', 'herdr.session.stopped host deletable'],
+		assert.deepStrictEqual(rows.map(sessionPickButtons), [['stop'], ['stop', 'delete'], ['delete']]);
+		const container = sessionRows(
+			{ env: containerEnv, status: 'ok', sessions: [{ name: 'devc', default: false, running: true }, { name: 'x', default: true, running: true }] },
+			() => conn('connected'),
+			false,
 		);
-		const [placeholder] = sessionRows({ env: containerEnv, status: 'ok', sessions: [] }, () => undefined, false);
-		assert.strictEqual(sessionItemContext(placeholder, 'container'), 'herdr.session.stopped container', 'the herdr not running row lists no session');
-		assert.strictEqual(sessionItemContext({ envKey: 'ssh:box', contextValue: 'herdr.session.running', deletable: true }, 'ssh'), 'herdr.session.running deletable');
-	});
-
-	test('a click opens the lowest-numbered space', () => {
-		const snap = (numbers: number[]) =>
-			({ workspaces: numbers.map((n) => ({ workspace_id: `w${n}`, number: n })), tabs: [], panes: [] }) as unknown as Snapshot;
-		assert.strictEqual(firstSpaceId(snap([3, 1, 2])), 'w1');
-		assert.strictEqual(firstSpaceId(snap([])), undefined);
-		assert.strictEqual(firstSpaceId(undefined), undefined);
+		assert.deepStrictEqual(container.map(sessionPickButtons), [['delete'], []], 'no Stop in containers');
+		const unreachable = sessionRows({ env: { ...hostEnv, kind: 'ssh', key: 'ssh:box', alias: 'box' }, status: 'unreachable', sessions: [] }, () => undefined, false);
+		assert.deepStrictEqual(unreachable.map(sessionPickButtons), [[]]);
 	});
 
 	test('session status bar item: host, container, SSH', () => {
@@ -611,52 +611,78 @@ suite('Sessions rows', () => {
 	});
 });
 
-suite('Sessions on demand', () => {
-	test('shown with no selection or while managing', () => {
-		assert.strictEqual(sessionsShown(false, undefined), true, 'nothing selected');
-		assert.strictEqual(sessionsShown(false, 'host/a'), false, 'a session selected');
-		assert.strictEqual(sessionsShown(true, 'host/a'), true, 'manage mode');
-		assert.strictEqual(sessionsShown(false, 'host/a'), false, 'after Done');
-	});
+suite('Switch Session picker', () => {
+	const ssh: Environment = { ...hostEnv, kind: 'ssh', key: 'ssh:box', alias: 'box', label: 'box' };
 
-	test('Switch Session items: a separator per group, running sessions only, Manage Sessions last', () => {
-		const row = (key: string, groupId: string, contextValue: SessionRowNode['contextValue']): SessionRowNode =>
-			({ type: 'session', key, envKey: key.split('/')[0], session: key.split('/')[1], label: key, description: `d ${key}`, contextValue, tooltip: '', groupId }) as SessionRowNode;
-		const groups = [
-			{ type: 'group' as const, id: 'group:host', label: 'This machine' },
-			{ type: 'group' as const, id: 'group:ssh:box', label: 'SSH · box' },
-			{ type: 'group' as const, id: 'group:containers', label: 'Dev containers' },
+	test('entries: a separator per place in order, its rows, icons, buttons and actions', () => {
+		const states: EnvState[] = [
+			{ env: hostEnv, status: 'ok', sessions: [{ name: 'default', default: true, running: true }, { name: 'old', default: false, running: false }] },
+			{ env: ssh, status: 'unreachable', sessions: [] },
+			{ env: containerEnv, status: 'ok', sessions: [] },
 		];
-		const rows = new Map([
-			['group:host', [row('host/a', 'group:host', 'herdr.session.running'), row('host/b', 'group:host', 'herdr.session.stopped')]],
-			['group:ssh:box', [row('ssh:box/x', 'group:ssh:box', 'herdr.session.absent')]],
-			['group:containers', [row('c1/devc', 'group:containers', 'herdr.session.running')]],
-		]);
-		assert.deepStrictEqual(switchSessionItems(groups, rows), [
-			{ label: 'This machine', kind: 'separator' },
-			{ label: 'host/a', description: 'd host/a', key: 'host/a' },
-			{ label: 'Dev containers', kind: 'separator' },
-			{ label: 'c1/devc', description: 'd c1/devc', key: 'c1/devc' },
-			{ label: '', kind: 'separator' },
-			{ label: MANAGE_SESSIONS_LABEL, manage: true },
-		]);
-		assert.deepStrictEqual(switchSessionItems(groups, new Map()), [{ label: MANAGE_SESSIONS_LABEL, manage: true }], 'none running');
+		const groups = states.map((st) => groupOf(st.env));
+		const rows = new Map(states.map((st) => [groupOf(st.env).id, sessionRows(st, () => conn('connected'), false)]));
+		const kinds: Record<string, Environment['kind']> = { [hostEnv.key]: 'host', [ssh.key]: 'ssh', [containerEnv.key]: 'container' };
+		const entries = sessionPickEntries(groups, rows, (k) => kinds[k]);
+		assert.deepStrictEqual(
+			entries.map((e) => (e.kind === 'separator' ? `-- ${e.label}` : [e.label, e.description, e.status ?? 'off', e.buttons.join('+'), e.action].join(' | '))),
+			[
+				'-- This machine',
+				'default | 1 blocked · 1 working · 1 done | blocked | stop | select',
+				'old | stopped | off | delete | start',
+				'-- SSH · box',
+				'box | unreachable | off |  | none',
+				'-- Dev containers',
+				'my-app | herdr not running | off |  | start',
+			],
+		);
 	});
 
-	test('contributions: Sessions view when clause, Switch / Manage / Done, status bar click', () => {
+	test('showStoppedSessions hides stopped container and SSH rows, never this machine\'s', () => {
+		const stopped = [{ name: 'old', default: false, running: false }];
+		assert.deepStrictEqual(sessionRows({ env: hostEnv, status: 'ok', sessions: stopped }, () => undefined, false).map((r) => r.label), ['old']);
+		assert.deepStrictEqual(sessionRows({ env: ssh, status: 'ok', sessions: stopped }, () => undefined, false).map((r) => r.contextValue), ['herdr.session.absent']);
+		assert.deepStrictEqual(sessionRows({ env: ssh, status: 'ok', sessions: stopped }, () => undefined, true).map((r) => r.contextValue), ['herdr.session.stopped']);
+	});
+
+	test('New Session: places and name checks', () => {
+		const other: Environment = { ...containerEnv, key: 'container:other', label: 'other' };
+		assert.deepStrictEqual(
+			newSessionPlaces([
+				{ env: hostEnv, status: 'ok' },
+				{ env: ssh, status: 'ok' },
+				{ env: containerEnv, status: 'ok' },
+				{ env: other, status: 'notInstalled' },
+			]),
+			[
+				{ label: 'This machine', envKey: 'host' },
+				{ label: 'my-app', description: 'Dev container', envKey: containerEnv.key },
+			],
+		);
+		assert.deepStrictEqual(newSessionPlaces([]), [{ label: 'This machine', envKey: 'host' }], 'this machine always');
+		assert.strictEqual(validateSessionName('  ', []), 'Enter a name.');
+		assert.strictEqual(validateSessionName('my session', []), 'Use letters, digits, ".", "_" or "-".');
+		assert.strictEqual(validateSessionName('-x', []), 'Use letters, digits, ".", "_" or "-".');
+		assert.strictEqual(validateSessionName('work', ['default', 'work']), 'A session named "work" already exists there.');
+		assert.strictEqual(validateSessionName('work-2.b_c', ['work']), undefined);
+	});
+
+	test('contributions: no Sessions view or its commands; Select Session welcome; status bar click', () => {
 		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
 		const c = ext.packageJSON.contributes;
-		assert.strictEqual(c.views.herdr.find((v: { id: string }) => v.id === 'herdr.sessions').when, 'herdr.sessionsShown');
-		const cmd = (id: string) => c.commands.find((x: { command: string }) => x.command === id);
-		assert.deepStrictEqual([cmd('herdr.sessions.switch').title, cmd('herdr.sessions.switch').icon], ['Switch Session', '$(arrow-swap)']);
-		assert.deepStrictEqual([cmd('herdr.sessions.manage').title, cmd('herdr.sessions.manage').icon], ['Manage Sessions', '$(gear)']);
-		assert.deepStrictEqual([cmd('herdr.sessions.doneManaging').title, cmd('herdr.sessions.doneManaging').icon], ['Done', '$(check)']);
-		const title = c.menus['view/title'] as { command: string; when: string; group: string }[];
-		const at = (id: string) => title.find((m) => m.command === id)!;
-		assert.deepStrictEqual([at('herdr.sessions.switch').when, at('herdr.sessions.switch').group], ['view == herdr.spaces', 'navigation@0']);
-		assert.deepStrictEqual([at('herdr.sessions.manage').when, at('herdr.sessions.manage').group], ['view == herdr.spaces', '9_manage@1']);
-		assert.deepStrictEqual([at('herdr.sessions.doneManaging').when, at('herdr.sessions.doneManaging').group], ['view == herdr.sessions && herdr.sessionsManaging', 'navigation@0']);
-		assert.strictEqual(c.menus.commandPalette.find((m: { command: string }) => m.command === 'herdr.sessions.doneManaging')?.when, 'false');
+		assert.ok(!c.views.herdr.some((v: { id: string }) => v.id === 'herdr.sessions'));
+		const all = JSON.stringify(ext.packageJSON);
+		for (const gone of ['"herdr.sessions"', 'onView:herdr.sessions', 'herdr.sessionsShown', 'herdr.sessionsManaging', 'herdr.sessions.manage', 'herdr.sessions.doneManaging', 'herdr.openSession', 'herdr.startSession', 'herdr.stopSession', 'herdr.deleteSession']) {
+			assert.ok(!all.includes(gone), gone);
+		}
+		const cmd = c.commands.find((x: { command: string }) => x.command === 'herdr.sessions.switch');
+		assert.deepStrictEqual([cmd.title, cmd.icon], ['Switch Session', '$(arrow-swap)']);
+		const title = (c.menus['view/title'] as { command: string; when: string; group: string }[]).find((m) => m.command === 'herdr.sessions.switch')!;
+		assert.deepStrictEqual([title.when, title.group], ['view == herdr.spaces', 'navigation@0']);
+		const welcome = c.viewsWelcome as { view: string; contents: string; when: string }[];
+		const select = 'No session selected.\n[Select Session](command:herdr.sessions.switch)';
+		assert.strictEqual(welcome.find((w) => w.view === 'herdr.spaces' && w.when === '!herdr.sessionSelected')?.contents, select);
+		assert.strictEqual(welcome.find((w) => w.view === 'herdr.agents' && w.when === 'herdr.agentsScope == session && !herdr.sessionSelected')?.contents, select);
 		const status = fs.readFileSync(path.join(ext.extensionPath, 'src', 'status.ts'), 'utf8');
 		assert.ok(status.includes("this.item.command = 'herdr.sessions.switch'"));
 	});
