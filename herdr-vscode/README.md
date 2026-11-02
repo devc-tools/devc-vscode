@@ -7,6 +7,10 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   in every running dev container. Each running session shows its agents' counts
   (`2 blocked · 1 working`) and an icon for its worst status. Click a running session to select
   it and open its first space in an editor tab (or focus that tab if it is already open).
+  The view is shown only when it is needed: while no session is selected, or after **Manage Sessions**
+  (the Spaces `…` menu, or the command palette) until you click **Done** in its title bar. To change
+  session day to day, use **Switch Session** (`$(arrow-swap)` in the Spaces title bar, or click the
+  session in the status bar): a list of the running sessions by place, and **Manage Sessions…**.
 
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
@@ -22,9 +26,10 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
   their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or
   a tab to open its space on that tab; click a pane to open its space on the pane's tab and focus its tile.
-  Space rows expand with their arrow.
+  Clicking a space or tab makes Active Pane and the status bar follow that tab's pane (herdr's focused pane
+  there, else its first). Space rows expand with their arrow.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
-  tooltip); click it to go to Sessions.
+  tooltip); click it to switch session.
 
 **Done and time in state.** herdr reports an agent that finished as `idle`. An agent that goes from
 working to idle shows as **done** (green) until you look at it: click into its tile, click its row, or
@@ -104,14 +109,15 @@ move herdr's own focus; **Focus in herdr TUI** on a pane row does.
 
 The **Active Pane** view shows the repo, changes and file tree of the pane you last clicked into, so
 VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
-herdr's own focus in the selected session; after that only tiles count. Clicking into a file editor or
-another view changes nothing, and **Pin** stops it following.
+herdr's own focus in the selected session; after that tiles count, and so does clicking a space or tab in
+Spaces or a tab in a space's strip (it follows that tab's pane). Clicking into a file editor or another view
+changes nothing, and **Pin** stops it following.
 
-- **Pane row:** the pane itself, first: its mark, name and `<space> › <tab>`, plus ` · not open in a tile` when
-  no tile in this window shows it. Click it (or its **Show Pane** action, there while it is not open) to open its
-  space on its tab and focus its tile.
-
-- **Repo row:** the repo (or directory, outside a repo), branch, changed count, ahead and behind.
+- **Header:** the view's title names the pane: `ACTIVE PANE  <pane name> · <space> › <tab>`, plus
+  ` · not open in a tile` when no tile in this window shows it, and `pinned · ` in front while pinned.
+  **Show Pane** (`$(window)` in the title bar) opens its space on its tab and focuses its tile.
+- **Repo row:** the repo (or directory, outside a repo) and its git status in the Spaces format
+  (`⎇ main ● 3 ↑1`, `⎇ main · clean`).
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
   the action is there only for local paths. **Open in Source Control** (local repos) has VS Code's Git open the
   repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.

@@ -186,6 +186,51 @@ export function effectiveSelection(
 	return undefined;
 }
 
+/** Context key: the Sessions view is shown (managing, or no session selected). */
+export const SESSIONS_SHOWN_KEY = 'herdr.sessionsShown';
+/** Context key: manage mode is on (the view's Done button). */
+export const SESSIONS_MANAGING_KEY = 'herdr.sessionsManaging';
+export const SWITCH_SESSION_COMMAND = 'herdr.sessions.switch';
+export const MANAGE_SESSIONS_COMMAND = 'herdr.sessions.manage';
+export const DONE_MANAGING_COMMAND = 'herdr.sessions.doneManaging';
+export const MANAGE_SESSIONS_LABEL = '$(gear) Manage Sessions…';
+export const NO_RUNNING_SESSIONS = 'No running herdr sessions';
+
+/** Whether the Sessions view is shown: while managing, or while there is nothing selected to show. */
+export function sessionsShown(managing: boolean, selected: string | undefined): boolean {
+	return managing || selected === undefined;
+}
+
+/** A Switch Session entry: a group separator, a running session, or Manage Sessions. */
+export interface SwitchSessionItem {
+	label: string;
+	description?: string;
+	kind?: 'separator';
+	/** The session to select. */
+	key?: string;
+	manage?: boolean;
+}
+
+/**
+ * Switch Session's entries, in the Sessions view's order: a separator per group
+ * with running sessions, those sessions, then Manage Sessions after a separator.
+ */
+export function switchSessionItems(groups: readonly GroupNode[], rows: ReadonlyMap<string, readonly SessionRowNode[]>): SwitchSessionItem[] {
+	const items: SwitchSessionItem[] = [];
+	for (const group of groups) {
+		const running = (rows.get(group.id) ?? []).filter((r) => r.contextValue === 'herdr.session.running');
+		if (running.length > 0) {
+			items.push({ label: group.label, kind: 'separator' });
+			items.push(...running.map((r) => ({ label: r.label, description: r.description, key: r.key })));
+		}
+	}
+	if (items.length > 0) {
+		items.push({ label: '', kind: 'separator' });
+	}
+	items.push({ label: MANAGE_SESSIONS_LABEL, manage: true });
+	return items;
+}
+
 export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<SessionsNode | undefined | void>();
 	readonly onDidChangeTreeData = this.emitter.event;
@@ -200,6 +245,8 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 	private revealed = false;
 	/** Set while the view selects a row itself, so that is not stored as the user's choice. */
 	private revealing = false;
+	private managing = false;
+	private shownContext: boolean | undefined;
 
 	constructor(
 		private readonly model: SessionModel,
@@ -226,6 +273,33 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 			}),
 		);
 		this.rebuild();
+		this.updateShown();
+	}
+
+	/** Manage mode: the view shows until Done. */
+	get managingSessions(): boolean {
+		return this.managing;
+	}
+
+	setManaging(on: boolean): void {
+		if (on !== this.managing) {
+			this.managing = on;
+			void vscode.commands.executeCommand('setContext', SESSIONS_MANAGING_KEY, on);
+		}
+		this.updateShown();
+	}
+
+	/** Switch Session's entries now. */
+	switchItems(): SwitchSessionItem[] {
+		return switchSessionItems(this.groups, this.rows);
+	}
+
+	private updateShown(): void {
+		const shown = sessionsShown(this.managing, this.selected);
+		if (shown !== this.shownContext) {
+			this.shownContext = shown;
+			void vscode.commands.executeCommand('setContext', SESSIONS_SHOWN_KEY, shown);
+		}
 	}
 
 	/** The selected session's key, if any. */
@@ -276,6 +350,7 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 			this.revealed = false;
 			this.selectionEmitter.fire();
 		}
+		this.updateShown();
 		this.revealSelected();
 	}
 

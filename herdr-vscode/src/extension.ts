@@ -15,11 +15,21 @@ import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './status';
 import { PaneStreams } from './streams';
-import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
+import { activeTabOf, TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
 import { TouchedRecorder, TouchedStore } from './touched';
 import { AgentSource, AgentsView } from './views/agentsView';
-import { firstSpaceId, OPEN_SESSION_COMMAND, SessionRowNode, SessionsView } from './views/sessionsView';
+import {
+	DONE_MANAGING_COMMAND,
+	firstSpaceId,
+	MANAGE_SESSIONS_COMMAND,
+	NO_RUNNING_SESSIONS,
+	OPEN_SESSION_COMMAND,
+	SessionRowNode,
+	SessionsView,
+	SWITCH_SESSION_COMMAND,
+	SwitchSessionItem,
+} from './views/sessionsView';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
@@ -290,6 +300,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			await m.relist(HOST_KEY);
 		}),
+		vscode.commands.registerCommand(SWITCH_SESSION_COMMAND, async () => {
+			const picked = await pickSession(sessions.switchItems(), sessions.selected);
+			if (picked?.manage) {
+				await vscode.commands.executeCommand(MANAGE_SESSIONS_COMMAND);
+			} else if (picked?.key) {
+				sessions.select(picked.key);
+			}
+		}),
+		vscode.commands.registerCommand(MANAGE_SESSIONS_COMMAND, async () => {
+			sessions.setManaging(true);
+			await vscode.commands.executeCommand('herdr.sessions.focus');
+		}),
+		vscode.commands.registerCommand(DONE_MANAGING_COMMAND, () => sessions.setManaging(false)),
 		vscode.commands.registerCommand(OPEN_SESSION_COMMAND, async (key?: string) => {
 			if (!key) {
 				return;
@@ -393,11 +416,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand(OPEN_SPACE_COMMAND, (sessionKey?: string, workspaceId?: string) => {
 			if (sessionKey && workspaceId) {
 				panels.openSpace(sessionKey, workspaceId);
+				const snapshot = m.connection(sessionKey)?.snapshot;
+				const tabId = snapshot && activeTabOf(snapshot, workspaceId);
+				if (tabId) {
+					focus.followTab(sessionKey, tabId);
+				}
 			}
 		}),
 		vscode.commands.registerCommand(OPEN_TAB_COMMAND, (sessionKey?: string, tabId?: string) => {
-			if (sessionKey && tabId) {
-				panels.openTab(sessionKey, tabId);
+			if (sessionKey && tabId && panels.openTab(sessionKey, tabId)) {
+				focus.followTab(sessionKey, tabId);
 			}
 		}),
 		vscode.commands.registerCommand(OPEN_PANE_TAB_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
@@ -464,4 +492,35 @@ export function deactivate(): void {
 	streams = undefined;
 	model?.dispose();
 	model = undefined;
+}
+
+/** Switch Session's quick pick; the chosen entry, or undefined on Escape. */
+async function pickSession(entries: SwitchSessionItem[], selected: string | undefined): Promise<SwitchSessionItem | undefined> {
+	type Item = vscode.QuickPickItem & { entry: SwitchSessionItem };
+	const items: Item[] = entries.map((e) => ({
+		label: e.label,
+		description: e.description,
+		kind: e.kind === 'separator' ? vscode.QuickPickItemKind.Separator : vscode.QuickPickItemKind.Default,
+		entry: e,
+	}));
+	const qp = vscode.window.createQuickPick<Item>();
+	qp.title = 'Switch herdr Session';
+	qp.items = items;
+	qp.placeholder = entries.some((e) => e.key) ? 'Select a session to show in Spaces' : NO_RUNNING_SESSIONS;
+	const current = items.find((i) => i.entry.key !== undefined && i.entry.key === selected);
+	if (current) {
+		qp.activeItems = [current];
+	}
+	return new Promise((resolve) => {
+		let result: SwitchSessionItem | undefined;
+		qp.onDidAccept(() => {
+			result = qp.selectedItems[0]?.entry;
+			qp.hide();
+		});
+		qp.onDidHide(() => {
+			qp.dispose();
+			resolve(result);
+		});
+		qp.show();
+	});
 }

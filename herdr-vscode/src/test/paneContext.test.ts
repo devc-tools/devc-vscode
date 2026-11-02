@@ -22,13 +22,10 @@ import {
 	paneContextItem,
 	PaneContextHost,
 	paneContextMessage,
-	paneRowContextValue,
-	paneRowDescription,
-	PaneRowNode,
+	paneHeaderDescription,
 	PaneContextNode,
 	PaneContextView,
 	markedDescription,
-	repoDescription,
 	RootNode,
 	rootContextValue,
 	sortEntries,
@@ -36,6 +33,7 @@ import {
 	touchedChange,
 } from '../paneContext';
 import { LocalShell, RemoteShell } from '../remoteShell';
+import { gitDescription } from '../spaceGit';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TilesPanels } from '../tilesPanel';
@@ -87,32 +85,30 @@ suite('pane context: rules', () => {
 		assert.strictEqual(paneContextMessage(true), 'The pinned pane is not available. Unpin to follow panes again.');
 	});
 
-	test('the pane row description and context value', () => {
-		assert.strictEqual(paneRowDescription('api', 'main', true), 'api › main');
-		assert.strictEqual(paneRowDescription('api', 'main', false), 'api › main · not open in a tile');
-		assert.strictEqual(paneRowContextValue({ shown: true }), 'herdr.paneContext.pane');
-		assert.strictEqual(paneRowContextValue({ shown: false }), 'herdr.paneContext.pane hidden');
+	test('the header description', () => {
+		const h = { name: 'Fixing the API', space: 'api', tab: 'main', shown: true, pinned: false };
+		assert.strictEqual(paneHeaderDescription(h), 'Fixing the API · api › main');
+		assert.strictEqual(paneHeaderDescription({ ...h, shown: false }), 'Fixing the API · api › main · not open in a tile');
+		assert.strictEqual(paneHeaderDescription({ ...h, pinned: true }), 'pinned · Fixing the API · api › main');
+		assert.strictEqual(paneHeaderDescription({ ...h, space: 'w2', tab: 'w2:t1', shown: false, pinned: true }), 'pinned · Fixing the API · w2 › w2:t1 · not open in a tile');
 	});
 
-	test('Show Pane applies to a hidden pane row only', () => {
+	test('Show Pane is a title action while a pane is followed; no pane-row menu entries', () => {
 		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
-		const menus = ext.packageJSON.contributes.menus['view/item/context'] as { command: string; when: string }[];
-		const when = menus.find((m) => m.command === 'herdr.paneContext.showPane')!.when;
-		assert.strictEqual(when, "view == herdr.paneContext && viewItem == 'herdr.paneContext.pane hidden'");
-		// The clause's viewItem value, as VS Code compares it: the whole context value.
-		const value = /viewItem == '([^']*)'/.exec(when)![1];
-		assert.strictEqual(value, paneRowContextValue({ shown: false }));
-		assert.notStrictEqual(value, paneRowContextValue({ shown: true }));
-		assert.notStrictEqual(value, rootContextValue({ canAdd: true, scm: true, terminal: true }));
+		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
+		const title = menus['view/title'].find((m) => m.command === 'herdr.paneContext.showPane')!;
+		assert.strictEqual(title.when, 'view == herdr.paneContext && herdr.paneContext.following');
+		assert.strictEqual(title.group, 'navigation@0');
+		assert.ok(!menus['view/item/context'].some((m) => m.command === 'herdr.paneContext.showPane'));
+		assert.ok(!/viewItem == 'herdr\.paneContext\.pane'/.test(JSON.stringify(menus)) && !JSON.stringify(menus).includes("herdr.paneContext.pane hidden"), 'no pane-row context values');
 	});
 
-	test('the Repo row description', () => {
+	test('the Repo row description is the Spaces git format', () => {
 		const git = (changed: number, ahead: number, behind: number) => ({ head: 'main', changes: Array.from({ length: changed }, () => ({ xy: ' M', path: 'x' })), ahead, behind });
-		assert.strictEqual(repoDescription(git(0, 0, 0)), '⎇ main');
-		assert.strictEqual(repoDescription(git(3, 0, 0)), '⎇ main · ● 3');
-		assert.strictEqual(repoDescription(git(0, 2, 0)), '⎇ main ↑2');
-		assert.strictEqual(repoDescription(git(0, 0, 4)), '⎇ main ↓4');
-		assert.strictEqual(repoDescription(git(3, 2, 4)), '⎇ main · ● 3 ↑2 ↓4');
+		assert.strictEqual(gitDescription(git(0, 0, 0)), '⎇ main · clean');
+		assert.strictEqual(gitDescription(git(3, 0, 0)), '⎇ main ● 3');
+		assert.strictEqual(gitDescription(git(3, 1, 2)), '⎇ main ● 3 ↑1 ↓2');
+		assert.strictEqual(gitDescription(git(0, 0, 2)), '⎇ main · clean ↓2');
 	});
 
 	test('Add to Workspace: a file root not in the workspace', () => {
@@ -148,7 +144,6 @@ suite('pane context: rules', () => {
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable'));
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable scm'));
 		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root scm'));
-		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.pane hidden'));
 		assert.ok(applies('herdr.paneContext.splitPane', 'herdr.paneContext.root'));
 
 		// Open in Source Control on a file: repo; Terminal Here on this machine.
@@ -172,8 +167,8 @@ suite('pane context: rules', () => {
 		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
 		const groups = new Map(menus['view/item/context'].filter((m) => m.group?.startsWith('inline')).map((m) => [m.command, m.group]));
 		assert.deepStrictEqual(
-			['addToWorkspace', 'openSourceControl', 'openTerminal', 'splitPane', 'showPane'].map((c) => groups.get(`herdr.paneContext.${c}`)),
-			['inline@1', 'inline@2', 'inline@3', 'inline@4', 'inline@5'],
+			['addToWorkspace', 'openSourceControl', 'openTerminal', 'splitPane'].map((c) => groups.get(`herdr.paneContext.${c}`)),
+			['inline@1', 'inline@2', 'inline@3', 'inline@4'],
 		);
 		for (const c of ['showPaneFiles', 'showAllFiles', 'openSourceControl', 'openTerminal']) {
 			assert.strictEqual(menus.commandPalette.find((m) => m.command === `herdr.paneContext.${c}`)?.when, 'false', c);
@@ -298,6 +293,18 @@ class FakeModel {
 
 class FakeHost {
 	message: string | undefined;
+	/** Every value the view set as the description. */
+	readonly descriptions: (string | undefined)[] = [];
+	private descriptionNow: string | undefined;
+
+	get description(): string | undefined {
+		return this.descriptionNow;
+	}
+
+	set description(value: string | undefined) {
+		this.descriptionNow = value;
+		this.descriptions.push(value);
+	}
 	visibleNow = true;
 	readonly revealed: unknown[] = [];
 	private readonly visibility = new vscode.EventEmitter<vscode.TreeViewVisibilityChangeEvent>();
@@ -382,7 +389,6 @@ suite('pane context: the view over a temp repo', function () {
 
 	const roots = () => view.getChildren();
 	const rootRow = async () => (await roots()).find((n) => n.type === 'root') as RootNode;
-	const paneRow = async () => (await roots()).find((n) => n.type === 'pane') as PaneRowNode | undefined;
 	const group = async (name: GroupNode['group']) => (await roots()).find((n) => n.type === 'group' && n.group === name) as GroupNode | undefined;
 	const labels = (nodes: PaneContextNode[]) => nodes.map((n) => (n.type === 'entry' ? n.name : (n as RootNode).label));
 	const rootIs = (name: string) => waitFor(`root ${name}`, async () => (await rootRow())?.label === name);
@@ -443,7 +449,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(host.message, undefined, 'no header while a pane is followed');
 		await rootIs(path.basename(dir));
 		const root = await rootRow();
-		assert.strictEqual(root.description, '⎇ main · ● 4');
+		assert.strictEqual(root.description, '⎇ main ● 4');
 		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable scm terminal');
 		assert.deepStrictEqual((paneContextItem(root).iconPath as vscode.ThemeIcon).id, 'repo');
 
@@ -486,7 +492,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual((readme.resourceUri as vscode.Uri).fsPath, path.join(dir, 'README.md'));
 		assert.strictEqual(readme.command?.command, 'vscode.open');
 
-		assert.deepStrictEqual((await roots()).slice(0, 2).map((n) => n.type), ['pane', 'root'], 'the pane row first, then the repo');
+		assert.strictEqual((await roots())[0].type, 'root', 'the repo row first');
 		const top = (await view.getChildren()).filter((n): n is GroupNode => n.type === 'group');
 		assert.deepStrictEqual(top.map((g) => g.label), ['Uncommitted', 'Commits', 'Files'], 'no Other Panes');
 		assert.strictEqual(paneContextItem((await group('files'))!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
@@ -582,51 +588,41 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(host.message, NO_PANE_MESSAGE);
 	});
 
-	test('the pane row: name, place, icon, click; a tile showing it drops the note and Show Pane', async () => {
+	test('the header: name and place; a tile showing it drops the note; set only on a change', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
-		const row = (await paneRow())!;
-		assert.strictEqual(row.id, `${makePaneKey(S, 'w2:p1')}|pane`);
-		assert.strictEqual(row.label, 'api-fixer');
-		assert.strictEqual(row.description, 'api › main · not open in a tile');
-		const item = paneContextItem(row);
-		assert.strictEqual(item.contextValue, 'herdr.paneContext.pane hidden');
-		assert.deepStrictEqual(item.command, paneClickCommand({ sessionKey: S, paneId: 'w2:p1' }));
-		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'herdr-agent-claude');
-		assert.strictEqual(((item.iconPath as vscode.ThemeIcon).color as vscode.ThemeColor).id, 'charts.blue');
-		assert.match(String(item.tooltip), /^claude · working/);
-		assert.ok(!paneContextItem(await rootRow()).contextValue?.includes('showable'));
+		assert.strictEqual(host.description, 'api-fixer · api › main · not open in a tile');
+		assert.strictEqual(host.message, undefined);
+		assert.strictEqual((await roots())[0].type, 'root', 'the repo row is first');
 
-		const fires: unknown[] = [];
-		const listener = view.onDidChangeTreeData((e) => fires.push(e));
 		shown.add(makePaneKey(S, 'w2:p1'));
 		tiles.fire();
-		assert.strictEqual(host.message, undefined);
-		assert.strictEqual((await paneRow())!.description, 'api › main');
-		assert.strictEqual(paneContextItem((await paneRow())!).contextValue, 'herdr.paneContext.pane');
-		assert.deepStrictEqual(fires, [row], 'only the pane row refreshes');
+		assert.strictEqual(host.description, 'api-fixer · api › main');
+		const sets = host.descriptions.length;
+		model.changed.fire();
+		model.changed.fire();
+		assert.strictEqual(host.descriptions.length, sets, 'an unchanged header is not set again');
 
-		// A new title (the snapshot changes) refreshes that row alone, too.
-		fires.length = 0;
 		const renamed = twoPanes(dir, other);
 		renamed.agentNames.clear();
 		renamed.panes[0].terminal_title_stripped = 'Fixing the API';
 		model.snapshots.set(S, renamed);
 		model.changed.fire();
-		assert.strictEqual((await paneRow())!.label, 'Fixing the API');
-		assert.deepStrictEqual(fires, [row]);
-		listener.dispose();
+		assert.strictEqual(host.description, 'Fixing the API · api › main');
+
+		view.pin();
+		assert.strictEqual(host.description, 'pinned · Fixing the API · api › main');
+		view.unpin();
 	});
 
-	test('a shell pane row: terminal icon, the pane id as tooltip', async () => {
-		model.snapshots.set(S, twoPanes(dir, other, 'w2:p2'));
+	test('no pane followed: no header description, the message instead', async () => {
+		model.snapshots.set(S, twoPanes(dir, other, 'w9:p9'));
 		view = makeView();
-		await rootIs(path.basename(other));
-		const item = paneContextItem((await paneRow())!);
-		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'terminal');
-		assert.strictEqual(item.tooltip, 'w2:p2');
+		await sleep(50);
+		assert.strictEqual(host.description, undefined);
+		assert.strictEqual(host.message, NO_PANE_MESSAGE);
+		assert.deepStrictEqual(await roots(), []);
 	});
-
 
 	test('Split Pane Here asks herdr for exactly that', async () => {
 		view = makeView();
@@ -642,7 +638,7 @@ suite('pane context: the view over a temp repo', function () {
 		await rootIs(path.basename(dir));
 		fs.writeFileSync(path.join(dir, 'another.txt'), 'x');
 		await view.poll();
-		assert.strictEqual((await rootRow()).description, '⎇ main · ● 5');
+		assert.strictEqual((await rootRow()).description, '⎇ main ● 5');
 		const fires: unknown[] = [];
 		const listener = view.onDidChangeTreeData((e) => fires.push(e));
 		await view.poll();
@@ -662,7 +658,8 @@ suite('pane context: the view over a temp repo', function () {
 		host.visibleNow = false;
 		view = makeView();
 		await sleep(100);
-		assert.deepStrictEqual((await roots()).map((n) => n.type), ['pane'], 'the pane row does not wait');
+		assert.deepStrictEqual(await roots(), [], 'nothing loads while hidden');
+		assert.strictEqual(host.description, 'api-fixer · api › main · not open in a tile', 'the header does not wait');
 		assert.deepStrictEqual(model.requests, []);
 		assert.strictEqual(host.message, undefined);
 		host.visibleNow = true;
@@ -682,7 +679,7 @@ suite('pane context: the view over a temp repo', function () {
 		await sleep(500); // The watcher starts asynchronously.
 		fs.writeFileSync(path.join(dir, 'watched.txt'), 'x');
 		await Promise.race([fired, sleep(15000).then(() => assert.fail('no refresh from the watcher'))]);
-		await waitFor('the new file in the status', async () => (await rootRow()).description === '⎇ main · ● 5');
+		await waitFor('the new file in the status', async () => (await rootRow()).description === '⎇ main ● 5');
 	});
 
 	test('Open Changes: HEAD against the working tree', async () => {
@@ -746,7 +743,7 @@ suite('pane context: the view over a temp repo', function () {
 		const top = await roots();
 		assert.deepStrictEqual(
 			top.map((n) => (n.type === 'group' ? n.label : n.type)),
-			['pane', 'root', 'Uncommitted', 'Commits', 'Files'],
+			['root', 'Uncommitted', 'Commits', 'Files'],
 		);
 		const uncommitted = (await group('changes'))!;
 		assert.strictEqual(uncommitted.description, '4');
@@ -766,13 +763,13 @@ suite('pane context: the view over a temp repo', function () {
 		view.dispose();
 		view = makeView();
 		await rootIs(path.basename(dir));
-		await waitFor('the clean status', async () => (await rootRow()).description === '⎇ main');
-		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['pane', 'root', 'Commits', 'Files']);
+		await waitFor('the clean status', async () => (await rootRow()).description === '⎇ main · clean');
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Commits', 'Files']);
 		view.dispose();
 		model.snapshots.set(S, twoPanes(other, dir));
 		view = makeView();
 		await rootIs(path.basename(other));
-		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['pane', 'root', 'Files']);
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Files']);
 		assert.strictEqual(decorated[decorated.length - 1], undefined, 'no markers outside a repo');
 	});
 

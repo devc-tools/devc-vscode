@@ -25,6 +25,21 @@ export function focusedPaneStatus(
 	};
 }
 
+/** How long a tab switch waits for the snapshot to show the tab active. */
+export const FOLLOW_TAB_MS = 2000;
+
+/** Whether the snapshot shows the tab as its space's active tab. */
+export function tabIsActive(snapshot: Snapshot, tabId: string): boolean {
+	const tab = snapshot.tabs.find((t) => t.tab_id === tabId);
+	return !!tab && snapshot.workspaces.find((w) => w.workspace_id === tab.workspace_id)?.activeTabId === tabId;
+}
+
+/** The pane a switch to the tab follows: herdr's focused pane when it is in the tab, else the tab's first pane. */
+export function tabFollowPane(snapshot: Snapshot, tabId: string): string | undefined {
+	const panes = snapshot.panes.filter((p) => p.tab_id === tabId);
+	return panes.find((p) => p.pane_id === snapshot.focusedPaneId)?.pane_id ?? panes[0]?.pane_id;
+}
+
 /**
  * The window's last focused pane (the tile whose xterm last gained focus) and
  * its status bar item. Focusing a tile does not move herdr's own focus.
@@ -42,6 +57,8 @@ export class FocusTracker implements vscode.Disposable {
 	readonly onDidReportFocus = this.reportEmitter.event;
 	private readonly listeners: vscode.Disposable[];
 	private last: string | undefined;
+	/** A tab switch waiting for its snapshot. */
+	private following: vscode.Disposable | undefined;
 
 	constructor(
 		private readonly model: SessionModel,
@@ -95,10 +112,49 @@ export class FocusTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * A tab switch made from this window: once the snapshot shows the tab
+	 * active (within {@link FOLLOW_TAB_MS}), the last focused pane becomes its
+	 * pane ({@link tabFollowPane}). A newer switch replaces a waiting one.
+	 */
+	followTab(sessionKey: string, tabId: string, timeoutMs = FOLLOW_TAB_MS): void {
+		this.following?.dispose();
+		this.following = undefined;
+		const attempt = (): boolean => {
+			const snapshot = this.model.connection(sessionKey)?.snapshot;
+			if (!snapshot || !tabIsActive(snapshot, tabId)) {
+				return false;
+			}
+			const paneId = tabFollowPane(snapshot, tabId);
+			if (paneId) {
+				this.set(sessionKey, paneId);
+			}
+			return true;
+		};
+		if (attempt()) {
+			return;
+		}
+		const timer = setTimeout(() => done.dispose(), timeoutMs);
+		const listener = this.model.onDidChange(() => {
+			if (attempt()) {
+				done.dispose();
+			}
+		});
+		const done = new vscode.Disposable(() => {
+			clearTimeout(timer);
+			listener.dispose();
+			if (this.following === done) {
+				this.following = undefined;
+			}
+		});
+		this.following = done;
+	}
+
 	dispose(): void {
 		for (const listener of this.listeners) {
 			listener.dispose();
 		}
+		this.following?.dispose();
 		this.emitter.dispose();
 		this.reportEmitter.dispose();
 		this.item.dispose();

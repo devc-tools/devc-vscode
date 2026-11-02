@@ -156,13 +156,13 @@ export function sessionStatusText(input: SessionStatusInput): { text: string; to
 	return { text: `herdr: ${input.rowLabel}${suffix}`, tooltip: lines.join('\n') };
 }
 
-/** `herdr: <session>` left of the focused pane item while a session is selected; a click focuses Sessions. */
+/** `herdr: <session>` left of the focused pane item while a session is selected; a click runs Switch Session. */
 export class SessionStatusBar implements vscode.Disposable {
 	private readonly item = vscode.window.createStatusBarItem('herdr.session', vscode.StatusBarAlignment.Left, 101);
 
 	constructor() {
 		this.item.name = 'herdr session';
-		this.item.command = 'herdr.sessions.focus';
+		this.item.command = 'herdr.sessions.switch';
 	}
 
 	update(input: SessionStatusInput | undefined): void {

@@ -4,6 +4,14 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Active Pane names its pane in the view header** (`ACTIVE PANE  Fixing the API · api › main`), with
+  `pinned · ` and ` · not open in a tile` when they apply. The pane row is gone; the repo row is first, and
+  **Show Pane** is in the title bar.
+- **Clicking a space or tab in Spaces, or a tab in a space's strip, follows that tab's pane**: Active Pane and the
+  status bar switch without another click into a tile.
+- The Active Pane repo row shows git status in the Spaces format (`⎇ main · clean`, `⎇ main ● 3 ↑1`).
+- **Sessions is shown only when needed**: while no session is selected, or after **Manage Sessions** until
+  **Done**. **Switch Session** (Spaces title bar, or click the session in the status bar) picks a running session.
 - Shell panes have a terminal icon on Spaces and Active Pane rows, in tile headers and in the status bar (they had none).
 - **Active Pane shows changes by commit.** **Changed in This Pane** and **Reset Baseline** are gone. **All Changes** is
   now **Uncommitted** (expanded), followed by **Commits** (collapsed): your branch's commits since the default branch

@@ -4,6 +4,8 @@
 
 ### Pending
 
+- [herdr Sidebar Clarity](herdr-sidebar-clarity.md) — Active Pane names its pane in the view header (pane row removed), tab switches from VS Code follow the new tab's pane, one git summary format, Sessions view shown only while managing or with no session selected (Switch Session quick pick).
+
 - [SSH Environments](ssh-environments.md) — an SSH host (the devc-dev agent sandbox VM) as a third environment with dev container parity: Remote Files roots, ssh terminals and links, Agents view env with herdr and terminal agents, Add Agent; plain `ssh`, no remote VS Code server, no workspace folder.
 
 - [SSH Workspace Sync](ssh-workspace-sync.md) — Send / Fetch a workspace folder's Git repo to an SSH host at the mirrored home-relative path (worktrees mirrored as worktrees), fetch opens a review diff and never merges, with sensitive paths flagged.
@@ -84,3 +86,4 @@
 | 26 | [herdr-space-tab-cleanup.md](herdr-space-tab-cleanup.md) | Remove Layout tabs; drag-built herdr layouts, tile context menu, toolbar / title / status-dot cleanup (depends on phases 22 and 25) | implemented, manual checks pending |
 | 27 | [herdr-pane-identity.md](archived/herdr-pane-identity.md) | Task-title pane names, agent marks as icons, Active Pane pane row (depends on phase 26) | complete |
 | 28 | [herdr-commit-changes.md](archived/herdr-commit-changes.md) | Active Pane: Uncommitted + per-commit changes, this-pane filter; baseline section removed (depends on phases 20 and 27) | complete |
+| 29 | [herdr-sidebar-clarity.md](herdr-sidebar-clarity.md) | Active Pane header identity, tab switch follows pane, one git format, Sessions on demand (depends on phases 27 and 28) | implemented, manual checks pending |

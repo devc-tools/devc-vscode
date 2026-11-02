@@ -125,7 +125,7 @@ when its session stops and when its environment goes away.
   `ThemeIcon('herdr-agent-<agent>')` in the status colour, from `contributes.icons` over
   `resources/agent-icons.woff` (U+E001–U+E004, built by `scripts/build-agent-icons.sh` from the vendored Lobe
   Icons SVGs; picosvg first, since font glyphs fill non-zero and the raw marks' holes are even-odd). Other
-  agents get the status dot, shells the uncoloured `terminal` codicon (an inline `>_` glyph in tile headers). Pane rows, Agents rows, Active Pane's pane row and the focused-pane
+  agents get the status dot, shells the uncoloured `terminal` codicon (an inline `>_` glyph in tile headers). Pane rows, Agents rows and the focused-pane
   status bar item (`$(herdr-agent-claude) <name> · <status>`) use it; session, space, tab and strip rows keep the
   dot, since they sum up several panes.
 - **Agents** filter (`all`, `blocked`, `working`, `done`) and scope (`all`, `session`: the selected
@@ -139,7 +139,15 @@ when its session stops and when its environment goes away.
   on `herdr.session.running host` only.
 - The **session status bar item** (`herdr.session`, left, priority 101) shows `herdr: <row label>`, with
   ` (<session>)` in a container and ` (<alias>)` on an SSH host, while a session is selected; its tooltip has
-  the session key, the herdr version and the counts. Clicking it runs `herdr.sessions.focus`.
+  the session key, the herdr version and the counts. Clicking it runs `herdr.sessions.switch`.
+- **Sessions on demand.** `herdr.sessions` has `"when": "herdr.sessionsShown"`; the context key is
+  `managing || selected === undefined` (`sessionsShown`, `src/views/sessionsView.ts`), so the view also shows
+  during startup discovery. A view hidden by `when` is gone, so `herdr.sessions.focus` does nothing then:
+  **Manage Sessions** (`herdr.sessions.manage`) turns manage mode on (in memory, off at activation; context key
+  `herdr.sessionsManaging`) and then focuses it; **Done** (`herdr.sessions.doneManaging`) turns it off.
+  **Switch Session** (`herdr.sessions.switch`) is a quick pick of `switchSessionItems`: per group with running
+  rows a separator and those rows (label and description as in the view, the selected one active), then a
+  separator and `$(gear) Manage Sessions…`. Picking a session calls `select`, as a row click does.
 
 ### Time in state and done
 
@@ -457,17 +465,21 @@ the focus tracker, Pane Context's pin, the touched-files store and its open span
 ## Pane Context
 
 `src/paneContext.ts`. The followed pane is the pinned pane, else `FocusTracker.lastFocused`, else, while
-no tile has been focused in this window, the selected session's `focused_pane_id`. The snapshot is what
+no tile has been focused in this window, the selected session's `focused_pane_id`. A tab switch from this
+window — a Spaces space row (its active tab), a Spaces tab row, a strip click — calls `FocusTracker.followTab`:
+once the snapshot shows the tab active (at most 2 s; a newer switch replaces a waiting one; a `tab.focus` error
+never confirms), `lastFocused` becomes the snapshot's `focused_pane_id` if it is in the tab, else the tab's first
+pane. Tab switches made in herdr itself do not move it. The snapshot is what
 carries that: `pane.focused` (`{"pane_id","workspace_id"}`) re-takes it like any event. `pane.moved` to another
 workspace changes a pane's id, so the pin and `lastFocused` move to the new key. A followed pane that is gone,
 or whose session is not connected, shows no rows; a pin stays until **Unpin**. Pin is not persisted.
 
-The first row is the followed pane (`<pane key>|pane`, context value `herdr.paneContext.pane`, plus ` hidden` when
-no tile in this window shows it, which is when **Show Pane** is offered): its mark, name, `<space> › <tab>` and
-` · not open in a tile`; a click runs `paneClickCommand`. It is there as soon as the pane is found, before (and
-without) the directory loading. `TreeView.message` is set only when no pane is followed or found; pinning shows
-only in the title bar's pin / unpin button. A snapshot that changes only the pane row's name, status, place or
-tile state fires that row alone.
+The followed pane is named in the view header, `TreeView.description` (`paneHeaderDescription`):
+`[pinned · ]<pane name> · <space> › <tab>[ · not open in a tile]`, labels or ids. It is set as soon as the pane
+is found, before (and without) the directory loading, and only when the string changes. Plain text: no mark.
+Context key `herdr.paneContext.following` (a pane followed and found) shows **Show Pane** (`paneClickCommand`) in
+the title bar. `TreeView.message` is set only when no pane is followed or found. The first row is the repo
+(description `gitDescription`, the Spaces format).
 
 ### Refreshing
 

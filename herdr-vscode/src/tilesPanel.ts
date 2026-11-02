@@ -1081,6 +1081,7 @@ export class MirrorPanel extends TilesPanel {
 				break;
 			case 'focusTab':
 				void this.selectTab(msg.tabId);
+				this.deps.focus.followTab(this.sessionKey, msg.tabId);
 				break;
 			case 'newTab':
 				void this.newTab();

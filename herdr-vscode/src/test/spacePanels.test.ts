@@ -177,6 +177,51 @@ suite('space panels', function () {
 		assert.deepStrictEqual(await shown(web), [pk('w1:p2')], 'herdr\'s snapshot agrees: it stays');
 	});
 
+	test('a strip click follows the new tab\'s pane: once, after herdr confirms the tab', async () => {
+		const web = panels.openSpace(S, 'w1');
+		await showing(web, 'w1:p1');
+		const reports: string[] = [];
+		const listener = focus.onDidReportFocus((r) => reports.push(r.paneId));
+		await web.probe({ kind: 'clickStrip', tabId: 'w1:t2', part: 'tab' });
+		// herdr's focused pane (w2:p1) is not in the tab: its first pane.
+		await waitFor('followed', () => focus.lastFocused === pk('w1:p2'));
+		await sleep(100);
+		assert.deepStrictEqual(reports, ['w1:p2'], 'one focus per click');
+		listener.dispose();
+	});
+
+	test('followTab: herdr\'s focused pane in the tab, at once for an active tab', () => {
+		herdr.snap = { ...herdr.snap, focusedPaneId: 'w2:p2' };
+		focus.followTab(S, 'w2:t1');
+		assert.strictEqual(focus.lastFocused, pk('w2:p2'));
+	});
+
+	test('followTab: unchanged when herdr does not confirm in time, or on a tab.focus error', async () => {
+		focus.set(S, 'w2:p1');
+		focus.followTab(S, 'w1:t2', 100);
+		await sleep(150);
+		herdr.activate('w1:t2');
+		assert.strictEqual(focus.lastFocused, pk('w2:p1'), 'too late: not followed');
+
+		herdr.activate('w1:t1');
+		const web = panels.openSpace(S, 'w1');
+		await showing(web, 'w1:p1');
+		const request = herdr.request.bind(herdr);
+		herdr.request = (key, method, params) => (method === 'tab.focus' ? Promise.reject(new Error('no')) : request(key, method, params));
+		await web.probe({ kind: 'clickStrip', tabId: 'w1:t2', part: 'tab' });
+		await sleep(300);
+		assert.strictEqual(focus.lastFocused, pk('w2:p1'), 'error: not followed');
+	});
+
+	test('followTab: a newer switch replaces a waiting one', async () => {
+		focus.followTab(S, 'w1:t2');
+		focus.followTab(S, 'w2:t1');
+		assert.strictEqual(focus.lastFocused, pk('w2:p1'), 'w2:t1 is active');
+		herdr.activate('w1:t2');
+		await sleep(50);
+		assert.strictEqual(focus.lastFocused, pk('w2:p1'), 'the replaced wait does not fire');
+	});
+
 	test('herdr switching the space\'s tab switches the tiles', async () => {
 		const web = panels.openSpace(S, 'w1');
 		await showing(web, 'w1:p1');

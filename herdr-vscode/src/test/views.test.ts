@@ -11,7 +11,18 @@ import { activeTabOf, eventTouchesTab, stripTabs, tileMetas } from '../tilesPane
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
-import { effectiveSelection, firstSpaceId, groupOf, sessionItemContext, sessionRows, sessionRowStatus } from '../views/sessionsView';
+import {
+	effectiveSelection,
+	firstSpaceId,
+	groupOf,
+	MANAGE_SESSIONS_LABEL,
+	SessionRowNode,
+	sessionItemContext,
+	sessionRows,
+	sessionRowStatus,
+	sessionsShown,
+	switchSessionItems,
+} from '../views/sessionsView';
 import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
@@ -597,5 +608,56 @@ suite('Sessions rows', () => {
 	test('pane keys round-trip', () => {
 		assert.strictEqual(makePaneKey('container:abc/devc', 'w1:p2'), 'container:abc/devc|w1:p2');
 		assert.deepStrictEqual(splitPaneKey('container:abc/devc|w1:p2'), { sessionKey: 'container:abc/devc', paneId: 'w1:p2' });
+	});
+});
+
+suite('Sessions on demand', () => {
+	test('shown with no selection or while managing', () => {
+		assert.strictEqual(sessionsShown(false, undefined), true, 'nothing selected');
+		assert.strictEqual(sessionsShown(false, 'host/a'), false, 'a session selected');
+		assert.strictEqual(sessionsShown(true, 'host/a'), true, 'manage mode');
+		assert.strictEqual(sessionsShown(false, 'host/a'), false, 'after Done');
+	});
+
+	test('Switch Session items: a separator per group, running sessions only, Manage Sessions last', () => {
+		const row = (key: string, groupId: string, contextValue: SessionRowNode['contextValue']): SessionRowNode =>
+			({ type: 'session', key, envKey: key.split('/')[0], session: key.split('/')[1], label: key, description: `d ${key}`, contextValue, tooltip: '', groupId }) as SessionRowNode;
+		const groups = [
+			{ type: 'group' as const, id: 'group:host', label: 'This machine' },
+			{ type: 'group' as const, id: 'group:ssh:box', label: 'SSH · box' },
+			{ type: 'group' as const, id: 'group:containers', label: 'Dev containers' },
+		];
+		const rows = new Map([
+			['group:host', [row('host/a', 'group:host', 'herdr.session.running'), row('host/b', 'group:host', 'herdr.session.stopped')]],
+			['group:ssh:box', [row('ssh:box/x', 'group:ssh:box', 'herdr.session.absent')]],
+			['group:containers', [row('c1/devc', 'group:containers', 'herdr.session.running')]],
+		]);
+		assert.deepStrictEqual(switchSessionItems(groups, rows), [
+			{ label: 'This machine', kind: 'separator' },
+			{ label: 'host/a', description: 'd host/a', key: 'host/a' },
+			{ label: 'Dev containers', kind: 'separator' },
+			{ label: 'c1/devc', description: 'd c1/devc', key: 'c1/devc' },
+			{ label: '', kind: 'separator' },
+			{ label: MANAGE_SESSIONS_LABEL, manage: true },
+		]);
+		assert.deepStrictEqual(switchSessionItems(groups, new Map()), [{ label: MANAGE_SESSIONS_LABEL, manage: true }], 'none running');
+	});
+
+	test('contributions: Sessions view when clause, Switch / Manage / Done, status bar click', () => {
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
+		const c = ext.packageJSON.contributes;
+		assert.strictEqual(c.views.herdr.find((v: { id: string }) => v.id === 'herdr.sessions').when, 'herdr.sessionsShown');
+		const cmd = (id: string) => c.commands.find((x: { command: string }) => x.command === id);
+		assert.deepStrictEqual([cmd('herdr.sessions.switch').title, cmd('herdr.sessions.switch').icon], ['Switch Session', '$(arrow-swap)']);
+		assert.deepStrictEqual([cmd('herdr.sessions.manage').title, cmd('herdr.sessions.manage').icon], ['Manage Sessions', '$(gear)']);
+		assert.deepStrictEqual([cmd('herdr.sessions.doneManaging').title, cmd('herdr.sessions.doneManaging').icon], ['Done', '$(check)']);
+		const title = c.menus['view/title'] as { command: string; when: string; group: string }[];
+		const at = (id: string) => title.find((m) => m.command === id)!;
+		assert.deepStrictEqual([at('herdr.sessions.switch').when, at('herdr.sessions.switch').group], ['view == herdr.spaces', 'navigation@0']);
+		assert.deepStrictEqual([at('herdr.sessions.manage').when, at('herdr.sessions.manage').group], ['view == herdr.spaces', '9_manage@1']);
+		assert.deepStrictEqual([at('herdr.sessions.doneManaging').when, at('herdr.sessions.doneManaging').group], ['view == herdr.sessions && herdr.sessionsManaging', 'navigation@0']);
+		assert.strictEqual(c.menus.commandPalette.find((m: { command: string }) => m.command === 'herdr.sessions.doneManaging')?.when, 'false');
+		const status = fs.readFileSync(path.join(ext.extensionPath, 'src', 'status.ts'), 'utf8');
+		assert.ok(status.includes("this.item.command = 'herdr.sessions.switch'"));
 	});
 });

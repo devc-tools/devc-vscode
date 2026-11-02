@@ -39,7 +39,8 @@
       "herdr": [
         {
           "id": "herdr.sessions",
-          "name": "Sessions"
+          "name": "Sessions",
+          "when": "herdr.sessionsShown"
         },
         {
           "id": "herdr.spaces",
@@ -58,7 +59,7 @@
     "viewsWelcome": [
       {
         "view": "herdr.sessions",
-        "contents": "Looking for herdr sessions\u2026"
+        "contents": "Looking for herdr sessions…"
       },
       {
         "view": "herdr.spaces",
@@ -347,10 +348,48 @@
         "command": "herdr.tile.close",
         "title": "Close Pane",
         "category": "herdr"
+      },
+      {
+        "command": "herdr.sessions.switch",
+        "title": "Switch Session",
+        "category": "herdr",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "herdr.sessions.manage",
+        "title": "Manage Sessions",
+        "category": "herdr",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "herdr.sessions.doneManaging",
+        "title": "Done",
+        "category": "herdr",
+        "icon": "$(check)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "herdr.sessions.switch",
+          "when": "view == herdr.spaces",
+          "group": "navigation@0"
+        },
+        {
+          "command": "herdr.sessions.manage",
+          "when": "view == herdr.spaces",
+          "group": "9_manage@1"
+        },
+        {
+          "command": "herdr.sessions.doneManaging",
+          "when": "view == herdr.sessions && herdr.sessionsManaging",
+          "group": "navigation@0"
+        },
+        {
+          "command": "herdr.paneContext.showPane",
+          "when": "view == herdr.paneContext && herdr.paneContext.following",
+          "group": "navigation@0"
+        },
         {
           "command": "herdr.newSpace",
           "when": "view == herdr.spaces && herdr.sessionSelected",
@@ -467,11 +506,6 @@
           "command": "herdr.paneContext.splitPane",
           "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root/",
           "group": "inline@4"
-        },
-        {
-          "command": "herdr.paneContext.showPane",
-          "when": "view == herdr.paneContext && viewItem == 'herdr.paneContext.pane hidden'",
-          "group": "inline@5"
         },
         {
           "command": "herdr.paneContext.openFile",
@@ -680,6 +714,10 @@
         },
         {
           "command": "herdr.tile.close",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.doneManaging",
           "when": "false"
         }
       ],

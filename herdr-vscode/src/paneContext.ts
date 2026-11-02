@@ -23,12 +23,12 @@ import {
 } from './git';
 import { environmentUri, EnvironmentPaths, isUnder, parseLinkText, resolveLinkPath } from './paths';
 import { hasAgent, paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPane } from './sessions';
-import { agentIcon } from './status';
 import { TilesPanels } from './tilesPanel';
 import { memoryMemento, TouchedStore } from './touched';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 import { SessionsView } from './views/sessionsView';
-import { agentTooltip, paneClickCommand, PaneRef } from './views/spacesView';
+import { paneClickCommand, PaneRef } from './views/spacesView';
+import { gitDescription } from './spaceGit';
 
 export const PANE_CONTEXT_VIEW = 'herdr.paneContext';
 /** A click on a change row: its diff. */
@@ -73,17 +73,15 @@ export function paneContextMessage(pinned: boolean): string {
 	return pinned ? 'The pinned pane is not available. Unpin to follow panes again.' : NO_PANE_MESSAGE;
 }
 
-/** The pane row's description: `<space> › <tab>`, then ` · not open in a tile` when no tile shows it. */
-export function paneRowDescription(space: string, tab: string, shown: boolean): string {
-	return `${space} › ${tab}${shown ? '' : ' · not open in a tile'}`;
-}
+/** Context key: a pane is followed and found (Show Pane applies). */
+export const PANE_CONTEXT_FOLLOWING_KEY = 'herdr.paneContext.following';
 
-/** The Repo row's description. */
-export function repoDescription(git: Pick<GitInfo, 'head' | 'changes' | 'ahead' | 'behind'>): string {
-	const changed = git.changes.length > 0 ? ` · ● ${git.changes.length}` : '';
-	const ahead = git.ahead > 0 ? ` ↑${git.ahead}` : '';
-	const behind = git.behind > 0 ? ` ↓${git.behind}` : '';
-	return `⎇ ${git.head}${changed}${ahead}${behind}`;
+/**
+ * The view header's description for the followed pane:
+ * `[pinned · ]<pane name> · <space> › <tab>[ · not open in a tile]`.
+ */
+export function paneHeaderDescription(h: { name: string; space: string; tab: string; shown: boolean; pinned: boolean }): string {
+	return `${h.pinned ? 'pinned · ' : ''}${h.name} · ${h.space} › ${h.tab}${h.shown ? '' : ' · not open in a tile'}`;
 }
 
 /** Whether **Add to Workspace** applies: a plain file that is not a workspace folder yet. */
@@ -123,19 +121,6 @@ export function storedPaneFilesOnly(memento: PaneFilesMemento): boolean {
 }
 
 // ── Tree nodes ──────────────────────────────────────────────────────────────
-
-/** The followed pane itself: the first row. */
-export interface PaneRowNode {
-	type: 'pane';
-	/** `<pane key>|pane`. */
-	id: string;
-	label: string;
-	description: string;
-	pane: SnapshotPane;
-	ref: PaneRef;
-	/** A tile in this window shows the pane. */
-	shown: boolean;
-}
 
 export interface RootNode {
 	type: 'root';
@@ -218,16 +203,11 @@ export interface NoteNode {
 	plain?: boolean;
 }
 
-export type PaneContextNode = PaneRowNode | RootNode | GroupNode | ChangeNode | CommitNode | CommitFileNode | EntryNode | NoteNode;
+export type PaneContextNode = RootNode | GroupNode | ChangeNode | CommitNode | CommitFileNode | EntryNode | NoteNode;
 
 /** The Repo row's context value, which the inline actions' `when` clauses read. */
 export function rootContextValue(node: Pick<RootNode, 'canAdd' | 'scm' | 'terminal'>): string {
 	return `herdr.paneContext.root${node.canAdd ? ' addable' : ''}${node.scm ? ' scm' : ''}${node.terminal ? ' terminal' : ''}`;
-}
-
-/** The pane row's context value: Show Pane applies when it is ` hidden`. */
-export function paneRowContextValue(node: Pick<PaneRowNode, 'shown'>): string {
-	return `herdr.paneContext.pane${node.shown ? '' : ' hidden'}`;
 }
 
 /** A commit row's description: `<sha7> · <time>`. */
@@ -263,17 +243,6 @@ export function markedDescription(marker: string | undefined, description: strin
 
 export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 	switch (node.type) {
-		case 'pane': {
-			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
-			item.id = node.id;
-			item.description = node.description;
-			const agent = hasAgent(node.pane);
-			item.iconPath = agentIcon(node.pane);
-			item.tooltip = agent ? agentTooltip(node.pane) : node.pane.pane_id;
-			item.contextValue = paneRowContextValue(node);
-			item.command = paneClickCommand(node.ref);
-			return item;
-		}
 		case 'root': {
 			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
 			item.id = node.id;
@@ -347,7 +316,7 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 // ── The view ────────────────────────────────────────────────────────────────
 
 /** The parts of a `TreeView` used here. */
-export type PaneContextHost = Pick<vscode.TreeView<PaneContextNode>, 'message' | 'visible' | 'onDidChangeVisibility' | 'reveal' | 'dispose'>;
+export type PaneContextHost = Pick<vscode.TreeView<PaneContextNode>, 'message' | 'description' | 'visible' | 'onDidChangeVisibility' | 'reveal' | 'dispose'>;
 
 export interface PaneContextDeps {
 	model: Pick<SessionModel, 'connection' | 'onDidChange' | 'onDidEvent' | 'request'>;
@@ -403,8 +372,11 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	/** Entry nodes of the current root: `reveal` needs its parents to be the tree's own. */
 	private readonly entries = new Map<string, EntryNode>();
 	private filesGroup: GroupNode | undefined;
-	/** The pane row, while a pane is followed and found. */
-	private paneRow: PaneRowNode | undefined;
+	/** The header description last set (undefined: none). */
+	private header: string | undefined;
+	/** Whether the followed pane had an agent when the header was last set. */
+	private headerAgent: boolean | undefined;
+	private following: boolean | undefined;
 	private watcher: vscode.FileSystemWatcher | undefined;
 	private watchedRoot: string | undefined;
 	private watchTimer: NodeJS.Timeout | undefined;
@@ -520,7 +492,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		const key = this.followed;
 		const found = key ? this.find(key) : undefined;
 		this.host.message = found ? undefined : paneContextMessage(this.pinned);
-		this.updatePaneRow(key, found);
+		this.updateHeader(key, found);
 		const dir = found?.pane.foreground_cwd ?? found?.pane.cwd;
 		if (!key || !found || !dir) {
 			this.clear();
@@ -533,50 +505,36 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	}
 
 	/**
-	 * Brings the pane row in line with the snapshot: its name and status change
-	 * constantly, so a change of the same pane fires that row alone.
+	 * Brings the header in line with the snapshot. Set only on a change: every
+	 * snapshot event lands here.
 	 */
-	private updatePaneRow(key: string | undefined, found: ReturnType<PaneContextView['find']>): void {
-		const previous = this.paneRow;
-		if (!key || !found) {
-			if (previous) {
-				this.paneRow = undefined;
-				this.emitter.fire();
-			}
-			return;
+	private updateHeader(key: string | undefined, found: ReturnType<PaneContextView['find']>): void {
+		const following = !!key && !!found;
+		if (following !== this.following) {
+			this.following = following;
+			void vscode.commands.executeCommand('setContext', PANE_CONTEXT_FOLLOWING_KEY, following);
 		}
-		const { pane, snapshot, ref } = found;
-		const shown = this.deps.panels.showsPane(ref.sessionKey, ref.paneId);
-		const space = snapshot.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label ?? pane.workspace_id;
-		const tab = snapshot.tabs.find((t) => t.tab_id === pane.tab_id)?.label ?? pane.tab_id;
-		const next: PaneRowNode = {
-			type: 'pane',
-			id: `${key}|pane`,
-			label: paneLabel(pane, snapshot),
-			description: paneRowDescription(space, tab, shown),
-			pane,
-			ref,
-			shown,
-		};
-		if (!previous || previous.id !== next.id) {
-			this.paneRow = next;
-			this.emitter.fire();
-			return;
+		let header: string | undefined;
+		let agent: boolean | undefined;
+		if (key && found) {
+			const { pane, snapshot, ref } = found;
+			header = paneHeaderDescription({
+				name: paneLabel(pane, snapshot),
+				space: snapshot.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label ?? pane.workspace_id,
+				tab: snapshot.tabs.find((t) => t.tab_id === pane.tab_id)?.label ?? pane.tab_id,
+				shown: this.deps.panels.showsPane(ref.sessionKey, ref.paneId),
+				pinned: this.pinned,
+			});
+			agent = hasAgent(pane);
 		}
-		const same =
-			previous.label === next.label &&
-			previous.description === next.description &&
-			previous.shown === next.shown &&
-			previous.pane.agent === pane.agent &&
-			previous.pane.agent_status === pane.agent_status &&
-			previous.pane.state_since === pane.state_since;
-		const agentChanged = hasAgent(previous.pane) !== hasAgent(pane);
-		// The tree holds the node it was given: update it in place and fire it.
-		Object.assign(previous, next);
+		if (header !== this.header) {
+			this.header = header;
+			this.host.description = header;
+		}
+		const agentChanged = this.headerAgent !== undefined && agent !== undefined && agent !== this.headerAgent;
+		this.headerAgent = agent;
 		if (agentChanged && this.paneFilesOnlyNow) {
 			this.emitter.fire(); // The sections' filter depends on it.
-		} else if (!same) {
-			this.emitter.fire(previous);
 		}
 	}
 
@@ -594,7 +552,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	}
 
 	private tilesChanged(): void {
-		this.update(); // The pane row's `not open in a tile` and Show Pane.
+		this.update(); // The header's `not open in a tile`.
 	}
 
 	private async load(paneKey: string, env: Environment, dir: string): Promise<void> {
@@ -761,8 +719,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	async getChildren(node?: PaneContextNode): Promise<PaneContextNode[]> {
 		const loaded = this.loaded;
 		if (!node) {
-			const pane = this.paneRow ? [this.paneRow] : [];
-			return loaded ? [...pane, ...this.topLevel(loaded)] : pane;
+			return loaded ? this.topLevel(loaded) : [];
 		}
 		if (!loaded) {
 			return [];
@@ -789,7 +746,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			type: 'root',
 			id: `${prefix}root`,
 			label: path.posix.basename(loaded.rootPath) || loaded.rootPath,
-			description: loaded.git && repoDescription(loaded.git),
+			description: loaded.git && gitDescription(loaded.git),
 			isRepo: loaded.toplevel !== undefined,
 			canAdd: canAddToWorkspace(loaded.rootUri, vscode.workspace.workspaceFolders),
 			scm: loaded.rootUri.scheme === 'file' && loaded.toplevel !== undefined,
