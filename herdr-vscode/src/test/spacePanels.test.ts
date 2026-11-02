@@ -279,26 +279,37 @@ suite('space panels', function () {
 		assert.strictEqual(web.panel.title, 'web');
 	});
 
-	test('the toolbar is the strip only; a shell tile has no dot, an agent tile its status; tiles carry their menu context', async () => {
+	test('the toolbar is the strip only; a shell tile has no icon, a claude tile its mark; tiles carry their menu context', async () => {
 		const api = panels.openSpace(S, 'w2');
 		await showing(api, 'w2:p1', 'w2:p2');
 		const probe = await api.probe();
 		assert.deepStrictEqual(probe.toolbar, ['strip']);
 		const tile = (id: string) => probe.tiles.find((t) => t.paneKey === pk(id))!;
-		assert.strictEqual(tile('w2:p1').dot, 'tile-dot tile-dot-working');
+		assert.strictEqual(tile('w2:p1').mark, 'tile-mark tile-mark-working', 'claude: the mark, coloured by status');
+		assert.strictEqual(tile('w2:p1').dot, '', 'claude: no dot');
 		assert.strictEqual(tile('w2:p2').dot, '', 'a shell: no dot');
+		assert.strictEqual(tile('w2:p2').mark, '', 'a shell: no mark');
 		assert.deepStrictEqual(JSON.parse(tile('w2:p2').context), {
 			webviewSection: 'tile',
 			paneKey: pk('w2:p2'),
 			zoomed: false,
 			preventDefaultContextMenuItems: true,
 		});
-		// An idle agent: the gray dot.
+		// An idle agent: the gray mark.
 		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT)) as typeof RAW_SNAPSHOT;
-		(raw.panes.find((p) => p.pane_id === 'w2:p1') as Record<string, unknown>).agent_status = 'idle';
+		const p1 = raw.panes.find((p) => p.pane_id === 'w2:p1') as Record<string, unknown>;
+		p1.agent_status = 'idle';
 		herdr.snap = snapshot(raw);
 		herdr.changed.fire();
-		await waitFor('the idle dot', async () => (await api.probe()).tiles.find((t) => t.paneKey === pk('w2:p1'))?.dot === 'tile-dot tile-dot-idle');
+		await waitFor('the idle mark', async () => (await api.probe()).tiles.find((t) => t.paneKey === pk('w2:p1'))?.mark === 'tile-mark tile-mark-idle');
+		// An agent without a mark: the dot again.
+		p1.agent = 'codex';
+		herdr.snap = snapshot(raw);
+		herdr.changed.fire();
+		await waitFor('the idle dot', async () => {
+			const t = (await api.probe()).tiles.find((x) => x.paneKey === pk('w2:p1'));
+			return t?.dot === 'tile-dot tile-dot-idle' && t.mark === '';
+		});
 	});
 
 	test('the tile menu: split, zoom (the menu context follows), unzoom and close, on the clicked pane', async () => {
@@ -330,7 +341,7 @@ suite('space panels', function () {
 		await api.probe({ kind: 'dragTile', paneKey: pk('w2:p2'), targetPaneKey: pk('w2:p1'), zone: 'left' });
 		await waitFor('three requests', () => herdr.edits().length === 3);
 		assert.deepStrictEqual(herdr.edits(), [
-			{ method: 'pane.move', params: { pane_id: 'w2:p2', destination: { type: 'new_tab', workspace_id: 'w2', label: 'test' }, focus: false } },
+			{ method: 'pane.move', params: { pane_id: 'w2:p2', destination: { type: 'new_tab', workspace_id: 'w2', label: 'zsh' }, focus: false } },
 			{
 				method: 'pane.move',
 				params: { pane_id: 'w2:p2', destination: { type: 'tab', tab_id: 'w2:t1', split: 'right', target_pane_id: 'w2:p1', ratio: 0.5 }, focus: false },

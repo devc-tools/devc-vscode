@@ -454,7 +454,7 @@
         },
         {
           "command": "herdr.paneContext.showPane",
-          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* showable/",
+          "when": "view == herdr.paneContext && viewItem == 'herdr.paneContext.pane hidden'",
           "group": "inline@5"
         },
         {
@@ -695,6 +695,36 @@
           "group": "3_close@1"
         }
       ]
+    },
+    "icons": {
+      "herdr-agent-claude": {
+        "description": "Claude Code",
+        "default": {
+          "fontPath": "resources/agent-icons.woff",
+          "fontCharacter": "\\E001"
+        }
+      },
+      "herdr-agent-copilot": {
+        "description": "GitHub Copilot",
+        "default": {
+          "fontPath": "resources/agent-icons.woff",
+          "fontCharacter": "\\E002"
+        }
+      },
+      "herdr-agent-pi": {
+        "description": "pi",
+        "default": {
+          "fontPath": "resources/agent-icons.woff",
+          "fontCharacter": "\\E003"
+        }
+      },
+      "herdr-agent-opencode": {
+        "description": "OpenCode",
+        "default": {
+          "fontPath": "resources/agent-icons.woff",
+          "fontCharacter": "\\E004"
+        }
+      }
     },
     "resourceLabelFormatters": [
       {

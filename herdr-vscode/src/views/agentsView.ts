@@ -145,7 +145,9 @@ export function agentRows(sources: AgentSource[], scope: AgentsScope = 'all', no
 				}
 			} else {
 				const breadcrumb = scope === 'session' ? `${space} › ${tab}` : `${src.rowLabel} › ${space}`;
-				row.description = [breadcrumb, stateText(pane, now), pane.terminal_title_stripped].filter((p): p is string => !!p).join(' · ');
+				// The terminal title is usually the row's name now; repeat it only when it is not.
+				const title = pane.terminal_title_stripped?.trim();
+				row.description = [breadcrumb, stateText(pane, now), title !== label ? title : undefined].filter((p): p is string => !!p).join(' · ');
 			}
 			rows.push(row);
 		}

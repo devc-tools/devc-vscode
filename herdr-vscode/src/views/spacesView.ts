@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import { formatElapsed } from '../agentState';
-import { hasAgent, paneLabel, Snapshot, SnapshotPane } from '../sessions';
+import { hasAgent, paneFolder, paneLabel, Snapshot, SnapshotPane } from '../sessions';
 import { customToken, renderRow, SidebarRows, SidebarRowsSource } from '../sidebarConfig';
 import { SpaceGit, spaceDirectory, splitGitDescription } from '../spaceGit';
-import { countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
+import { agentIcon, countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
 import { SessionsView } from './sessionsView';
 
 /** A pane across every session. */
@@ -62,9 +62,17 @@ export interface PaneNode {
 
 export type SpacesNode = SpaceNode | TabNode | PaneNode;
 
-/** A pane row's description: the terminal title when an agent runs, else the cwd. */
-export function paneDescription(pane: SnapshotPane): string | undefined {
-	return hasAgent(pane) ? pane.terminal_title_stripped : (pane.foreground_cwd ?? pane.cwd);
+/**
+ * A pane row's description: for an agent, its folder (basename of
+ * `foreground_cwd ?? cwd`), omitted when it equals the pane's name; for a
+ * shell, the full cwd.
+ */
+export function paneDescription(pane: SnapshotPane, name?: string): string | undefined {
+	if (!hasAgent(pane)) {
+		return pane.foreground_cwd ?? pane.cwd;
+	}
+	const folder = paneFolder(pane);
+	return folder !== undefined && folder !== name ? folder : undefined;
 }
 
 /**
@@ -141,16 +149,17 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 					tabId: t.tab_id,
 					children: snapshot.panes
 						.filter((p) => p.tab_id === t.tab_id)
-						.map(
-							(p): PaneNode => ({
+						.map((p): PaneNode => {
+							const label = paneLabel(p, snapshot);
+							return {
 								type: 'pane',
 								id: `${sessionKey}|pane|${p.pane_id}`,
-								label: paneLabel(p, snapshot),
-								description: paneDescription(p),
+								label,
+								description: paneDescription(p, label),
 								pane: p,
 								ref: { sessionKey, paneId: p.pane_id },
-							}),
-						),
+							};
+						}),
 				}),
 			);
 		const agents = snapshot.panes.filter((p) => p.workspace_id === w.workspace_id && hasAgent(p)).map((p) => p.agent_status);
@@ -212,7 +221,7 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 	}
 }
 
-/** A pane or agent row: status icon (none for a shell), and a click that opens its space's tab. */
+/** A pane or agent row: agent mark or status dot (none for a shell), and a click that opens its space's tab. */
 export function paneTreeItem(
 	id: string,
 	label: string,
@@ -224,7 +233,7 @@ export function paneTreeItem(
 	item.id = id;
 	item.description = description;
 	const agent = hasAgent(pane);
-	item.iconPath = agent ? statusIcon(pane.agent_status) : undefined;
+	item.iconPath = agentIcon(pane);
 	item.contextValue = agent ? 'herdr.pane.agent' : 'herdr.pane.shell';
 	item.tooltip = agent ? agentTooltip(pane) : pane.pane_id;
 	item.command = paneClickCommand(ref);

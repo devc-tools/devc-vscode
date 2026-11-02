@@ -323,8 +323,9 @@ suite('sidebar config: rendering', () => {
 			agentRow(agentSnapshot({ agent: 'codex', workspace: 'infra-ci', tab: 'main', tokens: { ticket: 'DH-42' } }), fixtureAgents, { envKind: 'ssh', envLabel: 'buildbox' }),
 			{ label: 'codex', description: 'buildbox · infra-ci › main · DH-42', icon: true },
 		);
+		// The label is the pane's name (the task title), as the default rows have it.
 		assert.deepStrictEqual(agentRow(agentSnapshot({ agent: 'claude', title: 'Refactoring auth middleware' }), fixtureAgents), {
-			label: 'claude',
+			label: 'Refactoring auth middleware',
 			description: 'v3_auth › agents · Refactoring auth middleware',
 			icon: true,
 		});
@@ -350,7 +351,7 @@ suite('sidebar config: rendering', () => {
 		assert.strictEqual(r([['workspace', 'tab', 'pane']]).description, 'v3_auth › agents › p-one');
 		assert.strictEqual(r([['tab', '$missing', 'pane']]).description, 'agents › p-one', 'tab › pane across a skipped token');
 		const noAgent = r([['workspace']]);
-		assert.deepStrictEqual([noAgent.label, noAgent.description], ['claude', 'v3_auth'], 'label fallback without `agent`');
+		assert.deepStrictEqual([noAgent.label, noAgent.description], ['p-one', 'v3_auth'], 'label fallback without `agent`: the pane name');
 		assert.strictEqual(r([['state_text']]).description, 'working');
 		assert.strictEqual(agentRow(agentSnapshot({ agent: 'x', status: 'unknown' }), { rows: [['state_text']] }).description, undefined);
 		const since = agentSnapshot({ agent: 'claude', status: 'blocked' });
@@ -368,7 +369,7 @@ suite('sidebar config: rendering', () => {
 		codex.panes[0].state_since = NOW - 60_000;
 		const src = [{ sessionKey: 'host/s', rowLabel: 's', snapshot: codex }];
 		assert.deepStrictEqual(agentRows(src, 'all', NOW, byAgent), agentRows(src, 'all', NOW));
-		assert.strictEqual(agentRows(src, 'all', NOW, byAgent)[0].description, 's › v3_auth · working 1m · t');
+		assert.strictEqual(agentRows(src, 'all', NOW, byAgent)[0].description, 's › v3_auth · working 1m', 'the title is the name');
 	});
 });
 
@@ -388,7 +389,7 @@ suite('sidebar config: views keep the defaults without a config', () => {
 			await source.setEnabled(false);
 			assert.deepStrictEqual(spaces(), defaults.spaces);
 			assert.deepStrictEqual(agents(), defaults.agents);
-			assert.strictEqual(agents()[0].description, 's › v3_auth · working · T');
+			assert.strictEqual(agents()[0].description, 's › v3_auth · working');
 			let fired = false;
 			source.onDidChange(() => (fired = true));
 			await source.setEnabled(true);

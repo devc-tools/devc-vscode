@@ -42,12 +42,17 @@ export interface StripTab {
 	active: boolean;
 }
 
-/** A tile header: label, faded detail, and the status dot (`shell` for no agent: no dot). */
+/**
+ * A tile header: label, faded detail, and the agent's mark or status dot
+ * (`shell` for no agent: neither).
+ */
 export interface TileMeta {
 	paneKey: string;
 	label: string;
 	detail?: string;
 	status: 'blocked' | 'working' | 'done' | 'idle' | 'unknown' | 'shell';
+	/** herdr's `agent`, for the mark; absent for a shell. */
+	agent?: string;
 }
 
 /** A tile's stream, when it is not simply showing frames. */
@@ -112,6 +117,8 @@ export interface TileProbe {
 	overLink: boolean;
 	/** The class of the status dot on the tile's tab; '' with no dot. */
 	dot: string;
+	/** The class of the agent mark on the tile's tab; '' with no mark. */
+	mark: string;
 	/** The tile host's `data-vscode-context`, as written. */
 	context: string;
 }

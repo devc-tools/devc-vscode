@@ -51,6 +51,30 @@ export function statusIcon(status: AgentStatus | undefined): vscode.ThemeIcon {
 	return new vscode.ThemeIcon(spec.id, spec.color ? new vscode.ThemeColor(spec.color) : undefined);
 }
 
+/** herdr agent ids (`pane.agent`) with a mark in the `herdr-agent-<id>` icon font. */
+export const AGENT_MARK_IDS = ['claude', 'copilot', 'pi', 'opencode'] as const;
+export type AgentMarkId = (typeof AGENT_MARK_IDS)[number];
+
+/** Whether an agent id has a mark. */
+export function hasAgentMark(agent: string | undefined): agent is AgentMarkId {
+	return agent !== undefined && (AGENT_MARK_IDS as readonly string[]).includes(agent);
+}
+
+/**
+ * The icon for one pane: its agent's mark (`herdr-agent-<agent>`) coloured by
+ * status for the agents with a mark, the status dot for any other agent,
+ * `undefined` for a shell.
+ */
+export function agentIcon(pane: { agent?: string; agent_status: AgentStatus }): vscode.ThemeIcon | undefined {
+	if (pane.agent === undefined) {
+		return undefined;
+	}
+	if (hasAgentMark(pane.agent)) {
+		return new vscode.ThemeIcon(`herdr-agent-${pane.agent}`, new vscode.ThemeColor(COLOR[pane.agent_status]));
+	}
+	return statusIcon(pane.agent_status);
+}
+
 export interface StatusCounts {
 	blocked: number;
 	working: number;

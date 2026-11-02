@@ -124,19 +124,43 @@ suite('snapshot', () => {
 			...extra,
 		});
 		const full = pane({
-			display_agent: 'Claude',
-			agent: 'claude',
+			terminal_title_stripped: 'Fixing the API',
 			label: 'my pane',
 			foreground_cwd: '/a/fg',
 			cwd: '/a/cwd',
+			display_agent: 'Claude',
+			agent: 'claude',
 		});
+		// 1. the live agent name; 2. the terminal title; 3. label; 4. the folder; 5. the agent kind; 6. shell.
 		assert.strictEqual(paneLabel(full, names), 'named');
-		assert.strictEqual(paneLabel(full, none), 'Claude');
-		assert.strictEqual(paneLabel({ ...full, display_agent: undefined }, none), 'claude');
-		assert.strictEqual(paneLabel({ ...full, display_agent: undefined, agent: undefined }, none), 'my pane');
-		assert.strictEqual(paneLabel(pane({ foreground_cwd: '/a/fg', cwd: '/a/cwd' }), none), 'fg');
+		assert.strictEqual(paneLabel(full, none), 'Fixing the API');
+		assert.strictEqual(paneLabel({ ...full, terminal_title_stripped: undefined }, none), 'my pane');
+		assert.strictEqual(paneLabel({ ...full, terminal_title_stripped: undefined, label: undefined }, none), 'fg');
 		assert.strictEqual(paneLabel(pane({ cwd: '/a/cwd/' }), none), 'cwd');
+		const noDir = { ...full, terminal_title_stripped: undefined, label: undefined, foreground_cwd: undefined, cwd: undefined };
+		assert.strictEqual(paneLabel(noDir, none), 'Claude');
+		assert.strictEqual(paneLabel({ ...noDir, display_agent: undefined }, none), 'claude');
 		assert.strictEqual(paneLabel(pane({ cwd: '/' }), none), 'shell');
 		assert.strictEqual(paneLabel(pane({}), none), 'shell');
+		// Whitespace-only values are empty; values are trimmed.
+		assert.strictEqual(paneLabel({ ...full, terminal_title_stripped: '   ' }, none), 'my pane');
+		assert.strictEqual(paneLabel({ ...full, terminal_title_stripped: '  Fixing  ' }, none), 'Fixing');
+		assert.strictEqual(paneLabel(full, { agentNames: new Map([['p', ' ']]) }), 'Fixing the API');
+	});
+
+	test('pane label: the 2026-11-02 measurement gives the task title, not claude or a stale label', () => {
+		const measured: SnapshotPane = {
+			pane_id: 'w1:p2',
+			tab_id: 'w1:t1',
+			workspace_id: 'w1',
+			agent: 'claude',
+			agent_status: 'working',
+			raw_status: 'working',
+			label: 'Old session title',
+			cwd: '/workspaces/tools',
+			terminal_title_stripped: 'Herdr-vscode session improvements',
+			focused: false,
+		};
+		assert.strictEqual(paneLabel(measured, { agentNames: new Map() }), 'Herdr-vscode session improvements');
 	});
 });

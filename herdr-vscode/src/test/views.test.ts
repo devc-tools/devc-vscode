@@ -1,16 +1,18 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { Environment } from '../environments';
 import { focusedPaneStatus } from '../focus';
 import { LocalShell } from '../remoteShell';
 import { EnvState, SessionConnection } from '../sessions';
-import { countsDescription, statusIcon, statusIconSpec, statusRank, worstStatus } from '../status';
+import { agentIcon, countsDescription, statusIcon, statusIconSpec, statusRank, worstStatus } from '../status';
 import { activeTabOf, eventTouchesTab, stripTabs, tileMetas } from '../tilesPanel';
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
 import { effectiveSelection, firstSpaceId, groupOf, sessionItemContext, sessionRows, sessionRowStatus } from '../views/sessionsView';
-import { agentTooltip, buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
+import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
 
@@ -57,6 +59,58 @@ suite('status presentation', () => {
 	});
 });
 
+suite('pane identity', () => {
+	const base = (extra: Partial<SnapshotPane>): SnapshotPane => ({
+		pane_id: 'p',
+		tab_id: 't',
+		workspace_id: 'w',
+		agent_status: 'unknown',
+		raw_status: 'unknown',
+		focused: false,
+		...extra,
+	});
+
+	test('paneDescription: an agent its folder, omitted when it is the name; a shell its full path', () => {
+		const agent = base({ agent: 'claude', foreground_cwd: '/src/api/', cwd: '/src', terminal_title_stripped: 'Task' });
+		assert.strictEqual(paneDescription(agent, 'Task'), 'api');
+		assert.strictEqual(paneDescription(agent, 'api'), undefined);
+		assert.strictEqual(paneDescription(base({ agent: 'claude' }), 'claude'), undefined, 'no directory');
+		assert.strictEqual(paneDescription(base({ foreground_cwd: '/src/api/test', cwd: '/src/api' }), 'test'), '/src/api/test');
+		assert.strictEqual(paneDescription(base({ cwd: '/src/api' }), 'api'), '/src/api');
+	});
+
+	test('agentIcon: the mark coloured by status, the dot for other agents, nothing for a shell', () => {
+		const claude = agentIcon(base({ agent: 'claude', agent_status: 'blocked' }))!;
+		assert.strictEqual(claude.id, 'herdr-agent-claude');
+		assert.strictEqual((claude.color as vscode.ThemeColor).id, 'charts.orange');
+		for (const [agent, status, color] of [
+			['copilot', 'working', 'charts.blue'],
+			['pi', 'done', 'charts.green'],
+			['opencode', 'idle', 'disabledForeground'],
+		] as const) {
+			const icon = agentIcon(base({ agent, agent_status: status }))!;
+			assert.strictEqual(icon.id, `herdr-agent-${agent}`);
+			assert.strictEqual((icon.color as vscode.ThemeColor).id, color);
+		}
+		const codex = agentIcon(base({ agent: 'codex', agent_status: 'blocked' }))!;
+		assert.strictEqual(codex.id, 'circle-filled');
+		assert.strictEqual((codex.color as vscode.ThemeColor).id, 'charts.orange');
+		assert.strictEqual(agentIcon(base({})), undefined);
+	});
+
+	test('contributes.icons: exactly the four marks, from the bundled font', () => {
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
+		const font = { fontPath: 'resources/agent-icons.woff' };
+		assert.deepStrictEqual(ext.packageJSON.contributes.icons, {
+			'herdr-agent-claude': { description: 'Claude Code', default: { ...font, fontCharacter: '\\E001' } },
+			'herdr-agent-copilot': { description: 'GitHub Copilot', default: { ...font, fontCharacter: '\\E002' } },
+			'herdr-agent-pi': { description: 'pi', default: { ...font, fontCharacter: '\\E003' } },
+			'herdr-agent-opencode': { description: 'OpenCode', default: { ...font, fontCharacter: '\\E004' } },
+		});
+		assert.ok(fs.statSync(path.join(ext.extensionPath, 'resources', 'agent-icons.woff')).size > 0);
+	});
+});
+
 suite('Spaces items', () => {
 	const spaces = buildSpaces(snapshot(), 'host/code-wksp');
 
@@ -71,7 +125,7 @@ suite('Spaces items', () => {
 		);
 		assert.deepStrictEqual(
 			spaces[1].children[0].children.map((p) => p.label),
-			['api-fixer', 'test'],
+			['api-fixer', 'zsh'],
 		);
 	});
 
@@ -84,9 +138,10 @@ suite('Spaces items', () => {
 
 		const [agentPane, shellPane] = spaces[1].children[0].children;
 		const agentItem = spacesTreeItem(agentPane);
-		assert.strictEqual(agentItem.description, 'Refactoring');
+		assert.strictEqual(agentItem.description, 'api', 'the folder');
 		assert.strictEqual(agentItem.contextValue, 'herdr.pane.agent');
-		assert.strictEqual((agentItem.iconPath as vscode.ThemeIcon).id, 'circle-filled');
+		assert.strictEqual((agentItem.iconPath as vscode.ThemeIcon).id, 'herdr-agent-claude');
+		assert.strictEqual(((agentItem.iconPath as vscode.ThemeIcon).color as vscode.ThemeColor).id, 'charts.blue');
 		assert.deepStrictEqual(agentItem.command?.arguments, ['host/code-wksp', 'w2:p1']);
 		assert.strictEqual(agentItem.command?.command, 'herdr.openPaneTab');
 
@@ -96,7 +151,9 @@ suite('Spaces items', () => {
 		assert.strictEqual(shellItem.iconPath, undefined, 'a shell has no icon');
 
 		const codex = spaces[0].children[0].children[0];
-		assert.strictEqual(codex.label, 'Codex', 'display_agent when agents[] has no name');
+		assert.strictEqual(codex.label, 'web', 'the folder before the agent kind');
+		assert.strictEqual(codex.description, undefined, 'the folder is the name: no description');
+		assert.strictEqual((spacesTreeItem(codex).iconPath as vscode.ThemeIcon).id, 'circle-filled', 'codex has no mark');
 	});
 
 	test('focused spaces and tabs are expanded, others collapsed', () => {
@@ -202,10 +259,11 @@ suite('Agents', () => {
 		const desc = (snap: Snapshot, scope: 'all' | 'session', rowLabel = 'deephaven-mcp') =>
 			agentRows([{ sessionKey: 'host/s', rowLabel, snapshot: snap }], scope, NOW)[0].description;
 		assert.strictEqual(desc(one('blocked', NOW - 125_000), 'all'), 'deephaven-mcp › v3_auth · blocked 2m');
-		assert.strictEqual(desc(one('working', NOW - 180_000, 'Refactoring auth middleware'), 'session'), 'v3_auth › agents · working 3m · Refactoring auth middleware');
+		// The title is the row's name: not repeated in the description.
+		assert.strictEqual(desc(one('working', NOW - 180_000, 'Refactoring auth middleware'), 'session'), 'v3_auth › agents · working 3m');
 		assert.strictEqual(desc(one('idle', undefined, undefined, { label: 'api', id: 'w1' }), 'all', 'code-wksp'), 'code-wksp › api · idle');
 		assert.strictEqual(desc(one('done', NOW - 10_000, undefined, { label: 'web', id: 'w1' }), 'all', 'my-app'), 'my-app › web · done <1m');
-		assert.strictEqual(desc(one('unknown', NOW - 10_000, 'zsh'), 'all', 'x'), 'x › v3_auth · zsh');
+		assert.strictEqual(desc(one('unknown', NOW - 10_000, 'zsh'), 'all', 'x'), 'x › v3_auth');
 		const pane = one('blocked', NOW - 125_000).panes[0];
 		assert.strictEqual(agentTooltip(pane, NOW), 'claude · blocked for 2m\np1');
 		assert.strictEqual(agentTooltip({ ...pane, state_since: undefined }, NOW), 'claude · blocked\np1');
@@ -512,18 +570,25 @@ suite('Sessions rows', () => {
 	test('tile headers', () => {
 		const s = snapshot();
 		assert.deepStrictEqual(tileMetas(s, 'host/s', 'w2:t1'), [
-			{ paneKey: 'host/s|w2:p1', label: 'api-fixer', detail: 'Refactoring', status: 'working' },
-			{ paneKey: 'host/s|w2:p2', label: 'test', detail: undefined, status: 'shell' },
+			{ paneKey: 'host/s|w2:p1', label: 'api-fixer', detail: 'api', status: 'working', agent: 'claude' },
+			{ paneKey: 'host/s|w2:p2', label: 'zsh', detail: undefined, status: 'shell' },
 		]);
+		// The folder is not repeated when it is the name; strip entries keep their status dots.
+		const t = snapshot();
+		t.agentNames.clear();
+		t.panes[0].terminal_title_stripped = undefined;
+		assert.deepStrictEqual(tileMetas(t, 'host/s', 'w2:t1')[0], { paneKey: 'host/s|w2:p1', label: 'api', detail: undefined, status: 'working', agent: 'claude' });
+		assert.deepStrictEqual(stripTabs(s, 'w2', 'w2:t1'), [{ tabId: 'w2:t1', label: 'main', status: 'working', active: true }]);
 	});
 
 	test('focused pane status bar text', () => {
 		const s = snapshot();
 		assert.deepStrictEqual(focusedPaneStatus(s, 'w2:p1', 'my-session'), {
-			text: '$(circle-filled) api-fixer · working',
+			text: '$(herdr-agent-claude) api-fixer · working',
 			tooltip: 'my-session › api › main',
 		});
-		assert.strictEqual(focusedPaneStatus(s, 'w2:p2', 'r')?.text, '$(circle-filled) test · shell');
+		assert.strictEqual(focusedPaneStatus(s, 'w2:p2', 'r')?.text, '$(circle-filled) zsh · shell', 'a shell: unchanged');
+		assert.strictEqual(focusedPaneStatus(s, 'w1:p1', 'r')?.text, '$(circle-filled) web · blocked', 'an agent without a mark: the dot');
 		assert.strictEqual(focusedPaneStatus(s, 'gone', 'r'), undefined);
 	});
 

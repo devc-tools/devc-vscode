@@ -271,14 +271,33 @@ export function hasAgent(pane: SnapshotPane): boolean {
 	return pane.agent !== undefined;
 }
 
+/** The basename of a pane's `foreground_cwd ?? cwd` (trailing `/` removed), undefined without one. */
+export function paneFolder(pane: SnapshotPane): string | undefined {
+	const dir = pane.foreground_cwd ?? pane.cwd;
+	return dir ? path.posix.basename(dir.replace(/\/+$/, '')) || undefined : undefined;
+}
+
 /**
- * A pane's row label: its live agent name, else `display_agent`, `agent`,
- * `label`, the basename of `foreground_cwd ?? cwd`, else `shell`.
+ * A pane's name, what it is working on: the first non-empty (trimmed) of its
+ * live agent name, the terminal title (Claude Code keeps it set to the task),
+ * `label`, the folder (basename of `foreground_cwd ?? cwd`),
+ * `display_agent ?? agent`, else `shell`.
  */
 export function paneLabel(pane: SnapshotPane, snapshot: Pick<Snapshot, 'agentNames'>): string {
-	const dir = pane.foreground_cwd ?? pane.cwd;
-	const base = dir ? path.posix.basename(dir.replace(/\/+$/, '')) : undefined;
-	return snapshot.agentNames.get(pane.pane_id) ?? pane.display_agent ?? pane.agent ?? pane.label ?? (base || undefined) ?? 'shell';
+	const candidates = [
+		snapshot.agentNames.get(pane.pane_id),
+		pane.terminal_title_stripped,
+		pane.label,
+		paneFolder(pane),
+		pane.display_agent ?? pane.agent,
+	];
+	for (const value of candidates) {
+		const trimmed = value?.trim();
+		if (trimmed) {
+			return trimmed;
+		}
+	}
+	return 'shell';
 }
 
 /** The sorted pane ids of a snapshot, as one comparable string. */

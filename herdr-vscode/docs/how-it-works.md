@@ -116,6 +116,18 @@ when its session stops and when its environment goes away.
   worst status, and idle when connected with no agents. `circle-outline` is "off": a session row
   that is not running or not connected. Panes without an agent have no icon. Tile and strip dots
   follow the same colors; a shell pane, and a strip tab with no agents, has no dot.
+- **Pane names** (`paneLabel`, `src/sessions.ts`): the first non-empty, trimmed value of `agents[].name`,
+  `terminal_title_stripped`, `label`, the basename of `foreground_cwd ?? cwd`, `display_agent ?? agent`, else
+  `shell`. Measured 2026-11-02 (herdr 0.9.5): no pane had `agents[].name` or `display_agent`, every Claude pane
+  had `agent: "claude"`, `label` was missing or stale, and `terminal_title_stripped` was the current task. Agent
+  pane rows and tile headers show the folder basename after the name (omitted when equal); shell rows the full cwd.
+- **Agent marks** (`agentIcon`, `src/status.ts`): for `agent` ∈ `claude`, `copilot`, `pi`, `opencode`, a
+  `ThemeIcon('herdr-agent-<agent>')` in the status colour, from `contributes.icons` over
+  `resources/agent-icons.woff` (U+E001–U+E004, built by `scripts/build-agent-icons.sh` from the vendored Lobe
+  Icons SVGs; picosvg first, since font glyphs fill non-zero and the raw marks' holes are even-odd). Other
+  agents get the status dot, shells nothing. Pane rows, Agents rows, Active Pane's pane row and the focused-pane
+  status bar item (`$(herdr-agent-claude) <name> · <status>`) use it; session, space, tab and strip rows keep the
+  dot, since they sum up several panes.
 - **Agents** filter (`all`, `blocked`, `working`, `done`) and scope (`all`, `session`: the selected
   session) are stored in workspace state and in the context keys `herdr.agentsFilter` and
   `herdr.agentsScope`. Counts in the view description and in **Filter Agents…** are over the agents in
@@ -349,8 +361,10 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
 
 - The toolbar holds only the strip (the space's tabs, then **+**), from the left. The editor tab's
   title is the space's label, or `<session> · <space>` when herdr's session name is not `default`.
-- A tile's header is the Golden Layout tab plus two elements of ours: the status dot (none for a
-  shell) and the faded terminal title. They follow the session model with no re-layout.
+- A tile's header is the Golden Layout tab plus two elements of ours: the agent's mark (a 12×12 inline
+  `<svg class="tile-mark tile-mark-<status>">` from `src/agentMarks.ts`, the path data of devc web's
+  `AGENT_MARKS`) or, for other agents, the status dot (neither for a shell); and the faded folder
+  basename (agent panes, when it differs from the name). They follow the session model with no re-layout.
 - Golden Layout's close controls are intercepted in the capture phase: its own handlers would
   remove the tile before the user answers. The tile goes when herdr says the pane closed.
 - **New Space** and **New Tab** call `workspace.create` and `tab.create` with `focus:false`, wait for the
@@ -447,6 +461,13 @@ no tile has been focused in this window, the selected session's `focused_pane_id
 carries that: `pane.focused` (`{"pane_id","workspace_id"}`) re-takes it like any event. `pane.moved` to another
 workspace changes a pane's id, so the pin and `lastFocused` move to the new key. A followed pane that is gone,
 or whose session is not connected, shows no rows; a pin stays until **Unpin**. Pin is not persisted.
+
+The first row is the followed pane (`<pane key>|pane`, context value `herdr.paneContext.pane`, plus ` hidden` when
+no tile in this window shows it, which is when **Show Pane** is offered): its mark, name, `<space> › <tab>` and
+` · not open in a tile`; a click runs `paneClickCommand`. It is there as soon as the pane is found, before (and
+without) the directory loading. `TreeView.message` is set only when no pane is followed or found; pinning shows
+only in the title bar's pin / unpin button. A snapshot that changes only the pane row's name, status, place or
+tile state fires that row alone.
 
 ### Refreshing
 

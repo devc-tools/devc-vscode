@@ -17,23 +17,23 @@ session title); `terminal_title_stripped` was present, distinct and current on a
 (`Herdr-vscode session improvements`, `web_git_history_test.ts CI failure`, …). Tab labels were `1`, `2`, `3`.
 
 Depends on phase 26. Paths are under `herdr-vscode/` unless they start with `.plans/`.
-[herdr-commit-changes](herdr-commit-changes.md) (phase 28) builds on the pane row added here.
+[herdr-commit-changes](../herdr-commit-changes.md) (phase 28) builds on the pane row added here.
 
 ## Checklist
 
-- [ ] 1. Vendor the four marks: copy `devc-tools/devc/web/static/vendor/agent-icons/{claudecode,githubcopilot,pi,opencode}.svg`,
+- [x] 1. Vendor the four marks: copy `devc-tools/devc/web/static/vendor/agent-icons/{claudecode,githubcopilot,pi,opencode}.svg`,
       `LICENSE` and `VERSIONS` byte-for-byte into `resources/agent-icons/`
-- [ ] 2. `scripts/build-agent-icons.sh`: even-odd → non-zero paths, then an icon font; commit its output
+- [x] 2. `scripts/build-agent-icons.sh`: even-odd → non-zero paths, then an icon font; commit its output
       `resources/agent-icons.woff`; the glyph-hole check (Validation) passes
-- [ ] 3. `contributes.icons` for the four marks; `agentIcon(pane)` returning the coloured mark, the dot for other agents,
+- [x] 3. `contributes.icons` for the four marks; `agentIcon(pane)` returning the coloured mark, the dot for other agents,
       nothing for shells
-- [ ] 4. `paneLabel` order and `paneDescription` changed (Contracts); tile headers follow
-- [ ] 5. Spaces pane rows, Agents rows and the focused-pane status bar item use the mark
-- [ ] 6. Tiles webview: the tile header's dot becomes the inline-SVG mark for the four agents (`src/agentMarks.ts`)
-- [ ] 7. Active Pane: pane row first; header message only for no-pane states; Show Pane moves from the repo row
+- [x] 4. `paneLabel` order and `paneDescription` changed (Contracts); tile headers follow
+- [x] 5. Spaces pane rows, Agents rows and the focused-pane status bar item use the mark
+- [x] 6. Tiles webview: the tile header's dot becomes the inline-SVG mark for the four agents (`src/agentMarks.ts`)
+- [x] 7. Active Pane: pane row first; header message only for no-pane states; Show Pane moves from the repo row
       to the pane row
-- [ ] 8. Tests (Validation)
-- [ ] 9. README, CHANGELOG, `docs/how-it-works.md`
+- [x] 8. Tests (Validation)
+- [x] 9. README, CHANGELOG, `docs/how-it-works.md`
 
 ## Contracts
 
@@ -150,26 +150,26 @@ only that row, not the whole tree.
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run compile && npm run lint` succeed
-- [ ] Bundle on Linux with the esbuild binary in `node_modules` built for macOS:
+- [x] `cd herdr-vscode && npm run compile && npm run lint` succeed
+- [x] Bundle on Linux with the esbuild binary in `node_modules` built for macOS:
       `ESBUILD_BINARY_PATH=<linux esbuild> npm run bundle` (install `@esbuild/linux-arm64@<same version>` into a
       scratch directory; do not change `node_modules`)
-- [ ] `xvfb-run -a npx vscode-test` passes, including new tests:
-  - [ ] `paneLabel`: the order above, one case per step; whitespace-only `terminal_title_stripped` falls through;
+- [x] `xvfb-run -a npx vscode-test` passes, including new tests:
+  - [x] `paneLabel`: the order above, one case per step; whitespace-only `terminal_title_stripped` falls through;
         the 2026-11-02 measurement (`agent: claude`, title, stale label) gives the title
-  - [ ] `paneDescription`: agent → folder basename, omitted when equal to the name; shell → full path
-  - [ ] `agentIcon`: `claude` blocked → id `herdr-agent-claude`, colour `charts.orange`; `codex` → `circle-filled`;
+  - [x] `paneDescription`: agent → folder basename, omitted when equal to the name; shell → full path
+  - [x] `agentIcon`: `claude` blocked → id `herdr-agent-claude`, colour `charts.orange`; `codex` → `circle-filled`;
         shell → `undefined`
-  - [ ] `package.json` `contributes.icons` has exactly the four ids with the `fontPath` and characters above, and
+  - [x] `package.json` `contributes.icons` has exactly the four ids with the `fontPath` and characters above, and
         `resources/agent-icons.woff` exists
-  - [ ] `tileMetas`: `detail` is the folder basename, `agent` is set; strip entries unchanged
-  - [ ] Active Pane: top-level rows are pane, repo, …; pane row label, description with and without
+  - [x] `tileMetas`: `detail` is the folder basename, `agent` is set; strip entries unchanged
+  - [x] Active Pane: top-level rows are pane, repo, …; pane row label, description with and without
         `· not open in a tile`, context value with ` hidden`, click command = `paneClickCommand`; `host.message` is
         `undefined` while following and `NO_PANE_MESSAGE` with none; the repo row's context value has no ` showable`
-  - [ ] Show Pane `when` clause matches `herdr.paneContext.pane hidden` only
-  - [ ] Tiles webview probe: a `claude` tile header has a `.tile-mark` and no `.tile-dot`; a shell has neither
-- [ ] `bash scripts/build-agent-icons.sh` runs clean and the glyph-hole check passes
-- [ ] `cmp` of each vendored SVG, `LICENSE` and `VERSIONS` against the devc-tools originals reports no difference
+  - [x] Show Pane `when` clause matches `herdr.paneContext.pane hidden` only
+  - [x] Tiles webview probe: a `claude` tile header has a `.tile-mark` and no `.tile-dot`; a shell has neither
+- [x] `bash scripts/build-agent-icons.sh` runs clean and the glyph-hole check passes
+- [x] `cmp` of each vendored SVG, `LICENSE` and `VERSIONS` against the devc-tools originals reports no difference
 - [ ] Manual (left to the user, record under Implementation notes): Spaces, Agents and Active Pane show the Claude
       mark in orange / blue / green / gray with the eyes visible, in a light and a dark theme
 
@@ -197,3 +197,41 @@ only that row, not the whole tree.
 - `.plans/PLAN.md`
 
 ## Implementation notes
+
+Implemented 2026-11-02 on `herdr-vscode-active-pane`.
+
+- **Tests:** `xvfb-run -a npx vscode-test`: 296 passing, 59 pending (opt-in live suites), 0 failing (baseline 289 / 59 / 0).
+  New: `pane identity` suite in `views.test.ts` (paneDescription, agentIcon, contributes.icons + woff), the
+  2026-11-02 measurement case and whitespace / trim cases in `sessions.test.ts`, pane row / Show Pane `when` /
+  shell pane row tests in `paneContext.test.ts`; the `space panels` webview probe gained `mark` (claude tile: mark,
+  no dot; shell: neither; codex: the dot again).
+- **Live suites not run** (`HERDR_VSCODE_LIVE_*`, opt-in): `livePaneContext.test.ts` was updated to the pane row
+  (header assertions moved to the pane row's description; message `undefined` while following and pinned) but has
+  not been run against a live session.
+- **fantasticon 3.0.0 has no `--codepoints` flag** (`error: unknown option '--codepoints'`). The script passes the
+  same code points through a config file instead: `-c "$tmp/fantasticonrc.json"` with
+  `{"codepoints":{"claudecode":57345,"githubcopilot":57346,"pi":57347,"opencode":57348}}`; all other flags as
+  prescribed. The output is deterministic (two runs, identical md5 `dc23044c…`; 1568 bytes).
+- **Glyph-hole check** is `scripts/check-agent-icons.py`, run by the build script with
+  `pipx run --spec fonttools python`. It maps SVG points onto each glyph from the glyph's bounds against the SVG
+  path's bounds (so it does not assume `--normalize`'s scale) and also checks all four code points exist. All 7
+  points pass. Measured: a font built from the **raw** SVGs (no picosvg) also passes, since the Lobe paths'
+  counters are already wound opposite to their outlines; picosvg is kept as prescribed. A negative control (an
+  opencode counter wound the same way as its outline) fails the check (`FAIL U+E004 opencode (12, 12) hole`, exit 1).
+- **Tiles webview:** `TileProbe` gained `mark` (the `.tile-mark` class, '' with none). The mark is
+  rebuilt only when the agent changes; status changes only swap its class.
+- **Agents default row (deviation):** the default description was `<breadcrumb> · <state> · <terminal title>`; now
+  that the title is usually the row's name, the title is left out when it equals the label (still shown when, say,
+  `agents[].name` names the pane). Configured rows (`[ui.sidebar.agents]`) are untouched, so a config with
+  `terminal_title_stripped` repeats it, as herdr's own sidebar would.
+- **Active Pane:** the pane row is shown as soon as the pane is found, even while the view is hidden or its directory
+  has not loaded (the "hidden view" test now expects `['pane']`). `paneContextMessage(pinned)` now only gives the
+  no-pane texts; `paneRowDescription` / `paneRowContextValue` build the row. A same-pane change updates the node in
+  place and fires only it (tested: a tile opening and a title change each fire `[row]`).
+- **Shell names:** a shell pane's terminal title (often `zsh`) now comes before its folder, per the contract; in the
+  fixture the shell pane went from `test` to `zsh`, and a shell dragged onto **+** names its new tab `zsh`.
+- **Test environment:** the container lacked Electron's runtime libraries (`libglib-2.0.so.0` missing); installed
+  `libglib2.0-0t64 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libxkbfile1 libsecret-1-0 libxss1` with apt to
+  run the tests. Bundled with a Linux esbuild 0.28.2 binary from a scratch directory (`node_modules` untouched).
+- **Manual (pending, left to the user):** Spaces, Agents and Active Pane show the Claude mark in orange / blue / green /
+  gray with the eyes visible, in a light and a dark theme; tile headers show the 12×12 mark.

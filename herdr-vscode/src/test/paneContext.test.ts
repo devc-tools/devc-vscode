@@ -19,6 +19,9 @@ import {
 	paneContextItem,
 	PaneContextHost,
 	paneContextMessage,
+	paneRowContextValue,
+	paneRowDescription,
+	PaneRowNode,
 	PaneContextNode,
 	PaneContextView,
 	markedDescription,
@@ -33,6 +36,7 @@ import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TilesPanels } from '../tilesPanel';
 import { makePaneKey } from '../tilesProtocol';
+import { paneClickCommand } from '../views/spacesView';
 import { snapshot } from './fixtures';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -73,13 +77,28 @@ suite('pane context: rules', () => {
 		assert.strictEqual(followedPaneKey({ herdrFocused: 'w1:p1' }), undefined);
 	});
 
-	test('the header', () => {
-		const pane = { label: 'api-fixer', space: 'api', tab: 'main', shown: true };
-		assert.strictEqual(paneContextMessage(pane, false), 'api-fixer · api › main');
-		assert.strictEqual(paneContextMessage(pane, true), 'api-fixer · api › main · pinned');
-		assert.strictEqual(paneContextMessage({ ...pane, shown: false }, false), 'api-fixer · api › main · not open in a tile');
-		assert.strictEqual(paneContextMessage({ ...pane, shown: false }, true), 'api-fixer · api › main · pinned · not open in a tile');
-		assert.strictEqual(paneContextMessage(undefined, false), 'Click into a herdr pane to see its files.');
+	test('the header, only with no pane', () => {
+		assert.strictEqual(paneContextMessage(false), 'Click into a herdr pane to see its files.');
+		assert.strictEqual(paneContextMessage(true), 'The pinned pane is not available. Unpin to follow panes again.');
+	});
+
+	test('the pane row description and context value', () => {
+		assert.strictEqual(paneRowDescription('api', 'main', true), 'api › main');
+		assert.strictEqual(paneRowDescription('api', 'main', false), 'api › main · not open in a tile');
+		assert.strictEqual(paneRowContextValue({ shown: true }), 'herdr.paneContext.pane');
+		assert.strictEqual(paneRowContextValue({ shown: false }), 'herdr.paneContext.pane hidden');
+	});
+
+	test('Show Pane applies to a hidden pane row only', () => {
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
+		const menus = ext.packageJSON.contributes.menus['view/item/context'] as { command: string; when: string }[];
+		const when = menus.find((m) => m.command === 'herdr.paneContext.showPane')!.when;
+		assert.strictEqual(when, "view == herdr.paneContext && viewItem == 'herdr.paneContext.pane hidden'");
+		// The clause's viewItem value, as VS Code compares it: the whole context value.
+		const value = /viewItem == '([^']*)'/.exec(when)![1];
+		assert.strictEqual(value, paneRowContextValue({ shown: false }));
+		assert.notStrictEqual(value, paneRowContextValue({ shown: true }));
+		assert.notStrictEqual(value, rootContextValue({ canAdd: true, scm: true, terminal: true }));
 	});
 
 	test('the Repo row description', () => {
@@ -116,25 +135,23 @@ suite('pane context: rules', () => {
 	});
 
 	test('the Repo row offers what applies', () => {
-		assert.strictEqual(rootContextValue({ canAdd: false, showable: false }), 'herdr.paneContext.root');
-		assert.strictEqual(rootContextValue({ canAdd: true, showable: true }), 'herdr.paneContext.root addable showable');
+		assert.strictEqual(rootContextValue({ canAdd: false }), 'herdr.paneContext.root');
+		assert.strictEqual(rootContextValue({ canAdd: true }), 'herdr.paneContext.root addable');
 		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
 		const whens = new Map((ext.packageJSON.contributes.menus['view/item/context'] as { command: string; when: string }[]).map((m) => [m.command, m.when]));
 		const applies = (command: string, value: string) => new RegExp(/viewItem =~ \/(.*)\//.exec(whens.get(command)!)![1]).test(value);
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable'));
-		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable showable'));
-		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root showable'));
-		assert.ok(applies('herdr.paneContext.showPane', 'herdr.paneContext.root addable showable'));
-		assert.ok(applies('herdr.paneContext.showPane', 'herdr.paneContext.root showable'));
-		assert.ok(!applies('herdr.paneContext.showPane', 'herdr.paneContext.root addable'));
+		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable scm'));
+		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root scm'));
+		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.pane hidden'));
 		assert.ok(applies('herdr.paneContext.splitPane', 'herdr.paneContext.root'));
 
 		// Open in Source Control on a file: repo; Terminal Here on this machine.
-		assert.strictEqual(rootContextValue({ canAdd: true, showable: false, scm: true, terminal: true }), 'herdr.paneContext.root addable scm terminal');
-		assert.strictEqual(rootContextValue({ canAdd: false, showable: true, scm: false, terminal: true }), 'herdr.paneContext.root showable terminal');
+		assert.strictEqual(rootContextValue({ canAdd: true, scm: true, terminal: true }), 'herdr.paneContext.root addable scm terminal');
+		assert.strictEqual(rootContextValue({ canAdd: false, scm: false, terminal: true }), 'herdr.paneContext.root terminal');
 		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root addable scm terminal'));
 		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root scm'));
-		assert.ok(!applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root showable terminal'));
+		assert.ok(!applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root terminal'));
 		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root scm terminal'));
 		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root terminal'));
 		assert.ok(!applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root addable scm'));
@@ -303,7 +320,8 @@ suite('pane context: the view over a temp repo', function () {
 	}
 
 	const roots = () => view.getChildren();
-	const rootRow = async () => (await roots())[0] as RootNode;
+	const rootRow = async () => (await roots()).find((n) => n.type === 'root') as RootNode;
+	const paneRow = async () => (await roots()).find((n) => n.type === 'pane') as PaneRowNode | undefined;
 	const group = async (name: GroupNode['group']) => (await roots()).find((n) => n.type === 'group' && n.group === name) as GroupNode | undefined;
 	const labels = (nodes: PaneContextNode[]) => nodes.map((n) => (n.type === 'entry' ? n.name : (n as RootNode).label));
 	const rootIs = (name: string) => waitFor(`root ${name}`, async () => (await rootRow())?.label === name);
@@ -359,11 +377,11 @@ suite('pane context: the view over a temp repo', function () {
 
 	test("the repo, branch, changes and tree of herdr's focused pane", async () => {
 		view = makeView();
-		assert.strictEqual(host.message, 'api-fixer · api › main · not open in a tile');
+		assert.strictEqual(host.message, undefined, 'no header while a pane is followed');
 		await rootIs(path.basename(dir));
 		const root = await rootRow();
 		assert.strictEqual(root.description, '⎇ main · ● 4');
-		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable showable scm terminal');
+		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable scm terminal');
 		assert.deepStrictEqual((paneContextItem(root).iconPath as vscode.ThemeIcon).id, 'repo');
 
 		const changes = (await view.getChildren(await group('changes'))) as ChangeNode[];
@@ -405,6 +423,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual((readme.resourceUri as vscode.Uri).fsPath, path.join(dir, 'README.md'));
 		assert.strictEqual(readme.command?.command, 'vscode.open');
 
+		assert.deepStrictEqual((await roots()).slice(0, 2).map((n) => n.type), ['pane', 'root'], 'the pane row first, then the repo');
 		const top = (await view.getChildren()).filter((n): n is GroupNode => n.type === 'group');
 		assert.deepStrictEqual(top.map((g) => g.label), ['Changed in This Pane', 'All Changes', 'Files'], 'no Other Panes');
 		assert.strictEqual(paneContextItem((await group('files'))!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
@@ -452,7 +471,7 @@ suite('pane context: the view over a temp repo', function () {
 		// Pinned: another tile does not move it, until Unpin.
 		view.pin();
 		assert.ok(view.pinned);
-		assert.match(String(host.message), / · pinned/);
+		assert.strictEqual(host.message, undefined, 'pinned shows in the title bar only');
 		focus.set(S, 'w2:p2');
 		await sleep(50);
 		assert.strictEqual(view.followed, makePaneKey(S, 'w2:p1'));
@@ -500,14 +519,49 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(host.message, NO_PANE_MESSAGE);
 	});
 
-	test('a tile showing it changes the header and the Show Pane offer', async () => {
+	test('the pane row: name, place, icon, click; a tile showing it drops the note and Show Pane', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
-		assert.ok((await rootRow()).showable);
+		const row = (await paneRow())!;
+		assert.strictEqual(row.id, `${makePaneKey(S, 'w2:p1')}|pane`);
+		assert.strictEqual(row.label, 'api-fixer');
+		assert.strictEqual(row.description, 'api › main · not open in a tile');
+		const item = paneContextItem(row);
+		assert.strictEqual(item.contextValue, 'herdr.paneContext.pane hidden');
+		assert.deepStrictEqual(item.command, paneClickCommand({ sessionKey: S, paneId: 'w2:p1' }));
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'herdr-agent-claude');
+		assert.strictEqual(((item.iconPath as vscode.ThemeIcon).color as vscode.ThemeColor).id, 'charts.blue');
+		assert.match(String(item.tooltip), /^claude · working/);
+		assert.ok(!paneContextItem(await rootRow()).contextValue?.includes('showable'));
+
+		const fires: unknown[] = [];
+		const listener = view.onDidChangeTreeData((e) => fires.push(e));
 		shown.add(makePaneKey(S, 'w2:p1'));
 		tiles.fire();
-		assert.strictEqual(host.message, 'api-fixer · api › main');
-		assert.ok(!(await rootRow()).showable);
+		assert.strictEqual(host.message, undefined);
+		assert.strictEqual((await paneRow())!.description, 'api › main');
+		assert.strictEqual(paneContextItem((await paneRow())!).contextValue, 'herdr.paneContext.pane');
+		assert.deepStrictEqual(fires, [row], 'only the pane row refreshes');
+
+		// A new title (the snapshot changes) refreshes that row alone, too.
+		fires.length = 0;
+		const renamed = twoPanes(dir, other);
+		renamed.agentNames.clear();
+		renamed.panes[0].terminal_title_stripped = 'Fixing the API';
+		model.snapshots.set(S, renamed);
+		model.changed.fire();
+		assert.strictEqual((await paneRow())!.label, 'Fixing the API');
+		assert.deepStrictEqual(fires, [row]);
+		listener.dispose();
+	});
+
+	test('a shell pane row: terminal icon, the pane id as tooltip', async () => {
+		model.snapshots.set(S, twoPanes(dir, other, 'w2:p2'));
+		view = makeView();
+		await rootIs(path.basename(other));
+		const item = paneContextItem((await paneRow())!);
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'terminal');
+		assert.strictEqual(item.tooltip, 'w2:p2');
 	});
 
 
@@ -545,9 +599,9 @@ suite('pane context: the view over a temp repo', function () {
 		host.visibleNow = false;
 		view = makeView();
 		await sleep(100);
-		assert.deepStrictEqual(await roots(), []);
+		assert.deepStrictEqual((await roots()).map((n) => n.type), ['pane'], 'the pane row does not wait');
 		assert.deepStrictEqual(model.requests, []);
-		assert.strictEqual(host.message, 'api-fixer · api › main · not open in a tile', 'the header does not wait');
+		assert.strictEqual(host.message, undefined);
 		host.visibleNow = true;
 		host.fireVisibility();
 		await rootIs(path.basename(dir));
@@ -623,7 +677,7 @@ suite('pane context: the view over a temp repo', function () {
 		const top = await roots();
 		assert.deepStrictEqual(
 			top.map((n) => (n.type === 'group' ? n.label : n.type)),
-			['root', 'Changed in This Pane', 'All Changes', 'Files'],
+			['pane', 'root', 'Changed in This Pane', 'All Changes', 'Files'],
 		);
 		const since = (await group('since'))!;
 		assert.strictEqual(since.description, 'since 10:31');
@@ -648,7 +702,7 @@ suite('pane context: the view over a temp repo', function () {
 		model.snapshots.set(S, twoPanes(other, dir));
 		view = makeView();
 		await rootIs(path.basename(other));
-		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['root', 'Files']);
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['pane', 'root', 'Files']);
 		assert.strictEqual(decorated[decorated.length - 1], undefined, 'no markers outside a repo');
 	});
 
@@ -888,7 +942,7 @@ suite('pane context: the view over a temp repo', function () {
 		await vscode.commands.executeCommand('herdr.paneContext.focus');
 		await waitFor('visible', () => real?.visible);
 		await rootIs(path.basename(dir));
-		assert.strictEqual(real!.message, 'api-fixer · api › main');
+		assert.strictEqual(real!.message, undefined);
 		await view.revealDirectory(path.join(dir, 'src', 'deep'));
 		await waitFor('selected', () => (real!.selection[0] as EntryNode | undefined)?.name === 'deep');
 	});

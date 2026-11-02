@@ -17,7 +17,7 @@ files; that limitation is documented, not solved. Phase 20 rejected snapshotting
 "would snapshot every pane of every session"; that was for polling a moving baseline. Here it is two snapshots per
 working span, each a stat-only `git add -A` into a copied index, which is cheap enough.
 
-Depends on phases 20 and 27 ([herdr-pane-identity](herdr-pane-identity.md): the pane row sits above these sections).
+Depends on phases 20 and 27 ([herdr-pane-identity](archived/herdr-pane-identity.md): the pane row sits above these sections).
 Paths are under `herdr-vscode/` unless they start with `.plans/`.
 
 ## Checklist

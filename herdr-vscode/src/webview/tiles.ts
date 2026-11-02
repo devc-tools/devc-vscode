@@ -4,6 +4,7 @@ import { ComponentContainer, ComponentItem, ContentItem, GoldenLayout, JsonValue
 import 'golden-layout/dist/css/goldenlayout-base.css';
 import '@xterm/xterm/css/xterm.css';
 import './tiles.css';
+import { agentMarkPaths } from '../agentMarks';
 import { componentStates, PaneComponentState, SPLIT_ID_PREFIX, StoredLayoutConfig } from '../layoutMapping';
 import { changedRatios, dropZone, DropZone, offeredZone, sameRatio } from '../mirrorEdit';
 import { HostMessage, makePaneKey, ProbeAction, StripTab, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
@@ -846,7 +847,7 @@ function applyTileMeta(paneKey: string): void {
 	if (!tab) {
 		return;
 	}
-	setDot(tab, meta.status, (dot) => tab.prepend(dot));
+	setMark(tab, meta);
 	let detail = tab.querySelector<HTMLElement>('.tile-detail');
 	if (!detail) {
 		detail = document.createElement('span');
@@ -855,6 +856,42 @@ function applyTileMeta(paneKey: string): void {
 	}
 	detail.textContent = meta.detail ?? '';
 	detail.hidden = !meta.detail;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * A tile tab's icon: its agent's mark, coloured by status, for the agents
+ * with one; the status dot for any other agent; nothing for a shell.
+ */
+function setMark(tab: HTMLElement, meta: TileMeta): void {
+	const paths = meta.status === 'shell' ? undefined : agentMarkPaths(meta.agent);
+	let mark = tab.querySelector<SVGSVGElement>(':scope > .tile-mark');
+	if (!paths) {
+		mark?.remove();
+		setDot(tab, meta.status, (dot) => tab.prepend(dot));
+		return;
+	}
+	tab.querySelector(':scope > .tile-dot')?.remove();
+	if (!mark || mark.dataset.agent !== meta.agent) {
+		mark?.remove();
+		mark = document.createElementNS(SVG_NS, 'svg');
+		mark.setAttribute('viewBox', '0 0 24 24');
+		mark.setAttribute('width', '12');
+		mark.setAttribute('height', '12');
+		mark.setAttribute('fill', 'currentColor');
+		mark.setAttribute('fill-rule', 'evenodd');
+		mark.setAttribute('aria-hidden', 'true');
+		mark.dataset.agent = meta.agent;
+		for (const d of paths) {
+			const path = document.createElementNS(SVG_NS, 'path');
+			path.setAttribute('d', d);
+			path.setAttribute('clip-rule', 'evenodd');
+			mark.append(path);
+		}
+		tab.prepend(mark);
+	}
+	mark.setAttribute('class', `tile-mark tile-mark-${meta.status}`);
 }
 
 /** A tab's (or strip entry's) status dot; a shell has none. */
@@ -894,6 +931,7 @@ function probeTile(tile: Tile): TileProbe {
 		overlay: tile.overlay.hidden ? '' : (tile.overlay.textContent ?? ''),
 		overLink: tile.termEl.querySelector('.xterm-cursor-pointer') !== null,
 		dot: tabs.get(tile.paneKey)?.querySelector(':scope > .tile-dot')?.className ?? '',
+		mark: tabs.get(tile.paneKey)?.querySelector(':scope > .tile-mark')?.getAttribute('class') ?? '',
 		context: tile.host.dataset.vscodeContext ?? '',
 	};
 }

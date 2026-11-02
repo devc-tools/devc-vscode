@@ -9,7 +9,7 @@ import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
 import { GitHeadContentProvider, parseGitHeadUri } from '../git';
-import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, RootNode, SinceNode } from '../paneContext';
+import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, PaneRowNode, RootNode, SinceNode } from '../paneContext';
 import { EnvironmentPaths } from '../paths';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
@@ -66,7 +66,8 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 
 	const git = (...args: string[]) => cp.execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
 	const roots = () => view.getChildren();
-	const rootRow = async () => (await roots())[0] as RootNode | undefined;
+	const rootRow = async () => (await roots()).find((n) => n.type === 'root') as RootNode | undefined;
+	const paneRow = async () => (await roots()).find((n) => n.type === 'pane') as PaneRowNode | undefined;
 	const group = async (name: GroupNode['group']) => (await roots()).find((n) => n.type === 'group' && n.group === name) as GroupNode | undefined;
 	const rootIs = (name: string, ms = 8000) => waitFor(`root ${name}`, ms, async () => (await rootRow())?.label === name);
 	const tileOf = async (id: string): Promise<TileProbe | undefined> => (await panel.probe()).tiles.find((t) => t.paneKey === pk(id));
@@ -145,10 +146,11 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		fs.rmSync(path.join(LIVE_HOME!, 'hv-link.txt'), { force: true });
 	});
 
-	test("before any tile: follows herdr's focus (pane.focused), with the header saying no tile", async () => {
+	test("before any tile: follows herdr's focus (pane.focused), with the pane row saying no tile", async () => {
 		await waitFor('p1 followed', 5000, () => view.followed === pk(p1));
 		await rootIs(path.basename(repo));
-		assert.match(String(tree.message), /· ctx › .* · not open in a tile$/);
+		assert.strictEqual(tree.message, undefined);
+		assert.match(String((await paneRow())?.description), /^ctx › .* · not open in a tile$/);
 
 		const start = Date.now();
 		await req('pane.focus', { pane_id: p2 });
@@ -183,10 +185,10 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	});
 
 	// `Show Pane` runs the extension's own command, whose model discovers nothing here: so what it runs.
-	test('a tile opening ends rule 2 and the header note', async () => {
+	test('a tile opening ends rule 2 and the pane row note', async () => {
 		panel = panels.openPaneTab(key, p1)!;
 		await waitFor('p1 painted', 15000, async () => (await tileOf(p1))?.text.length);
-		await waitFor('the header note gone', 5000, () => !String(tree.message).includes('not open in a tile'));
+		await waitFor('the pane row note gone', 5000, async () => !String((await paneRow())?.description).includes('not open in a tile'));
 		await waitFor('p1 is the last focused', 5000, () => focus.lastFocused === pk(p1));
 
 		await req('pane.focus', { pane_id: p2 });
@@ -201,7 +203,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await waitFor('p2 last focused', 15000, () => focus.lastFocused === pk(p2));
 		await rootIs(path.basename(plain));
 		view.pin();
-		assert.match(String(tree.message), / · pinned/);
+		assert.strictEqual(tree.message, undefined, 'pinned shows in the title bar only');
 		panels.openPaneTab(key, p1);
 		await waitFor('p1 last focused', 15000, () => focus.lastFocused === pk(p1));
 		await sleep(300);
@@ -345,7 +347,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 			assert.notStrictEqual(moved.pane_id, p1);
 			await waitFor('the new key', 5000, () => view.followed === pk(moved.pane_id));
 			assert.strictEqual(focus.lastFocused, pk(moved.pane_id));
-			await waitFor('the header', 5000, () => String(tree.message).includes('moved-ctx'));
+			await waitFor('the pane row', 5000, async () => String((await paneRow())?.description).includes('moved-ctx'));
 			await rootIs(path.basename(repo));
 			view.unpin();
 			await req('workspace.close', { workspace_id: moved.workspace_id });

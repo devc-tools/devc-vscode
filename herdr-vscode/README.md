@@ -11,6 +11,13 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
   panes have no dot.
+
+  **Pane names and agent marks.** A pane is named by what it is working on: its herdr agent name if it has
+  one, else its terminal title (Claude Code keeps that set to the current task), else its herdr label, its
+  folder, and only then its agent kind (`claude`). Where one pane is shown (pane rows in Spaces, Agents rows,
+  Active Pane, tile headers and the focused-pane status bar item) Claude Code, GitHub Copilot, pi and
+  OpenCode panes show their agent's mark, coloured like the status dot, instead of the dot; other agents
+  keep the dot. Agent pane rows and tile headers show the pane's folder after the name.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
   their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or
@@ -98,8 +105,11 @@ move herdr's own focus; **Focus in herdr TUI** on a pane row does.
 The **Active Pane** view shows the repo, changes and file tree of the pane you last clicked into, so
 VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
 herdr's own focus in the selected session; after that only tiles count. Clicking into a file editor or
-another view changes nothing, and **Pin** stops it following. The header says which pane it is, and when
-no tile in this window shows it, which **Show Pane** on the repo row fixes.
+another view changes nothing, and **Pin** stops it following.
+
+- **Pane row:** the pane itself, first: its mark, name and `<space> › <tab>`, plus ` · not open in a tile` when
+  no tile in this window shows it. Click it (or its **Show Pane** action, there while it is not open) to open its
+  space on its tab and focus its tile.
 
 - **Repo row:** the repo (or directory, outside a repo), branch, changed count, ahead and behind.
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
@@ -256,6 +266,12 @@ npm run lint
 npm test           # .npmrc sets ignore-scripts, so pretest does not run: build first
 npm run package:dev   # build a .vsix and install it into `code`
 ```
+
+The agent marks are Lobe Icons' monochrome SVGs (MIT, see `resources/agent-icons/LICENSE` and `VERSIONS`),
+vendored unmodified from devc web. `resources/agent-icons.woff` is built from them and committed;
+`bash scripts/build-agent-icons.sh` rebuilds it (needs `pipx` and network: picosvg turns the marks' even-odd
+holes into non-zero outlines, fantasticon builds the font at U+E001–U+E004, and a fontTools check fails the
+script if a hole such as the Claude mark's eyes is filled). It is not part of `npm run build`.
 
 `npm test` never discovers the machine's herdr sessions (`.vscode-test.mjs` sets
 `HERDR_VSCODE_NO_DISCOVERY=1`). `src/test/spacePanels.test.ts` and `mirrorPanels.test.ts` open real webviews

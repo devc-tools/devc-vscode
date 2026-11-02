@@ -263,6 +263,26 @@ body {
 	background: var(--vscode-charts-green);
 }
 
+/* An agent's mark in place of the dot, the dot's colour for the status. */
+.tile-mark {
+	flex: none;
+	width: 12px;
+	height: 12px;
+	color: var(--vscode-disabledForeground);
+}
+
+.tile-mark-blocked {
+	color: var(--vscode-charts-orange);
+}
+
+.tile-mark-working {
+	color: var(--vscode-charts-blue);
+}
+
+.tile-mark-done {
+	color: var(--vscode-charts-green);
+}
+
 .tile-detail {
 	min-width: 0;
 	overflow: hidden;

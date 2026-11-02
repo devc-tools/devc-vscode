@@ -4,6 +4,17 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Panes are named by their task**: the terminal title (which Claude Code keeps set to the current task) comes
+  before herdr's label, the folder and the agent kind, so three Claude panes no longer all read `claude`. Agent
+  pane rows and tile headers show the folder after the name (was the terminal title); the Agents view no longer
+  repeats the title when it is the name.
+- **Agent marks**: Claude Code, GitHub Copilot, pi and OpenCode panes show their agent's mark (devc web's Lobe
+  Icons), coloured by status, instead of the status dot on Spaces pane rows, Agents rows, Active Pane, tile
+  headers and the focused-pane status bar item. Other agents keep the dot; tab strips and session, space and
+  tab rows keep theirs.
+- **Active Pane** starts with a row for the pane: its mark, name and `<space> › <tab>`, plus `· not open in a
+  tile`. Clicking it opens the pane's tile; **Show Pane** moved there from the repo row. The header text is gone
+  except when no pane is followed.
 - **Pane Context is now Active Pane**, and its **Other Panes in This Space** section is gone.
 - Clicking a file under **Changed in This Pane** or **All Changes** opens its diff; the row's **Open File** action
   opens the file itself (these were the other way round).

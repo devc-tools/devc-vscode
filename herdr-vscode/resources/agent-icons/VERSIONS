@@ -1,0 +1,9 @@
+@lobehub/icons-static-svg 1.95.1 (Lobe Icons, MIT: see LICENSE)
+Monochrome (currentColor) files, unmodified, from
+https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/<name>.svg:
+  claudecode.svg     Claude Code
+  githubcopilot.svg  GitHub Copilot
+  pi.svg             pi
+  opencode.svg       OpenCode
+The logos are trademarks of their respective owners; they are used here only to label which
+agent a terminal runs.

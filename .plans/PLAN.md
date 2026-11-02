@@ -36,14 +36,13 @@
 
 - [herdr Space Tab Cleanup](herdr-space-tab-cleanup.md) — Layout tabs removed; space tabs are the only tile view, with edge / strip / + drops building herdr's layout; tile right-click menu replaces the toolbar buttons; no breadcrumb; gray idle dots, no shell icon; row clicks open the pane's space tab.
 
-- [herdr Pane Identity](herdr-pane-identity.md) — panes named by their task (terminal title) instead of `claude`; devc web's agent marks, coloured by status, as the icon on pane rows, tile headers and the status bar; Active Pane gets a pane row that opens the pane's tile.
-
 - [herdr Commit Changes](herdr-commit-changes.md) — Active Pane's baseline section replaced by Uncommitted plus expandable Commits (vs the default branch, else recent), with a toggle to show only files this pane's agent changed while working.
 
 - [herdr SSH](herdr-ssh.md) — live checks and fixes for SSH hosts across every herdr-vscode feature, plus Start / Stop on SSH sessions. Blocked until a reachable SSH host with herdr is available.
 
 ### Completed
 
+- [herdr Pane Identity](archived/herdr-pane-identity.md) — panes named by their task (terminal title) instead of `claude`; devc web's agent marks, coloured by status, as the icon on pane rows, tile headers and the status bar; Active Pane gets a pane row that opens the pane's tile. ✅ Done (manual visual checks of the marks in light / dark themes pending; live suites not run)
 - [herdr Sidebar](implemented/herdr-sidebar.md) — herdr-vscode's Sessions (host, SSH, dev containers), Spaces (selected session's spaces → tabs → panes) and Agents (all sessions, blocked first, badge) views over `herdr remote-api-bridge`. ✅ Done (SSH not tested live, deferred)
 - [herdr-vscode Scaffold](implemented/herdr-vscode-scaffold.md) — devc-vscode moves into `devc-vscode/` and a self-contained `herdr-vscode/` extension folder (own package.json, lockfile, build, tests, `.vscode/`) sits beside it; no monorepo tooling. ✅ Done
 - [Workspace Folders View](implemented/workspace-repos-view.md) — an Explorer view of pinned folders and Git repos with their worktrees, the window's first folder pinned automatically, each with a checkbox; Apply makes the ticked ones workspace folders and Source Control follows. ✅ Done (in-VS Code checks left to the user)
@@ -84,5 +83,5 @@
 | 24 | [herdr-ssh.md](herdr-ssh.md) | SSH hosts verified live and fixed; SSH session Start / Stop (blocked on a reachable host) | |
 | 25 | [herdr-space-tabs.md](herdr-space-tabs.md) | Editor tab = herdr space: active tab's tiles, two-way tab strip with create / close / rename (depends on phases 15 and 22) | implemented, manual checks pending |
 | 26 | [herdr-space-tab-cleanup.md](herdr-space-tab-cleanup.md) | Remove Layout tabs; drag-built herdr layouts, tile context menu, toolbar / title / status-dot cleanup (depends on phases 22 and 25) | implemented, manual checks pending |
-| 27 | [herdr-pane-identity.md](herdr-pane-identity.md) | Task-title pane names, agent marks as icons, Active Pane pane row (depends on phase 26) | |
+| 27 | [herdr-pane-identity.md](archived/herdr-pane-identity.md) | Task-title pane names, agent marks as icons, Active Pane pane row (depends on phase 26) | complete |
 | 28 | [herdr-commit-changes.md](herdr-commit-changes.md) | Active Pane: Uncommitted + per-commit changes, this-pane filter; baseline section removed (depends on phases 20 and 27) | |

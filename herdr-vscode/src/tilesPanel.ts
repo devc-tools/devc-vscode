@@ -3,7 +3,7 @@ import { BridgeError, HerdrEvent } from './bridge';
 import { FocusTracker } from './focus';
 import { LayoutExport, layoutPaneIds, mirrorConfig, parseLayoutExport, ratiosByPath, StoredLayoutConfig, structureKey } from './layoutMapping';
 import { changedRatios, clampRatio, dropRequests, herdrPath, HerdrRequest, refusal, sameRatio, stripDropRequest, zoomedAfter, zoomRequests } from './mirrorEdit';
-import { hasAgent, paneLabel, SessionModel, Snapshot } from './sessions';
+import { hasAgent, paneFolder, paneLabel, SessionModel, Snapshot } from './sessions';
 import { worstStatus } from './status';
 import { PaneFrame, PaneStreams, PaneViewer } from './streams';
 import {
@@ -88,12 +88,20 @@ export function stripTabs(snapshot: Snapshot, workspaceId: string, shown: string
 export function tileMetas(snapshot: Snapshot, sessionKey: string, tabId: string): TileMeta[] {
 	return snapshot.panes
 		.filter((p) => p.tab_id === tabId)
-		.map((p) => ({
-			paneKey: makePaneKey(sessionKey, p.pane_id),
-			label: paneLabel(p, snapshot),
-			detail: hasAgent(p) ? p.terminal_title_stripped : undefined,
-			status: hasAgent(p) ? p.agent_status : 'shell',
-		}));
+		.map((p): TileMeta => {
+			const label = paneLabel(p, snapshot);
+			const folder = hasAgent(p) ? paneFolder(p) : undefined;
+			const meta: TileMeta = {
+				paneKey: makePaneKey(sessionKey, p.pane_id),
+				label,
+				detail: folder !== label ? folder : undefined,
+				status: hasAgent(p) ? p.agent_status : 'shell',
+			};
+			if (p.agent !== undefined) {
+				meta.agent = p.agent;
+			}
+			return meta;
+		});
 }
 
 function panelHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
