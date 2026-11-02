@@ -283,7 +283,8 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			return item;
 		}
 		case 'group': {
-			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+			const collapsed = node.group === 'commits';
+			const item = new vscode.TreeItem(node.label, collapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
 			item.id = node.id;
 			item.description = node.description;
 			item.contextValue = `herdr.paneContext.${node.group}`;

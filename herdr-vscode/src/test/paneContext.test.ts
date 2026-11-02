@@ -756,6 +756,7 @@ suite('pane context: the view over a temp repo', function () {
 		const commits = (await group('commits'))!;
 		assert.strictEqual(commits.description, 'recent', 'on main itself');
 		assert.strictEqual(paneContextItem(commits).contextValue, 'herdr.paneContext.commits');
+		assert.strictEqual(paneContextItem(commits).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 		assert.ok(!top.some((n) => n.type === 'group' && n.label === 'Changed in This Pane'));
 		const last = decorated[decorated.length - 1]!;
 		assert.deepStrictEqual(Object.keys(last).sort(), ['status', 'untrackedDirs'], 'no since-markers');

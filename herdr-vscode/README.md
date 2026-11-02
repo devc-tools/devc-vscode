@@ -119,7 +119,7 @@ another view changes nothing, and **Pin** stops it following.
   **Split Pane Here** makes a herdr pane below, in that folder.
 - **Uncommitted:** the repo's whole `git status`. Click for a `HEAD ↔ working tree` diff;
   **Open File** opens the file as it is now.
-- **Commits · vs origin/main:** the commits on your branch since it left the default branch (`origin/HEAD`, else
+- **Commits · vs origin/main** (collapsed): the commits on your branch since it left the default branch (`origin/HEAD`, else
   `main` or `master`), or the 20 most recent (`recent`) on the default branch itself. Expand a commit for its files
   (`A`, `M`, `D` against its first parent); click one for its diff in that commit, and **Open File** for the file as
   it is now (or as the commit has it, when it is gone).
