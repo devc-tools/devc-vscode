@@ -860,12 +860,17 @@ function applyTileMeta(paneKey: string): void {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/** A shell's terminal glyph (`>_`), stroked in a 24×24 box. */
+const TERMINAL_PATHS = ['M4 7l5 5-5 5', 'M12 18h8'];
+
 /**
  * A tile tab's icon: its agent's mark, coloured by status, for the agents
- * with one; the status dot for any other agent; nothing for a shell.
+ * with one; the status dot for any other agent; a terminal glyph for a shell.
  */
 function setMark(tab: HTMLElement, meta: TileMeta): void {
-	const paths = meta.status === 'shell' ? undefined : agentMarkPaths(meta.agent);
+	const shell = meta.status === 'shell';
+	const paths = shell ? TERMINAL_PATHS : agentMarkPaths(meta.agent);
+	const kind = shell ? 'shell' : meta.agent;
 	let mark = tab.querySelector<SVGSVGElement>(':scope > .tile-mark');
 	if (!paths) {
 		mark?.remove();
@@ -873,20 +878,30 @@ function setMark(tab: HTMLElement, meta: TileMeta): void {
 		return;
 	}
 	tab.querySelector(':scope > .tile-dot')?.remove();
-	if (!mark || mark.dataset.agent !== meta.agent) {
+	if (!mark || mark.dataset.agent !== kind) {
 		mark?.remove();
 		mark = document.createElementNS(SVG_NS, 'svg');
 		mark.setAttribute('viewBox', '0 0 24 24');
 		mark.setAttribute('width', '12');
 		mark.setAttribute('height', '12');
-		mark.setAttribute('fill', 'currentColor');
-		mark.setAttribute('fill-rule', 'evenodd');
+		if (shell) {
+			mark.setAttribute('fill', 'none');
+			mark.setAttribute('stroke', 'currentColor');
+			mark.setAttribute('stroke-width', '2.5');
+			mark.setAttribute('stroke-linecap', 'round');
+			mark.setAttribute('stroke-linejoin', 'round');
+		} else {
+			mark.setAttribute('fill', 'currentColor');
+			mark.setAttribute('fill-rule', 'evenodd');
+		}
 		mark.setAttribute('aria-hidden', 'true');
-		mark.dataset.agent = meta.agent;
+		mark.dataset.agent = kind;
 		for (const d of paths) {
 			const path = document.createElementNS(SVG_NS, 'path');
 			path.setAttribute('d', d);
-			path.setAttribute('clip-rule', 'evenodd');
+			if (!shell) {
+				path.setAttribute('clip-rule', 'evenodd');
+			}
 			mark.append(path);
 		}
 		tab.prepend(mark);

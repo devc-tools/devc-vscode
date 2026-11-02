@@ -18,7 +18,7 @@ export function focusedPaneStatus(
 	}
 	const space = snapshot.workspaces.find((w) => w.workspace_id === pane.workspace_id);
 	const tab = snapshot.tabs.find((t) => t.tab_id === pane.tab_id);
-	const icon = hasAgentMark(pane.agent) ? `herdr-agent-${pane.agent}` : 'circle-filled';
+	const icon = !hasAgent(pane) ? 'terminal' : hasAgentMark(pane.agent) ? `herdr-agent-${pane.agent}` : 'circle-filled';
 	return {
 		text: `$(${icon}) ${paneLabel(pane, snapshot)} · ${hasAgent(pane) ? pane.agent_status : 'shell'}`,
 		tooltip: `${rowLabel} › ${space?.label ?? pane.workspace_id} › ${tab?.label ?? pane.tab_id}`,

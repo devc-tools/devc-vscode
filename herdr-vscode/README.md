@@ -10,7 +10,7 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
 
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
-  panes have no dot.
+  panes have a terminal icon instead of a dot.
 
   **Pane names and agent marks.** A pane is named by what it is working on: its herdr agent name if it has
   one, else its terminal title (Claude Code keeps that set to the current task), else its herdr label, its

@@ -95,7 +95,9 @@ suite('pane identity', () => {
 		const codex = agentIcon(base({ agent: 'codex', agent_status: 'blocked' }))!;
 		assert.strictEqual(codex.id, 'circle-filled');
 		assert.strictEqual((codex.color as vscode.ThemeColor).id, 'charts.orange');
-		assert.strictEqual(agentIcon(base({})), undefined);
+		const shell = agentIcon(base({}));
+		assert.strictEqual(shell.id, 'terminal');
+		assert.strictEqual(shell.color, undefined, 'a shell: the terminal icon, uncoloured');
 	});
 
 	test('contributes.icons: exactly the four marks, from the bundled font', () => {
@@ -148,7 +150,7 @@ suite('Spaces items', () => {
 		const shellItem = spacesTreeItem(shellPane);
 		assert.strictEqual(shellItem.description, '/src/api/test', 'foreground_cwd before cwd');
 		assert.strictEqual(shellItem.contextValue, 'herdr.pane.shell');
-		assert.strictEqual(shellItem.iconPath, undefined, 'a shell has no icon');
+		assert.strictEqual((shellItem.iconPath as vscode.ThemeIcon).id, 'terminal', 'a shell: the terminal icon');
 
 		const codex = spaces[0].children[0].children[0];
 		assert.strictEqual(codex.label, 'web', 'the folder before the agent kind');
@@ -587,7 +589,7 @@ suite('Sessions rows', () => {
 			text: '$(herdr-agent-claude) api-fixer · working',
 			tooltip: 'my-session › api › main',
 		});
-		assert.strictEqual(focusedPaneStatus(s, 'w2:p2', 'r')?.text, '$(circle-filled) zsh · shell', 'a shell: unchanged');
+		assert.strictEqual(focusedPaneStatus(s, 'w2:p2', 'r')?.text, '$(terminal) zsh · shell', 'a shell: the terminal icon');
 		assert.strictEqual(focusedPaneStatus(s, 'w1:p1', 'r')?.text, '$(circle-filled) web · blocked', 'an agent without a mark: the dot');
 		assert.strictEqual(focusedPaneStatus(s, 'gone', 'r'), undefined);
 	});

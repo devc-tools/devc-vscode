@@ -4,6 +4,7 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- Shell panes have a terminal icon on Spaces and Active Pane rows, in tile headers and in the status bar (they had none).
 - **Active Pane shows changes by commit.** **Changed in This Pane** and **Reset Baseline** are gone. **All Changes** is
   now **Uncommitted** (expanded), followed by **Commits**: your branch's commits since the default branch
   (`vs origin/main`), or the 20 most recent on the default branch itself. Expand a commit for its files; click one for

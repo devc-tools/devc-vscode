@@ -125,7 +125,7 @@ when its session stops and when its environment goes away.
   `ThemeIcon('herdr-agent-<agent>')` in the status colour, from `contributes.icons` over
   `resources/agent-icons.woff` (U+E001–U+E004, built by `scripts/build-agent-icons.sh` from the vendored Lobe
   Icons SVGs; picosvg first, since font glyphs fill non-zero and the raw marks' holes are even-odd). Other
-  agents get the status dot, shells nothing. Pane rows, Agents rows, Active Pane's pane row and the focused-pane
+  agents get the status dot, shells the uncoloured `terminal` codicon (an inline `>_` glyph in tile headers). Pane rows, Agents rows, Active Pane's pane row and the focused-pane
   status bar item (`$(herdr-agent-claude) <name> · <status>`) use it; session, space, tab and strip rows keep the
   dot, since they sum up several panes.
 - **Agents** filter (`all`, `blocked`, `working`, `done`) and scope (`all`, `session`: the selected

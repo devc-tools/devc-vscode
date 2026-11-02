@@ -283,6 +283,12 @@ body {
 	color: var(--vscode-charts-green);
 }
 
+/* A shell's terminal glyph: no status, the tab's own text colour. */
+.tile-mark-shell {
+	color: inherit;
+	opacity: 0.8;
+}
+
 .tile-detail {
 	min-width: 0;
 	overflow: hidden;

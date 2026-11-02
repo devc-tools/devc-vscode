@@ -288,7 +288,7 @@ suite('space panels', function () {
 		assert.strictEqual(tile('w2:p1').mark, 'tile-mark tile-mark-working', 'claude: the mark, coloured by status');
 		assert.strictEqual(tile('w2:p1').dot, '', 'claude: no dot');
 		assert.strictEqual(tile('w2:p2').dot, '', 'a shell: no dot');
-		assert.strictEqual(tile('w2:p2').mark, '', 'a shell: no mark');
+		assert.strictEqual(tile('w2:p2').mark, 'tile-mark tile-mark-shell', 'a shell: the terminal glyph');
 		assert.deepStrictEqual(JSON.parse(tile('w2:p2').context), {
 			webviewSection: 'tile',
 			paneKey: pk('w2:p2'),

@@ -63,11 +63,11 @@ export function hasAgentMark(agent: string | undefined): agent is AgentMarkId {
 /**
  * The icon for one pane: its agent's mark (`herdr-agent-<agent>`) coloured by
  * status for the agents with a mark, the status dot for any other agent,
- * `undefined` for a shell.
+ * the uncoloured `terminal` codicon for a shell.
  */
-export function agentIcon(pane: { agent?: string; agent_status: AgentStatus }): vscode.ThemeIcon | undefined {
+export function agentIcon(pane: { agent?: string; agent_status: AgentStatus }): vscode.ThemeIcon {
 	if (pane.agent === undefined) {
-		return undefined;
+		return new vscode.ThemeIcon('terminal');
 	}
 	if (hasAgentMark(pane.agent)) {
 		return new vscode.ThemeIcon(`herdr-agent-${pane.agent}`, new vscode.ThemeColor(COLOR[pane.agent_status]));

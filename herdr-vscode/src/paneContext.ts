@@ -268,7 +268,7 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			item.id = node.id;
 			item.description = node.description;
 			const agent = hasAgent(node.pane);
-			item.iconPath = agent ? agentIcon(node.pane) : new vscode.ThemeIcon('terminal');
+			item.iconPath = agentIcon(node.pane);
 			item.tooltip = agent ? agentTooltip(node.pane) : node.pane.pane_id;
 			item.contextValue = paneRowContextValue(node);
 			item.command = paneClickCommand(node.ref);
