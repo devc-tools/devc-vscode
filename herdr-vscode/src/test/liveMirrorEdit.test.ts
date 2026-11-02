@@ -5,7 +5,6 @@ import { bridgeRequest } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
 import { LayoutNode, parseLayoutExport } from '../layoutMapping';
-import { LayoutStore } from '../layouts';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
@@ -62,6 +61,7 @@ function text(node: LayoutNode): string {
 	let p1: string;
 	let p2: string;
 	let p3: string;
+	const extraTabs: string[] = [];
 	const key = `host/${SESSION}`;
 	const shell = new LocalShell();
 	const req = (method: string, params: unknown) => bridgeRequest(shell, SESSION, method, params);
@@ -82,8 +82,7 @@ function text(node: LayoutNode): string {
 			return c && { shell: c.env.shell, name: c.name };
 		}, log);
 		focus = new FocusTracker(model, () => 'hv-row');
-		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, layouts: noLayouts, rowLabel: () => 'hv-row', log });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, rowLabel: () => 'hv-row', log });
 
 		// Its own tab: p1 | (p2 / p3).
 		const workspaceId = model.connection(key)!.snapshot!.workspaces[0].workspace_id;
@@ -114,7 +113,9 @@ function text(node: LayoutNode): string {
 
 	suiteTeardown(async () => {
 		panels?.dispose();
-		await req('tab.close', { tab_id: tabId }).catch(() => undefined);
+		for (const id of [tabId, ...extraTabs]) {
+			await req('tab.close', { tab_id: id }).catch(() => undefined);
+		}
 		streams?.dispose();
 		focus?.dispose();
 		model?.dispose();
@@ -145,31 +146,50 @@ function text(node: LayoutNode): string {
 		}
 	});
 
-	test('p3 dropped on p1 (left; edges are a swap in herdr 0.9.5): p3 and p1 exchanged, terminals kept', async () => {
+	/** Pane id → terminal id, from herdr (the model's snapshot does not keep terminal ids). */
+	const terminals = async () => {
+		const raw = (await req('session.snapshot', {})) as { snapshot: { panes: { pane_id: string; terminal_id: string }[] } };
+		return new Map(raw.snapshot.panes.map((p) => [p.pane_id, p.terminal_id]));
+	};
+	const tabCount = () => model.connection(key)!.snapshot!.tabs.length;
+
+	test('p3 dropped on p1\'s left edge: herdr splits p1 with p3 on the left, same panes and terminals, no extra tab', async () => {
 		const before = await panel.probe();
+		const [terms, tabs] = [await terminals(), tabCount()];
 		const start = Date.now();
 		await panel.probe({ kind: 'dragTile', paneKey: pk(p3), targetPaneKey: pk(p1), zone: 'left' });
-		const { value: layout } = await waitFor('swapped in herdr', 5000, async () => {
+		const { value: layout } = await waitFor('moved in herdr', 5000, async () => {
 			const l = await exported();
-			return text(l.root) === `(right ${p3} (down ${p2} ${p1}))` && l;
+			return text(l.root) === `(right (right ${p3} ${p1}) ${p2})` && l;
 		});
 		const { value, after } = await waitFor('tiles follow', 5000, async () => {
 			const p = await panel.probe();
-			return tile(p.tiles, p3).x < tile(p.tiles, p1).x && p;
+			return p.tiles.length === 3 && tile(p.tiles, p3).x < tile(p.tiles, p1).x && tile(p.tiles, p1).x < tile(p.tiles, p2).x && p;
 		});
-		console.log(`[live-mirror] swap shown after ${Date.now() - start} ms (tiles ${after} ms after herdr)`, text(layout.root));
+		console.log(`[live-mirror] edge drop shown after ${Date.now() - start} ms (tiles ${after} ms after herdr)`, text(layout.root));
 		for (const id of [p1, p2, p3]) {
-			assert.strictEqual(tile(value.tiles, id).serial, tile(before.tiles, id).serial, `${id} kept its terminal`);
+			assert.strictEqual(tile(value.tiles, id).serial, tile(before.tiles, id).serial, `${id} kept its tile`);
 		}
+		await waitFor('the passing tab gone', 5000, () => tabCount() === tabs);
+		assert.deepStrictEqual(await terminals(), terms, 'every pane kept its terminal');
 		await waitFor('p3 shows its old screen', 3000, async () => tile((await panel.probe()).tiles, p3).text.includes(`mark-${p3.replace(/\W/g, '')}`));
+	});
+
+	test('p2 dropped on p3\'s top edge: p2 above p3', async () => {
+		await panel.probe({ kind: 'dragTile', paneKey: pk(p2), targetPaneKey: pk(p3), zone: 'top' });
+		await waitFor('moved in herdr', 5000, async () => text((await exported()).root) === `(right (down ${p2} ${p3}) ${p1})`);
+		await waitFor('tiles follow', 5000, async () => {
+			const p = await panel.probe();
+			return tile(p.tiles, p2).y < tile(p.tiles, p3).y && p;
+		});
 	});
 
 	test('p1 dropped on p2\'s centre: p1 and p2 exchanged in herdr', async () => {
 		await panel.probe({ kind: 'dragTile', paneKey: pk(p1), targetPaneKey: pk(p2), zone: 'center' });
-		await waitFor('swapped in herdr', 5000, async () => text((await exported()).root) === `(right ${p3} (down ${p1} ${p2}))`);
+		await waitFor('swapped in herdr', 5000, async () => text((await exported()).root) === `(right (down ${p1} ${p3}) ${p2})`);
 		await waitFor('tiles follow', 5000, async () => {
 			const p = await panel.probe();
-			return tile(p.tiles, p1).y < tile(p.tiles, p2).y && p;
+			return tile(p.tiles, p1).y < tile(p.tiles, p3).y && tile(p.tiles, p2).x > tile(p.tiles, p1).x && p;
 		});
 	});
 
@@ -185,6 +205,25 @@ function text(node: LayoutNode): string {
 		const { after } = await waitFor('nothing maximised', 1000, async () => (await panel.probe()).maximised === null);
 		console.log(`[live-mirror] unzoom shown after ${after} ms`);
 		assert.strictEqual((await exported()).zoomed, false);
+	});
+
+	test('p3 dropped on +: a new herdr tab holds it; p2 dropped on that tab\'s strip entry joins it', async () => {
+		const tabsBefore = new Set(model.connection(key)!.snapshot!.tabs.map((t) => t.tab_id));
+		const stripBefore = (await panel.probe()).strip.length;
+		const term3 = (await terminals()).get(p3);
+		await panel.probe({ kind: 'dragTileToStrip', paneKey: pk(p3), tabId: null });
+		const { value: newTab } = await waitFor('p3 in a new tab', 5000, () => {
+			const p = model.connection(key)!.snapshot!.panes.find((x) => x.pane_id === p3);
+			return p && !tabsBefore.has(p.tab_id) && p.tab_id;
+		});
+		extraTabs.push(newTab);
+		assert.strictEqual((await terminals()).get(p3), term3, 'p3 kept its terminal');
+		await waitFor('two tiles left', 5000, async () => (await panel.probe()).tiles.length === 2);
+		assert.strictEqual((await panel.probe()).strip.filter((e) => e.startsWith('*')).length, 1, 'the panel still shows one tab');
+		await waitFor('the new tab on the strip', 5000, async () => (await panel.probe()).strip.length === stripBefore + 1);
+		await panel.probe({ kind: 'dragTileToStrip', paneKey: pk(p2), tabId: newTab });
+		await waitFor('p2 in the new tab', 5000, () => model.connection(key)!.snapshot!.panes.find((x) => x.pane_id === p2)?.tab_id === newTab);
+		await waitFor('one tile left', 5000, async () => (await panel.probe()).tiles.length === 1);
 	});
 
 	test('no controller is left once the panel closes', async () => {

@@ -25,19 +25,24 @@ export function worstStatus(statuses: Iterable<AgentStatus>): AgentStatus | unde
 	return worst;
 }
 
-const COLOR: Partial<Record<AgentStatus, string>> = {
+const COLOR: Record<AgentStatus, string> = {
 	blocked: 'charts.orange',
 	working: 'charts.blue',
 	done: 'charts.green',
+	idle: 'disabledForeground',
+	unknown: 'disabledForeground',
 };
 
-/** The codicon id and theme color id for a status. */
+/** The codicon id and theme color id for a status: a filled circle, gray when idle. */
 export function statusIconSpec(status: AgentStatus): { id: string; color?: string } {
-	const color = COLOR[status];
-	return color ? { id: 'circle-filled', color } : { id: 'circle-outline' };
+	return { id: 'circle-filled', color: COLOR[status] };
 }
 
-/** The icon for a status; `circle-outline` for none (a session or space without agents). */
+/**
+ * The icon for a status. `undefined` is "off" (herdr not running, or not
+ * connected): an empty circle. A connected session or space without agents is
+ * `idle`, not off.
+ */
 export function statusIcon(status: AgentStatus | undefined): vscode.ThemeIcon {
 	if (status === undefined) {
 		return new vscode.ThemeIcon('circle-outline');
@@ -45,9 +50,6 @@ export function statusIcon(status: AgentStatus | undefined): vscode.ThemeIcon {
 	const spec = statusIconSpec(status);
 	return new vscode.ThemeIcon(spec.id, spec.color ? new vscode.ThemeColor(spec.color) : undefined);
 }
-
-/** The icon for a pane with no agent. */
-export const SHELL_ICON = new vscode.ThemeIcon('terminal');
 
 export interface StatusCounts {
 	blocked: number;

@@ -9,13 +9,12 @@ import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
 import { GitHeadContentProvider, parseGitHeadUri } from '../git';
-import { LayoutState, LayoutStore } from '../layouts';
 import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, RootNode, SinceNode } from '../paneContext';
 import { EnvironmentPaths } from '../paths';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
-import { LayoutPanel, TilesPanels } from '../tilesPanel';
+import { MirrorPanel, TilesPanels } from '../tilesPanel';
 import { makePaneKey, TileProbe } from '../tilesProtocol';
 
 /**
@@ -57,7 +56,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	let view: PaneContextView;
 	let baselines: BaselineStore;
 	let tree: vscode.TreeView<PaneContextNode>;
-	let panel: LayoutPanel;
+	let panel: MirrorPanel;
 	let repo: string;
 	let plain: string;
 	let workspaceId: string;
@@ -100,15 +99,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 			return c && { shell: c.env.shell, name: c.name };
 		}, log);
 		focus = new FocusTracker(model, () => 'hv-row');
-		const values = new Map<string, unknown>();
-		const state: LayoutState = {
-			get: (k) => values.get(k),
-			update: (k, v) => {
-				values.set(k, JSON.parse(JSON.stringify(v)));
-				return Promise.resolve();
-			},
-		};
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, layouts: new LayoutStore(state), rowLabel: () => 'hv-row', log });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, rowLabel: () => 'hv-row', log });
 		paths = new EnvironmentPaths(environments);
 
 		const created = (await req('workspace.create', { cwd: repo, label: 'ctx', focus: true })) as { workspace: { workspace_id: string }; tab: { tab_id: string }; root_pane: { pane_id: string } };
@@ -195,7 +186,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 
 	// `Show Pane` runs the extension's own command, whose model discovers nothing here: so what it runs.
 	test('a tile opening ends rule 2 and the header note', async () => {
-		panel = panels.addToLayout(key, p1)!;
+		panel = panels.openPaneTab(key, p1)!;
 		await waitFor('p1 painted', 15000, async () => (await tileOf(p1))?.text.length);
 		await waitFor('the header note gone', 5000, () => !String(tree.message).includes('not open in a tile'));
 		await waitFor('p1 is the last focused', 5000, () => focus.lastFocused === pk(p1));
@@ -208,12 +199,12 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	});
 
 	test('focusing another tile switches it; Pin holds until Unpin', async () => {
-		panels.addToLayout(key, p2);
+		panels.openPaneTab(key, p2);
 		await waitFor('p2 last focused', 15000, () => focus.lastFocused === pk(p2));
 		await rootIs(path.basename(plain));
 		view.pin();
 		assert.match(String(tree.message), / · pinned/);
-		panels.addToLayout(key, p1);
+		panels.openPaneTab(key, p1);
 		await waitFor('p1 last focused', 15000, () => focus.lastFocused === pk(p1));
 		await sleep(300);
 		assert.strictEqual((await rootRow())?.label, path.basename(plain));

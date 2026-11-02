@@ -7,10 +7,14 @@ herdr sessions, spaces, agents and panes in VS Code, for people who already use
   in every running dev container. Each running session shows its agents' counts
   (`2 blocked · 1 working`) and an icon for its worst status. Click a running session to select
   it.
+
+  **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
+  space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
+  panes have no dot.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
   their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or
-  a tab to open its space on that tab; click a pane to put it in a Layout tab (below, or see `herdr.openPaneIn`).
+  a tab to open its space on that tab; click a pane to open its space on the pane's tab and focus its tile.
   Space rows expand with their arrow.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
   tooltip); click it to go to Sessions.
@@ -31,9 +35,10 @@ reload; a state that began while VS Code was closed shows no time until it next 
 
 ## herdr spaces in the editor area
 
-Clicking a space in **Spaces** opens it as an editor tab, titled with the space's name. One editor tab is one
-herdr space. It shows the space's active herdr tab: its split layout, with every pane a live terminal
-tile. The toolbar's strip lists the space's tabs in herdr's order, each with its worst agent status.
+Clicking a space in **Spaces** opens it as an editor tab. One editor tab is one herdr space, titled with the
+space's name, or `<session> · <space>` for a session other than `default`. It shows the space's active herdr
+tab: its split layout, with every pane a live terminal tile. The strip across the top lists the space's tabs
+in herdr's order, each with its worst agent status. herdr's layout is the only one: everything below edits it.
 
 - The strip and herdr's active tab follow each other. Clicking a strip entry makes that tab herdr's active
   tab, and a tab switch in the herdr TUI switches the editor tab within a second. herdr's tab focus also
@@ -41,8 +46,8 @@ tile. The toolbar's strip lists the space's tabs in herdr's order, each with its
 - **+** on the strip creates a tab in the space, in the focused tile's directory, and shows it. **×** on an
   entry closes that tab in herdr, after asking, because its processes end. Double-click an entry to rename it.
   Closing a space's last tab closes the space; the editor tab then says *This herdr space was closed.*
-- Clicking a tab in **Spaces** opens its space on that tab. **Open in herdr Space** on a pane or agent row
-  (the click itself when `herdr.openPaneIn` is `herdr`) does the same for the pane's tab and focuses its tile.
+- Clicking a tab in **Spaces** opens its space on that tab. Clicking a pane or agent row (or **Open in herdr
+  Space** in its context menu) does the same for the pane's tab and focuses its tile.
 
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
@@ -52,15 +57,24 @@ tile. The toolbar's strip lists the space's tabs in herdr's order, each with its
 - **Start Session** and **Stop Session** on Sessions rows run this machine's sessions. Stopping asks first,
   because every pane in the session closes. A started session has no spaces until you add one.
   **Start Session** also starts a dev container's herdr: on its `herdr not running` row it starts `devc`.
-- **Split Right** and **Split Down** in the toolbar split the focused tile in herdr; the tile's
-  close button closes the pane in herdr, after asking, because its process ends. Changes made in a
-  herdr TUI come back within a second, and splitters move in place when herdr's split ratios change.
+- Right-click a tile for **Split Right**, **Split Down** (a new shell in the tile's directory), **Zoom** /
+  **Unzoom** and **Close Pane**. Closing, there or with the tile's close button, asks first, because the
+  pane's process ends. Changes made in a herdr TUI come back within a second, and splitters move in place
+  when herdr's split ratios change.
 - Dragging a splitter sets herdr's split ratio (herdr keeps ratios between 0.1 and 0.9; the
   splitter snaps to what herdr has).
-- Dragging a tile's tab onto another tile swaps the two panes in herdr. herdr 0.9.5 cannot move a
-  pane within its tab (`same_tab`), so there are no edge drops in a mirrored tab: anywhere on another
-  tile swaps. Nothing moves until herdr's layout comes back, a few hundred milliseconds later. Escape
-  cancels. To arrange panes freely, use **Copy as Layout**.
+- Drag a tile by its tab:
+  - onto the middle (or the header) of another tile: the two panes swap places in herdr;
+  - near an edge of another tile: herdr splits that tile and puts the dragged pane on that side. herdr
+    0.9.5 cannot move a pane within its tab, so the pane goes out to a passing tab (named after it) and
+    straight back; its terminal keeps running. If herdr refuses the way back, the pane stays in that tab
+    and a warning names it;
+  - onto another tab in the strip: the pane moves to that herdr tab (split right); onto **+**: to a new tab.
+    The editor tab keeps showing the tab you are on.
+
+  Nothing moves until herdr's layout comes back, a few hundred milliseconds later. Escape cancels. A pane
+  goes in one place at a time: there are no stacked tiles, and panes from other spaces or sessions do not
+  mix in.
 - Maximising a tile zooms that pane in herdr, and herdr's zoom maximises the tile. Zooming also
   makes that pane herdr's focused pane, and moves the herdr TUI's zoom with it. While herdr is
   zoomed, tiles cannot be dragged.
@@ -76,45 +90,6 @@ back.
 
 Other than maximising (zoom) and swapping (herdr focuses the dragged pane), focusing a tile does not
 move herdr's own focus; **Focus in herdr TUI** on a pane row does.
-
-## Layout tabs
-
-A Layout tab is a named editor tab holding any panes you like, from any space or session, arranged
-freely: drag a tile's tab to stack it with others or to an edge to split, and maximise a stack. The
-arrangement belongs to VS Code: it never changes herdr's tabs or splits.
-
-- Clicking a pane or agent row, or **Add to Layout** in its context menu, adds the pane to the active
-  Layout tab, else the most recently active one still open, else a new `Layout <n>`. It goes in as a
-  tab in the stack of the focused tile, else the last one focused, else the first; drag its tab to split.
-  A pane already there is just focused.
-- **New Layout** (the new-file icon on the Sessions view's title bar, or the command palette), **Open Layout…**,
-  **Rename Layout…** (also on the tab's toolbar) and **Delete Layout…** manage them. Layouts are
-  saved per workspace, and come back after a window reload.
-- Closing a tile takes it out of the layout. The pane keeps running in herdr. Closing the editor tab
-  keeps the layout saved; **Open Layout…** brings it back.
-- **Copy as Layout** on a mirrored tab's toolbar makes a Layout from its current arrangement, named
-  `<tab> (<space>)`, to rearrange without touching herdr.
-- A tile whose session is not connected says *Waiting for …* and reconnects when the session does.
-  A pane that no longer exists says *This pane is gone.*, with **Remove**. A pane moved to another
-  space in herdr stays in the tile, while VS Code is running to see the move.
-
-### Dragging panes in
-
-- Drag a pane row from Spaces, Agents or Pane Context's **Other Panes in This Space** onto a Layout tab
-  that is on screen and **let go, then click** where it should go: on a stack's tab strip to add it
-  there as a tab, or near an edge of a tile (or of the whole tab) to split. The highlight while you move
-  the pointer is Golden Layout's own, the same as when dragging a tile's tab. VS Code does not let a
-  drag from a view drop into an editor's web page, so letting go only arms the Layout tab, which says
-  *Place "…"* until the pointer comes over it; on some platforms letting go over it already places the pane.
-- **Esc** (right after letting go: the keyboard is still in the view), **Cancel** on the tab's toolbar,
-  or moving the pointer out of the tab cancels. After 15 s with the pointer never over a Layout tab,
-  it cancels by itself.
-- A pane is in a layout at most once: dragging in one it already has moves that tile there, or only
-  focuses it when the spot is its own stack's tab strip.
-- Each tile's tab has a grip (the dots before its status dot). Drag it into another Layout tab on screen,
-  in another editor group (no Shift needed), to move the tile there; the first tab loses it. Dragging it
-  within the same tab works too.
-- Mirrored herdr tabs take no drops: their arrangement is herdr's.
 
 ## Pane Context
 
@@ -182,8 +157,8 @@ which the agent's answer replaces. Follow-ups in the thread go to the same agent
 - **What is sent:** the question goes straight into the agent's pane (herdr's `agent.prompt`), with the file's path
   **as the agent's environment sees it** (the container path for a container agent), the lines, which version of the
   file it is (working tree, index, a commit, a PR side), and the code (up to 200 lines). Nothing else reaches the agent:
-  no selection tracking, no open files. The pane is not focused; **Show Agent** on the thread opens it (per
-  `herdr.openPaneIn`).
+  no selection tracking, no open files. The pane is not focused; **Show Agent** on the thread opens its space on
+  its tab.
 - **The answer** is a Markdown file the agent writes to `/tmp/herdr-vscode/review/<thread>/<n>.md` in its
   environment; it shows in the thread within about a second, and again if the agent rewrites it. **Delete Thread**
   removes the thread and its files. Threads are kept in this window only, never posted to GitHub, and are gone on reload.
@@ -262,7 +237,6 @@ id; an agents section with only `rows_by_agent` leaves other agents' rows as the
 | `herdr.sshPath` | `"ssh"` | ssh client (application scope) |
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
 | `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
-| `herdr.openPaneIn` | `"layout"` | what clicking a pane or agent row does: `layout` adds it to a Layout tab, `herdr` opens its herdr space on the pane's tab |
 | `herdr.useHerdrSidebarConfig` | `true` | lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).
@@ -284,8 +258,8 @@ npm run package:dev   # build a .vsix and install it into `code`
 ```
 
 `npm test` never discovers the machine's herdr sessions (`.vscode-test.mjs` sets
-`HERDR_VSCODE_NO_DISCOVERY=1`). `src/test/layoutPanels.test.ts` opens real webviews over a made-up
-model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.ts`, `git.test.ts` and
+`HERDR_VSCODE_NO_DISCOVERY=1`). `src/test/spacePanels.test.ts` and `mirrorPanels.test.ts` open real webviews
+over a made-up model, so they need the build, and reach no herdr. `src/test/paneContext.test.ts`, `git.test.ts` and
 `remoteFs.test.ts` run real `git` and coreutils, only in temp directories. Opt-in suites run against a throwaway session:
 
 - `HERDR_VSCODE_LIVE_SESSION=<name>`: connects to that running session on this machine (it
@@ -294,7 +268,7 @@ model, so it needs the build, and reaches no herdr. `src/test/paneContext.test.t
   discovery there, so it must hold only a running throwaway session named `hv-test` (with one
   workspace, and `herdr` in `<dir>/.local/bin`). Add `HERDR_VSCODE_LIVE_STOP=1` to also stop that
   session and check it drops out. This also runs a real tiles webview: frames, keys, splits,
-  takeover, restore, Layout tabs, dragging panes into them, split ratios, swaps and zoom in mirrored tabs, Pane Context,
+  takeover, restore, split ratios, swaps, edge and strip drops and zoom in space tabs, Pane Context,
   and it stops and restarts that session's server.
   Ask Agent runs a fake `claude` (a `sh` loop) in a pane of `hv-test` and prompts only that pane; its replies go to
   this machine's `/tmp/herdr-vscode/review`, and are removed afterwards. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100

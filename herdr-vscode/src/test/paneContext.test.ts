@@ -9,7 +9,6 @@ import { HerdrEvent } from '../bridge';
 import { RepoDecorations } from '../decorations';
 import { Environment } from '../environments';
 import { FocusTracker } from '../focus';
-import { LayoutState, LayoutStore } from '../layouts';
 import {
 	canAddToWorkspace,
 	ChangeNode,
@@ -33,7 +32,7 @@ import {
 import { LocalShell, RemoteShell } from '../remoteShell';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
-import { LayoutPanel, TilesPanels } from '../tilesPanel';
+import { MirrorPanel, TilesPanels } from '../tilesPanel';
 import { makePaneKey } from '../tilesProtocol';
 import { snapshot } from './fixtures';
 
@@ -200,6 +199,22 @@ class FakeModel {
 		}
 		if (method === 'pane.split') {
 			return Promise.resolve({ type: 'pane_info' });
+		}
+		if (method === 'tab.focus') {
+			return Promise.resolve({ type: 'ok' });
+		}
+		if (method === 'layout.export') {
+			// The tab's panes side by side.
+			const tabId = (params as { tab_id: string }).tab_id;
+			const panes = this.snapshots.get(key)?.panes.filter((p) => p.tab_id === tabId) ?? [];
+			if (panes.length === 0) {
+				return Promise.reject(new Error('layout_not_found'));
+			}
+			const leaf = (id: string): unknown => ({ type: 'pane', pane_id: id });
+			const root = panes
+				.slice(1)
+				.reduce((first, p) => ({ type: 'split', direction: 'right', ratio: 0.5, first, second: leaf(p.pane_id) }), leaf(panes[0].pane_id));
+			return Promise.resolve({ type: 'layout_export', layout: { tab_id: tabId, workspace_id: panes[0].workspace_id, zoomed: false, root } });
 		}
 		return Promise.reject(new Error(`unexpected ${method}`));
 	}
@@ -390,7 +405,7 @@ suite('pane context: the view over a temp repo', function () {
 		const panes = (await view.getChildren(await group('panes'))) as PaneRowNode[];
 		assert.deepStrictEqual(panes.map((p) => p.ref.paneId), ['w2:p2'], 'the same space, without the pane itself');
 		assert.strictEqual(panes[0].description, other);
-		assert.strictEqual(paneContextItem(panes[0]).command?.command, 'herdr.addToLayout');
+		assert.strictEqual(paneContextItem(panes[0]).command?.command, 'herdr.openPaneTab');
 		assert.strictEqual(paneContextItem((await group('panes'))!).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 		assert.strictEqual(paneContextItem((await group('files'))!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
 	});
@@ -928,20 +943,11 @@ suite('pane context: links from a real webview', function () {
 		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
 		streams = new PaneStreams(() => undefined, () => undefined);
 		focus = new FocusTracker(model as unknown as SessionModel, () => 'row');
-		const values = new Map<string, unknown>();
-		const state: LayoutState = {
-			get: (k) => values.get(k),
-			update: (k, v) => {
-				values.set(k, v);
-				return Promise.resolve();
-			},
-		};
 		panels = new TilesPanels({
 			extensionUri: ext.extensionUri,
 			model: model as unknown as SessionModel,
 			streams,
 			focus,
-			layouts: new LayoutStore(state),
 			rowLabel: () => 'row',
 			log: () => undefined,
 		});
@@ -958,10 +964,9 @@ suite('pane context: links from a real webview', function () {
 		panels.onDidRequestLink((l) => seen.push(l));
 		let tileChanges = 0;
 		panels.onDidChangeTiles(() => tileChanges++);
-		const panel: LayoutPanel = panels.newLayout('links');
 		assert.ok(!panels.showsPane(S, 'w2:p1'));
-		panels.addToLayout(S, 'w2:p1');
-		assert.ok(panels.showsPane(S, 'w2:p1'));
+		const panel: MirrorPanel = panels.openPaneTab(S, 'w2:p1')!;
+		await waitFor('showsPane', () => panels.showsPane(S, 'w2:p1'));
 		assert.ok(tileChanges > 0);
 		const paneKey = makePaneKey(S, 'w2:p1');
 		await waitFor('the tile', async () => (await panel.probe()).tiles.find((t) => t.paneKey === paneKey && t.width > 0 && t.cols > 0));

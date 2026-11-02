@@ -736,3 +736,10 @@ export class SessionModel implements vscode.Disposable {
 		this.events.dispose();
 	}
 }
+
+/** `pane.moved` data, when it gave the pane a new id (a move to another workspace). */
+export function parsePaneMoved(data: Record<string, unknown>): { from: string; to: string } | undefined {
+	const from = data.previous_pane_id;
+	const to = (data.pane as { pane_id?: unknown } | undefined)?.pane_id;
+	return typeof from === 'string' && typeof to === 'string' && from !== '' && to !== '' && from !== to ? { from, to } : undefined;
+}

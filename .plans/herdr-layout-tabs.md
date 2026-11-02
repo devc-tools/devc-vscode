@@ -1,5 +1,9 @@
 # herdr-vscode: Layout tabs (panes as units)
 
+> **Superseded (2026-11-02):** Layout tabs were removed by
+> [herdr-space-tab-cleanup](herdr-space-tab-cleanup.md). herdr's layout is the only one; tile drags in a
+> space tab (edges, strip entries, **+**) now edit it. This plan is kept for its history.
+
 Mockup board D (https://claude.ai/artifact/QJAeVX6smvE4aQ2YrHrrAP): besides mirrored herdr tabs,
 the user builds **Layout tabs**: named editor tabs holding any panes, from any space or session,
 arranged freely with Golden Layout (stacks, drag, maximise). The layout belongs to VS Code;

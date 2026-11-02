@@ -2,7 +2,6 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { HerdrEvent } from '../bridge';
 import { FocusTracker } from '../focus';
-import { LayoutStore } from '../layouts';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TILES_VIEW_TYPE, TilesPanels } from '../tilesPanel';
@@ -43,6 +42,10 @@ class FakeHerdr {
 	readonly requests: { method: string; params: Record<string, unknown> }[] = [];
 	/** Delays `layout.export` of these tabs (ms). */
 	readonly exportDelay = new Map<string, number>();
+	/** herdr's zoomed pane. */
+	zoomed: string | undefined;
+	/** herdr's session name. */
+	name = 'a';
 
 	constructor() {
 		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT)) as typeof RAW_SNAPSHOT;
@@ -51,7 +54,7 @@ class FakeHerdr {
 	}
 
 	connection(key: string): SessionConnection | undefined {
-		return key === S ? ({ state: 'connected', snapshot: this.snap, name: 'a' } as unknown as SessionConnection) : undefined;
+		return key === S ? ({ state: 'connected', snapshot: this.snap, name: this.name } as unknown as SessionConnection) : undefined;
 	}
 
 	edits(): { method: string; params: Record<string, unknown> }[] {
@@ -76,9 +79,14 @@ class FakeHerdr {
 				await sleep(this.exportDelay.get(tabId) ?? 0);
 				const panes = this.snap.panes.filter((p) => p.tab_id === tabId);
 				const tab = this.snap.tabs.find((t) => t.tab_id === tabId)!;
+				// The tab's panes side by side.
+				const leaf = (id: string): unknown => ({ type: 'pane', pane_id: id });
+				const root = panes
+					.slice(1)
+					.reduce((first, p) => ({ type: 'split', direction: 'right', ratio: 0.5, first, second: leaf(p.pane_id) }), leaf(panes[0].pane_id));
 				return {
 					type: 'layout_export',
-					layout: { tab_id: tabId, workspace_id: tab.workspace_id, zoomed: false, focused_pane_id: panes[0].pane_id, root: { type: 'pane', pane_id: panes[0].pane_id } },
+					layout: { tab_id: tabId, workspace_id: tab.workspace_id, zoomed: this.zoomed !== undefined, focused_pane_id: this.zoomed ?? panes[0].pane_id, root },
 				};
 			}
 			case 'tab.focus':
@@ -87,7 +95,18 @@ class FakeHerdr {
 			case 'tab.create':
 			case 'tab.close':
 			case 'tab.rename':
+			case 'pane.split':
+			case 'pane.close':
 				return { type: 'ok' };
+			case 'pane.move':
+				return { type: 'pane_move', move_result: { changed: true } };
+			case 'pane.swap':
+				return { type: 'pane_swap', swap: { changed: true } };
+			case 'pane.zoom': {
+				const on = params.mode === 'on';
+				this.zoomed = on ? (params.pane_id as string) : undefined;
+				return { type: 'pane_zoom', zoom: { changed: true, zoomed: on, pane_id: params.pane_id } };
+			}
 		}
 		throw new Error(`unexpected ${method}`);
 	}
@@ -115,8 +134,7 @@ suite('space panels', function () {
 		const fake = herdr as unknown as SessionModel;
 		focus = new FocusTracker(fake, () => 'row');
 		streams = new PaneStreams(() => undefined, () => undefined);
-		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model: fake, streams, focus, layouts: noLayouts, rowLabel: (k) => `row ${k}`, log: () => undefined });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model: fake, streams, focus, rowLabel: (k) => `row ${k}`, log: () => undefined });
 	});
 
 	teardown(async () => {
@@ -132,16 +150,15 @@ suite('space panels', function () {
 
 	test('one panel per space, titled with the space; it shows the active tab and a strip of the space\'s tabs', async () => {
 		const web = panels.openSpace(S, 'w1');
-		assert.strictEqual(web.panel.title, 'web');
+		assert.strictEqual(web.panel.title, 'a · web', 'a named session: <session> · <space>');
 		await showing(web, 'w1:p1');
 		const probe = await web.probe();
 		assert.deepStrictEqual(probe.strip, ['logs', '*1']);
-		assert.strictEqual(probe.breadcrumb, `row ${S} › web`);
 		assert.strictEqual(panels.openSpace(S, 'w1'), web);
 		assert.strictEqual(panels.openTab(S, 'w1:t2'), web, 'another tab of the space: the same panel');
 		const api = panels.openTab(S, 'w2:t1');
 		assert.notStrictEqual(api, web, 'another space: another panel');
-		assert.strictEqual(api?.panel.title, 'api');
+		assert.strictEqual(api?.panel.title, 'a · api');
 		assert.deepStrictEqual(herdr.edits().filter((r) => r.method === 'tab.focus').map((r) => r.params), [{ tab_id: 'w1:t2' }], 'only the inactive tab is focused');
 	});
 
@@ -230,7 +247,7 @@ suite('space panels', function () {
 		await panels.deserializeWebviewPanel(panel, { kind: 'mirror', sessionKey: S, tabId: 'w1:t2' });
 		const web = panels.openSpace(S, 'w1');
 		assert.strictEqual(web.panel, panel, 'the restored panel is the space\'s');
-		assert.strictEqual(web.panel.title, 'web');
+		assert.strictEqual(web.panel.title, 'a · web');
 		await showing(web, 'w1:p1');
 		assert.deepStrictEqual(herdr.edits(), []);
 
@@ -252,5 +269,102 @@ suite('space panels', function () {
 		await panels.deserializeWebviewPanel(second, { kind: 'mirror', sessionKey: S, tabId: 'w1:t1' });
 		assert.strictEqual(disposed, true);
 		assert.strictEqual(panels.openSpace(S, 'w1').panel, first);
+	});
+
+	test('the default session: the title is the space alone', async () => {
+		herdr.name = 'default';
+		const web = panels.openSpace(S, 'w1');
+		assert.strictEqual(web.panel.title, 'web');
+		await showing(web, 'w1:p1');
+		assert.strictEqual(web.panel.title, 'web');
+	});
+
+	test('the toolbar is the strip only; a shell tile has no dot, an agent tile its status; tiles carry their menu context', async () => {
+		const api = panels.openSpace(S, 'w2');
+		await showing(api, 'w2:p1', 'w2:p2');
+		const probe = await api.probe();
+		assert.deepStrictEqual(probe.toolbar, ['strip']);
+		const tile = (id: string) => probe.tiles.find((t) => t.paneKey === pk(id))!;
+		assert.strictEqual(tile('w2:p1').dot, 'tile-dot tile-dot-working');
+		assert.strictEqual(tile('w2:p2').dot, '', 'a shell: no dot');
+		assert.deepStrictEqual(JSON.parse(tile('w2:p2').context), {
+			webviewSection: 'tile',
+			paneKey: pk('w2:p2'),
+			zoomed: false,
+			preventDefaultContextMenuItems: true,
+		});
+		// An idle agent: the gray dot.
+		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT)) as typeof RAW_SNAPSHOT;
+		(raw.panes.find((p) => p.pane_id === 'w2:p1') as Record<string, unknown>).agent_status = 'idle';
+		herdr.snap = snapshot(raw);
+		herdr.changed.fire();
+		await waitFor('the idle dot', async () => (await api.probe()).tiles.find((t) => t.paneKey === pk('w2:p1'))?.dot === 'tile-dot tile-dot-idle');
+	});
+
+	test('the tile menu: split, zoom (the menu context follows), unzoom and close, on the clicked pane', async () => {
+		const api = panels.openSpace(S, 'w2');
+		await showing(api, 'w2:p1', 'w2:p2');
+		assert.strictEqual(panels.panelOfPane(pk('w2:p2')), api);
+		await api.split('w2:p2', 'down');
+		assert.deepStrictEqual(herdr.edits().at(-1), {
+			method: 'pane.split',
+			params: { target_pane_id: 'w2:p2', direction: 'down', cwd: '/src/api/test', focus: false },
+		});
+		await api.zoomFromMenu('w2:p2');
+		assert.deepStrictEqual(herdr.edits().at(-1), { method: 'pane.zoom', params: { pane_id: 'w2:p2', mode: 'on' } });
+		await waitFor('maximised', async () => (await api.probe()).maximised === pk('w2:p2'));
+		await waitFor('zoomed in the menu context', async () => {
+			const t = (await api.probe()).tiles.find((x) => x.paneKey === pk('w2:p2'));
+			return t && JSON.parse(t.context).zoomed === true;
+		});
+		await api.zoomFromMenu(null);
+		assert.deepStrictEqual(herdr.edits().at(-1), { method: 'pane.zoom', params: { pane_id: 'w2:p2', mode: 'off' } });
+		await waitFor('restored', async () => (await api.probe()).maximised === null);
+		await api.closePane(pk('w2:p1'), false);
+		assert.deepStrictEqual(herdr.edits().at(-1), { method: 'pane.close', params: { pane_id: 'w2:p1' } });
+	});
+
+	test('tile drops: an edge moves through a passing tab and back; onto a strip entry or + moves the pane there', async () => {
+		const api = panels.openSpace(S, 'w2');
+		await showing(api, 'w2:p1', 'w2:p2');
+		await api.probe({ kind: 'dragTile', paneKey: pk('w2:p2'), targetPaneKey: pk('w2:p1'), zone: 'left' });
+		await waitFor('three requests', () => herdr.edits().length === 3);
+		assert.deepStrictEqual(herdr.edits(), [
+			{ method: 'pane.move', params: { pane_id: 'w2:p2', destination: { type: 'new_tab', workspace_id: 'w2', label: 'test' }, focus: false } },
+			{
+				method: 'pane.move',
+				params: { pane_id: 'w2:p2', destination: { type: 'tab', tab_id: 'w2:t1', split: 'right', target_pane_id: 'w2:p1', ratio: 0.5 }, focus: false },
+			},
+			{ method: 'pane.swap', params: { source_pane_id: 'w2:p2', target_pane_id: 'w2:p1' } },
+		]);
+		await api.probe({ kind: 'dragTileToStrip', paneKey: pk('w2:p2'), tabId: null });
+		await waitFor('the + drop', () => herdr.edits().length === 4);
+		assert.deepStrictEqual(herdr.edits()[3], {
+			method: 'pane.move',
+			params: { pane_id: 'w2:p2', destination: { type: 'new_tab', workspace_id: 'w2' }, focus: false },
+		});
+
+		// One tile is enough to drag: onto another tab's entry.
+		const web = panels.openSpace(S, 'w1');
+		await showing(web, 'w1:p1');
+		await web.probe({ kind: 'dragTileToStrip', paneKey: pk('w1:p1'), tabId: 'w1:t2' });
+		await waitFor('the entry drop', () => herdr.edits().length === 5);
+		assert.deepStrictEqual(herdr.edits()[4], {
+			method: 'pane.move',
+			params: { pane_id: 'w1:p1', destination: { type: 'tab', tab_id: 'w1:t2', split: 'right' }, focus: false },
+		});
+		// The shown tab's own entry is no target.
+		await web.probe({ kind: 'dragTileToStrip', paneKey: pk('w1:p1'), tabId: 'w1:t1' });
+		await sleep(300);
+		assert.strictEqual(herdr.edits().length, 5);
+	});
+
+	test('a Layout tab saved by an earlier build is closed on restore', async () => {
+		const old = vscode.window.createWebviewPanel(TILES_VIEW_TYPE, 'Layout 1', vscode.ViewColumn.Active, { enableScripts: true });
+		extra.push(old);
+		let disposed = false;
+		old.onDidDispose(() => (disposed = true));
+		await panels.deserializeWebviewPanel(old, { kind: 'layout', layoutId: 'l1' });
+		assert.strictEqual(disposed, true);
 	});
 });

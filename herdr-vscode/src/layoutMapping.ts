@@ -64,8 +64,8 @@ export interface GlLayoutConfig {
 }
 
 /**
- * A Layout tab's config as stored: `saveLayout()`'s `ResolvedLayoutConfig` (with
- * `resolved: true`), or a new layout's short form, which has no `root` yet.
+ * A config as the webview takes it: {@link mirrorConfig}'s short form, or
+ * `saveLayout()`'s `ResolvedLayoutConfig` (with `resolved: true`, as probes read it).
  */
 export type StoredLayoutConfig = Omit<GlLayoutConfig, 'root'> & { root?: GlItem; resolved?: boolean };
 

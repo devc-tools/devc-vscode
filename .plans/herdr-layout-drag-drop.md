@@ -1,5 +1,9 @@
 # herdr-vscode: drag panes into Layout tabs
 
+> **Superseded (2026-11-02):** Layout tabs were removed by
+> [herdr-space-tab-cleanup](herdr-space-tab-cleanup.md). herdr's layout is the only one; tile drags in a
+> space tab (edges, strip entries, **+**) now edit it. This plan is kept for its history.
+
 Mockup board D, "Layout model" (https://claude.ai/artifact/QJAeVX6smvE4aQ2YrHrrAP): "Drag a pane →
 Into any Layout tab, onto an edge or a stack". Panes come from the Spaces and Agents views and Pane
 Context's **Other Panes in This Space** rows, and land in a Layout tab on a stack (as a tab there) or

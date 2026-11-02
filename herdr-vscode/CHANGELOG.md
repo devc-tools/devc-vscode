@@ -4,6 +4,20 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Layout tabs are gone.** herdr's layout is the only one, and dragging tiles edits it: onto another tile's
+  middle swaps the panes; near its edge splits that tile with the dragged pane on that side (through a passing
+  tab, since herdr cannot move a pane within its tab; the terminal keeps running); onto another tab in the strip
+  moves the pane there, and onto **+** to a new tab. Clicking a pane or agent row opens its space on the pane's
+  tab and focuses its tile. **Add to Layout**, **New / Open / Rename / Delete Layout**, **Copy as Layout**,
+  dragging rows into tiles and the `herdr.openPaneIn` setting are removed; Layout editor tabs left open close on
+  reload.
+- Right-click a tile for **Split Right**, **Split Down**, **Zoom** / **Unzoom** and **Close Pane**; the toolbar's
+  Split Right, Split Down and Copy as Layout buttons and the breadcrumb are gone, and the tab strip starts at
+  the left. Editor tabs are titled with the space, or `<session> · <space>` for a session other than `default`.
+- Status dots: idle is a filled gray dot, and so is a connected session or space with no agents; the empty
+  circle now only means herdr is not running or not connected. Shell panes have no icon or dot (was a terminal
+  icon, and a square in tiles).
+
 - An editor tab now mirrors a herdr **space** instead of one herdr tab. It shows the space's active tab,
   with a strip of the space's tabs in the toolbar that follows herdr's active tab both ways. **+** creates
   a tab, **×** closes one (after asking), and double-click renames one. Clicking a space row opens the space

@@ -30,24 +30,19 @@ export interface MirrorPanelState {
 	tabId: string;
 }
 
-export interface LayoutPanelState {
-	kind: 'layout';
-	layoutId: string;
-}
-
-export type PanelState = SpacePanelState | MirrorPanelState | LayoutPanelState;
+export type PanelState = SpacePanelState | MirrorPanelState;
 
 /** A space panel's tab strip entry: one of the space's herdr tabs. */
 export interface StripTab {
 	tabId: string;
 	label: string;
-	/** The worst agent status of the tab's panes; `shell` with no agents. */
+	/** The worst agent status of the tab's panes; `shell` with no agents (no dot). */
 	status: TileMeta['status'];
 	/** The tab the panel shows. */
 	active: boolean;
 }
 
-/** A tile header: label, faded detail, and the status dot (`shell` for no agent). */
+/** A tile header: label, faded detail, and the status dot (`shell` for no agent: no dot). */
 export interface TileMeta {
 	paneKey: string;
 	label: string;
@@ -59,11 +54,7 @@ export interface TileMeta {
 export type TileStreamState =
 	| { kind: 'live' }
 	| { kind: 'takenOver' }
-	| { kind: 'ended'; reason: string }
-	/** Layout tabs: the pane's session is not connected. */
-	| { kind: 'waiting'; label: string }
-	/** Layout tabs: the session is connected, and has no such pane. */
-	| { kind: 'gone' };
+	| { kind: 'ended'; reason: string };
 
 export type HostMessage =
 	| { type: 'init'; state: PanelState }
@@ -71,21 +62,11 @@ export type HostMessage =
 	| { type: 'layout'; config: StoredLayoutConfig }
 	/** No layout: every tile goes away and `text` is shown instead. */
 	| { type: 'empty'; text: string }
-	/** `strip`: space panels only, the space's tabs in herdr's order. */
-	| { type: 'meta'; breadcrumb: string; tiles: TileMeta[]; strip?: StripTab[] }
+	/** `strip`: the space's tabs in herdr's order. */
+	| { type: 'meta'; tiles: TileMeta[]; strip?: StripTab[] }
 	| { type: 'frame'; paneKey: string; full: boolean; cols: number; rows: number; bytes: string }
 	| { type: 'tileState'; paneKey: string; state: TileStreamState }
 	| { type: 'focusTile'; paneKey: string }
-	/** Layout tabs: add the pane, or focus its tile if it is there. */
-	| { type: 'addTile'; sessionKey: string; paneId: string; title: string }
-	/** Layout tabs: a pane got a new id. */
-	| { type: 'paneMoved'; sessionKey: string; from: string; to: string }
-	/** Layout tabs: a tree drag armed placing this pane. */
-	| { type: 'placePane'; sessionKey: string; paneId: string; title: string }
-	/** Layout tabs: placing ends without placing. */
-	| { type: 'placeEnd' }
-	/** Layout tabs: the pane moved to another Layout tab; close its tile. */
-	| { type: 'removeTile'; paneKey: string }
 	/** Mirrored tabs: herdr's split ratios changed (path key → the `first` child's share); resize in place. */
 	| { type: 'ratios'; ratios: Record<string, number> }
 	/** Mirrored tabs: herdr's zoomed pane (null: none); after every `layout` and on each change. */
@@ -93,37 +74,21 @@ export type HostMessage =
 	/** Test support: answer with `probeResult`, after an optional key press, click or drop. */
 	| { type: 'probe'; id: number; action?: ProbeAction };
 
-/**
- * A point in a Layout panel, worked out by the webview from its live layout: in
- * the stack holding a pane (`header`: 5 px right of its last tab; `left`/`right`:
- * 10% / 90% of the body's width at mid height; `top`/`bottom`: mid width at 20% /
- * 80% height), 20 px inside an edge of the tile area, or its centre.
- */
-export type DropPoint =
-	| { paneKey: string; segment: 'header' | 'left' | 'right' | 'top' | 'bottom' }
-	| { edge: 'left' | 'right' | 'top' | 'bottom' }
-	| { center: true };
-
 export type ProbeAction =
 	| { kind: 'press'; paneKey: string; key: string; keyCode: number }
 	| { kind: 'clickClose'; paneKey: string }
 	/** The X on a tile's own tab. */
 	| { kind: 'clickTabClose'; paneKey: string }
-	| { kind: 'clickRemove'; paneKey: string }
 	/** Moves the mouse over a cell (0-based) with synthetic events. */
 	| { kind: 'hoverCell'; paneKey: string; col: number; row: number }
 	/** A press and release where the mouse is, as a click on a link needs. */
 	| { kind: 'clickCell'; paneKey: string; col: number; row: number }
-	/** Drags a tile's tab to the right edge of the tile area with synthetic pointer events. */
-	| { kind: 'dragToRightEdge'; paneKey: string }
-	/** Placing mode: `pointermove` then `pointerdown` at the point. */
-	| { kind: 'placeAt'; at: DropPoint }
-	/** `dragenter`, `dragover`, `drop` at the point, carrying `application/vnd.herdr.pane` = `data`. */
-	| { kind: 'dropTileAt'; at: DropPoint; data: string }
 	/** Mirrored tabs: drags the splitter of item `split:<key>` to `fraction` of that item's width or height. */
 	| { kind: 'dragSplitter'; splitId: string; fraction: number }
 	/** Mirrored tabs: drags a tile's tab to a point inside `zone` of another tile, with synthetic pointer events. */
 	| { kind: 'dragTile'; paneKey: string; targetPaneKey: string; zone: DropZone }
+	/** Drags a tile's tab onto a strip entry (`tabId`) or the strip's + (null). */
+	| { kind: 'dragTileToStrip'; paneKey: string; tabId: string | null }
 	/** The maximise control of a tile's stack. */
 	| { kind: 'clickMaximise'; paneKey: string }
 	/** Space panels: a click on a tab strip entry (or its ×, or a double-click), or the strip's +. */
@@ -145,8 +110,10 @@ export interface TileProbe {
 	overlay: string;
 	/** Whether the terminal shows the pointer cursor, as it does over a link. */
 	overLink: boolean;
-	/** Whether the tile's tab has a drag grip. */
-	grip: boolean;
+	/** The class of the status dot on the tile's tab; '' with no dot. */
+	dot: string;
+	/** The tile host's `data-vscode-context`, as written. */
+	context: string;
 }
 
 export type WebviewMessage =
@@ -157,13 +124,7 @@ export type WebviewMessage =
 	| { type: 'input'; paneKey: string; text: string }
 	| { type: 'scroll'; paneKey: string; direction: 'up' | 'down'; lines: number }
 	| { type: 'focus'; paneKey: string }
-	| { type: 'split'; direction: 'right' | 'down' }
 	| { type: 'closePane'; paneKey: string }
-	/** A mirrored panel's current Golden Layout config. */
-	| { type: 'copyAsLayout'; config: StoredLayoutConfig }
-	/** A Layout panel's Golden Layout config, 500 ms after it last changed. */
-	| { type: 'layoutChanged'; config: StoredLayoutConfig }
-	| { type: 'renameLayout' }
 	/** Space panels: show this herdr tab (herdr's `tab.focus`). */
 	| { type: 'focusTab'; tabId: string }
 	/** Space panels: the strip's +. */
@@ -177,26 +138,22 @@ export type WebviewMessage =
 	| { type: 'clipboardCopy'; text: string }
 	/** A path printed in a tile was clicked: `text` is the link, with any `:line[:col]`. */
 	| { type: 'openLink'; paneKey: string; text: string }
-	/** Placing mode: the pointer reached this panel. */
-	| { type: 'placeHover' }
-	/** Placing mode ended by placing the pane (new, moved, or only focused). */
-	| { type: 'placed'; sessionKey: string; paneId: string }
-	| { type: 'placeCancel' }
-	/** A grip drop from another Layout tab landed here. */
-	| { type: 'tileMovedIn'; sessionKey: string; paneId: string; fromLayoutId: string }
 	/** Mirrored tabs: splitter drags, as path key → the `first` child's share. */
 	| { type: 'setRatios'; ratios: Record<string, number> }
 	/** Mirrored tabs: a tile was maximised (its pane key) or restored (null). */
 	| { type: 'setZoom'; paneKey: string | null }
 	/** Mirrored tabs: a tile was dragged onto another tile's zone. */
 	| { type: 'movePane'; paneKey: string; targetPaneKey: string; zone: DropZone }
+	/** Mirrored tabs: a tile was dragged onto a strip entry (`tabId`) or the strip's + (null). */
+	| { type: 'movePaneToTab'; paneKey: string; tabId: string | null }
 	| {
 			type: 'probeResult';
 			id: number;
 			tiles: TileProbe[];
-			breadcrumb: string;
+			/** The ids of the toolbar's children. */
+			toolbar: string[];
 			message: string;
-			/** Space panels: the strip's entries as shown, `*` before the active one. */
+			/** The strip's entries as shown, `*` before the active one. */
 			strip: string[];
 			config: StoredLayoutConfig;
 			/** A Golden Layout tab drag is under way. */

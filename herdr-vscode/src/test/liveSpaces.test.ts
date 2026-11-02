@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import { bridgeRequest } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
-import { LayoutStore } from '../layouts';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
@@ -79,8 +78,7 @@ function controlledPanes(): string[] {
 			return c && { shell: c.env.shell, name: c.name };
 		}, log);
 		focus = new FocusTracker(model, () => 'hv-row');
-		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, layouts: noLayouts, rowLabel: () => 'hv-row', log });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, rowLabel: () => 'hv-row', log });
 	});
 
 	setup(async () => {
@@ -121,7 +119,7 @@ function controlledPanes(): string[] {
 
 	test('one panel titled with the space; a strip of its tabs', async () => {
 		const p = await panel.probe();
-		assert.strictEqual(panel.panel.title, 'spaces');
+		assert.strictEqual(panel.panel.title, 'hv-test · spaces');
 		assert.deepStrictEqual(p.strip.length, 2);
 		assert.ok(p.strip[0].startsWith('*'), `strip ${p.strip}`);
 		assert.strictEqual(p.strip[1], 'two');

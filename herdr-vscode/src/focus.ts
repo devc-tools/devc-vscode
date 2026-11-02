@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { parsePaneMoved } from './layouts';
-import { Snapshot, paneLabel, hasAgent, SessionModel } from './sessions';
+import { Snapshot, paneLabel, hasAgent, parsePaneMoved, SessionModel } from './sessions';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 
 /** Internal command behind the status bar item. */

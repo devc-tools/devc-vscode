@@ -44,7 +44,7 @@ suite('herdr-vscode', () => {
 		assert.strictEqual(config.get('sshPath'), 'ssh');
 		assert.strictEqual(config.get('dockerPath'), 'docker');
 		assert.strictEqual(config.get('showStoppedSessions'), false);
-		assert.strictEqual(config.get('openPaneIn'), 'layout');
+		assert.strictEqual(config.get('openPaneIn'), undefined);
 	});
 
 	test('agent filter commands set the filter', async () => {
@@ -114,43 +114,52 @@ suite('herdr-vscode', () => {
 		await vscode.commands.executeCommand('herdr.openPaneTab', 'host/none', 'w1:p1');
 	});
 
-	test('layout tabs: commands, the context menu, and the icon ships', async () => {
+	test('Layout tabs are gone; pane rows: Open in herdr Space and Focus in herdr TUI', async () => {
 		const ext = extension();
 		await ext.activate();
 		const registered = new Set(await vscode.commands.getCommands(true));
-		for (const c of ['herdr.newLayout', 'herdr.openLayout', 'herdr.renameLayout', 'herdr.deleteLayout', 'herdr.addToLayout']) {
-			assert.ok(registered.has(c), c);
+		for (const c of ['herdr.newLayout', 'herdr.openLayout', 'herdr.renameLayout', 'herdr.deleteLayout', 'herdr.addToLayout', 'herdr.cancelPlacement']) {
+			assert.ok(!registered.has(c), c);
 		}
-		const menus = ext.packageJSON.contributes.menus;
+		const contributed = ext.packageJSON.contributes;
+		assert.strictEqual(contributed.keybindings, undefined);
+		assert.strictEqual(contributed.configuration.properties['herdr.openPaneIn'], undefined);
 		assert.deepStrictEqual(
-			(menus['view/item/context'] as { command: string }[])
+			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
 				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(startSession|stopSession|newTab|splitRight|splitDown)$/.test(c)),
-			['herdr.addToLayout', 'herdr.openPaneTab', 'herdr.focusPane'],
+			['herdr.openPaneTab', 'herdr.focusPane'],
 		);
-		const focus = (ext.packageJSON.contributes.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
+		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
 		assert.strictEqual(focus?.title, 'Focus in herdr TUI');
-		await vscode.workspace.fs.stat(vscode.Uri.joinPath(ext.extensionUri, 'resources', 'layout.svg'));
-		// Without the session connected (the test host discovers nothing) nothing opens.
-		await vscode.commands.executeCommand('herdr.addToLayout', 'host/none', 'w1:p1');
 	});
 
-	test('dragging panes: Cancel Placing Pane on Escape while placing, not in the palette', async () => {
+	test('tile context menu: Split Right, Split Down, Zoom / Unzoom, Close Pane, hidden from the palette', async () => {
 		const ext = extension();
 		await ext.activate();
 		const contributed = ext.packageJSON.contributes;
-		const command = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.cancelPlacement');
-		assert.strictEqual(command?.title, 'Cancel Placing Pane');
+		const tile = "webviewId == 'herdr.tiles' && webviewSection == 'tile'";
+		assert.deepStrictEqual(contributed.menus['webview/context'], [
+			{ command: 'herdr.tile.splitRight', when: tile, group: '1_split@1' },
+			{ command: 'herdr.tile.splitDown', when: tile, group: '1_split@2' },
+			{ command: 'herdr.tile.zoom', when: `${tile} && !zoomed`, group: '2_view@1' },
+			{ command: 'herdr.tile.unzoom', when: `${tile} && zoomed`, group: '2_view@1' },
+			{ command: 'herdr.tile.close', when: tile, group: '3_close@1' },
+		]);
+		const titles = Object.fromEntries((contributed.commands as { command: string; title: string }[]).map((c) => [c.command, c.title]));
 		assert.deepStrictEqual(
-			(contributed.keybindings as { command: string }[]).filter((k) => k.command === 'herdr.cancelPlacement'),
-			[{ command: 'herdr.cancelPlacement', key: 'escape', when: 'herdr.placingPane' }],
+			['herdr.tile.splitRight', 'herdr.tile.splitDown', 'herdr.tile.zoom', 'herdr.tile.unzoom', 'herdr.tile.close'].map((c) => titles[c]),
+			['Split Right', 'Split Down', 'Zoom', 'Unzoom', 'Close Pane'],
 		);
-		assert.deepStrictEqual(
-			(contributed.menus.commandPalette as { command: string; when: string }[]).find((m) => m.command === 'herdr.cancelPlacement'),
-			{ command: 'herdr.cancelPlacement', when: 'false' },
-		);
-		// Nothing is armed in the test host.
-		await vscode.commands.executeCommand('herdr.cancelPlacement');
+		const hidden = (contributed.menus.commandPalette as { command: string; when: string }[]).filter((m) => m.command.startsWith('herdr.tile.'));
+		assert.strictEqual(hidden.length, 5);
+		assert.ok(hidden.every((m) => m.when === 'false'));
+		const registered = new Set(await vscode.commands.getCommands(true));
+		for (const c of ['herdr.tile.splitRight', 'herdr.tile.splitDown', 'herdr.tile.zoom', 'herdr.tile.unzoom', 'herdr.tile.close']) {
+			assert.ok(registered.has(c), c);
+		}
+		// No panel shows that pane: a warning, nothing else.
+		await vscode.commands.executeCommand('herdr.tile.splitRight', { webviewSection: 'tile', paneKey: 'host/none|w1:p1' });
 	});
 
 	test('pane context: the title bar, the actions, and the schemes', async () => {

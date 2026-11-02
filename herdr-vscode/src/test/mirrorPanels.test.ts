@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import { HerdrEvent } from '../bridge';
 import { FocusTracker } from '../focus';
 import { GlItem, LayoutNode } from '../layoutMapping';
-import { LayoutStore } from '../layouts';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TilesPanels } from '../tilesPanel';
@@ -56,6 +55,9 @@ class FakeHerdr {
 	tree: LayoutNode = split('right', 0.6, pane(P1), split('down', 0.5, pane(P2), pane(P3)));
 	zoomed = false;
 	focused = P1;
+	/** Refuses the `pane.move` with this index (0-based, counting every `pane.move`), as herdr's `move_result`. */
+	refuseMove: number | undefined;
+	private moves = 0;
 	/** What `set_split_ratio` stores instead of the requested ratio (herdr clamps). */
 	ratioOverride: number | undefined;
 
@@ -91,6 +93,10 @@ class FakeHerdr {
 					node.ratio = this.ratioOverride ?? (params.ratio as number);
 				}
 				return Promise.resolve({ type: 'layout_split_ratio_set', layout: this.exported() });
+			}
+			case 'pane.move': {
+				const refused = this.moves++ === this.refuseMove;
+				return Promise.resolve({ type: 'pane_move', move_result: refused ? { changed: false, reason: 'zoomed_tab' } : { changed: true } });
 			}
 			case 'pane.swap':
 				return Promise.resolve({ type: 'pane_swap', swap: { changed: true, source_pane_id: params.source_pane_id, target_pane_id: params.target_pane_id } });
@@ -131,8 +137,7 @@ suite('mirrored panels edit herdr', function () {
 		const fake = herdr as unknown as SessionModel;
 		focus = new FocusTracker(fake, () => 'row');
 		streams = new PaneStreams(() => undefined, () => undefined);
-		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model: fake, streams, focus, layouts: noLayouts, rowLabel: (k) => `row ${k}`, log: () => undefined });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model: fake, streams, focus, rowLabel: (k) => `row ${k}`, log: () => undefined });
 		mirror = panels.openTab(S, TAB)!;
 		posted = [];
 		const webview = mirror.panel.webview;
@@ -209,17 +214,29 @@ suite('mirrored panels edit herdr', function () {
 		assert.ok(Math.abs((herdr.edits()[0].params.ratio as number) - 0.7) <= 0.01, `ratio ${herdr.edits()[0].params.ratio}`);
 	});
 
-	test('a tile dropped on another swaps them in herdr (edges too: herdr refuses same-tab moves); nothing moves locally', async () => {
+	test('a tile dropped on an edge moves out and back next to the target; the centre swaps; nothing moves locally', async () => {
 		const before = shape((await mirror.probe()).config?.root);
 		await mirror.probe({ kind: 'dragTile', paneKey: pk(P1), targetPaneKey: pk(P2), zone: 'right' });
-		await waitFor('a request', () => herdr.edits().length > 0);
-		assert.deepStrictEqual(herdr.edits(), [{ method: 'pane.swap', params: { source_pane_id: P1, target_pane_id: P2 } }]);
-		assert.ok(!herdr.edits().some((r) => r.method === 'pane.move'));
+		await waitFor('two moves', () => herdr.edits().length === 2);
+		assert.deepStrictEqual(herdr.edits(), [
+			{ method: 'pane.move', params: { pane_id: P1, destination: { type: 'new_tab', workspace_id: 'w2', label: 'api-fixer' }, focus: false } },
+			{ method: 'pane.move', params: { pane_id: P1, destination: { type: 'tab', tab_id: TAB, split: 'right', target_pane_id: P2, ratio: 0.5 }, focus: false } },
+		]);
 		herdr.requests.length = 0;
 		await mirror.probe({ kind: 'dragTile', paneKey: pk(P3), targetPaneKey: pk(P1), zone: 'center' });
 		await waitFor('a request', () => herdr.edits().length > 0);
 		assert.deepStrictEqual(herdr.edits(), [{ method: 'pane.swap', params: { source_pane_id: P3, target_pane_id: P1 } }]);
 		assert.deepStrictEqual(shape((await mirror.probe()).config?.root), before, 'the tiles wait for the export');
+	});
+
+	test('a refused move back stops the drop: no swap after it, and the layout is re-exported', async () => {
+		herdr.refuseMove = 1;
+		await mirror.probe({ kind: 'dragTile', paneKey: pk(P2), targetPaneKey: pk(P1), zone: 'top' });
+		await waitFor('two moves', () => herdr.edits().length === 2);
+		const exports = herdr.requests.filter((r) => r.method === 'layout.export').length;
+		await sleep(400);
+		assert.deepStrictEqual(herdr.edits().map((r) => r.method), ['pane.move', 'pane.move'], 'no pane.swap');
+		assert.ok(herdr.requests.filter((r) => r.method === 'layout.export').length > exports, 'a re-export after the drop');
 	});
 
 	test('no drop onto itself, and no drag while a tile is maximised', async () => {

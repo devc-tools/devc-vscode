@@ -237,11 +237,10 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 		private readonly selection: SelectedSession,
 		/** herdr's `[ui.sidebar.*]` rows; phase 19's rows without it. */
 		private readonly sidebar?: SidebarRowsSource,
-		dragAndDropController?: vscode.TreeDragAndDropController<AgentRow>,
 	) {
 		this.filterValue = toFilter(state.get(AGENTS_FILTER_KEY));
 		this.scopeValue = toScope(state.get(AGENTS_SCOPE_KEY));
-		this.treeView = vscode.window.createTreeView('herdr.agents', { treeDataProvider: this, dragAndDropController });
+		this.treeView = vscode.window.createTreeView('herdr.agents', { treeDataProvider: this });
 		this.disposables.push(
 			this.treeView,
 			this.emitter,
@@ -254,11 +253,6 @@ export class AgentsView implements vscode.TreeDataProvider<AgentRow>, vscode.Dis
 			}),
 			this.treeView.onDidChangeVisibility(() => this.tick()),
 			...(sidebar ? [sidebar.onDidChange(() => this.update())] : []),
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration('herdr.openPaneIn')) {
-					this.emitter.fire();
-				}
-			}),
 		);
 		void vscode.commands.executeCommand('setContext', AGENTS_FILTER_KEY, this.filterValue);
 		void vscode.commands.executeCommand('setContext', AGENTS_SCOPE_KEY, this.scopeValue);

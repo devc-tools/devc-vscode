@@ -6,13 +6,12 @@ import * as vscode from 'vscode';
 import { BridgeError, endConnection, HerdrEvent } from './bridge';
 import { Environment, EnvironmentsChange } from './environments';
 import { GIT_SCHEME } from './git';
-import { parsePaneMoved } from './layouts';
 import { BindMount, CONTAINER_SCHEME, environmentPathOf, SSH_SCHEME } from './paths';
 import { RemoteShell, shQuote } from './remoteShell';
-import { ConnectionState, Snapshot, SnapshotPane } from './sessions';
+import { ConnectionState, parsePaneMoved, Snapshot, SnapshotPane } from './sessions';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 import { AgentRow, agentRows, sortAndFilterAgents } from './views/agentsView';
-import { openPaneIn, paneClickCommand, PaneRef } from './views/spacesView';
+import { paneClickCommand, PaneRef } from './views/spacesView';
 
 /**
  * Comment threads on editor lines that ask a herdr agent about them. A comment
@@ -411,7 +410,7 @@ export interface AgentReviewDeps {
 	followed(): string | undefined;
 	/** The picker; a QuickPick by default. */
 	pick?(candidates: readonly Candidate[]): Promise<Candidate | undefined>;
-	/** Shows a pane the way a pane row click does; by default per `herdr.openPaneIn`. */
+	/** Shows a pane the way a pane row click does (its space's tab); tests replace it. */
 	showPane?(ref: PaneRef): Thenable<unknown>;
 	/** The reply root in every environment. Tests only. */
 	replyRoot?: string;
@@ -654,7 +653,7 @@ export class AgentReviewController implements vscode.Disposable {
 			await this.deps.showPane(ref);
 			return;
 		}
-		const cmd = paneClickCommand(openPaneIn(), ref);
+		const cmd = paneClickCommand(ref);
 		await vscode.commands.executeCommand(cmd.command, ...(cmd.arguments ?? []));
 	}
 

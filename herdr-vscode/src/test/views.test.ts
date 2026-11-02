@@ -4,12 +4,12 @@ import { Environment } from '../environments';
 import { focusedPaneStatus } from '../focus';
 import { LocalShell } from '../remoteShell';
 import { EnvState, SessionConnection } from '../sessions';
-import { countsDescription, statusIconSpec, statusRank, worstStatus } from '../status';
+import { countsDescription, statusIcon, statusIconSpec, statusRank, worstStatus } from '../status';
 import { activeTabOf, eventTouchesTab, stripTabs, tileMetas } from '../tilesPanel';
 import { makePaneKey, splitPaneKey } from '../tilesProtocol';
 import { sessionStatusText } from '../status';
 import { agentRows, agentsViewDescription, AgentSource, blockedCount, filterPickItems, scopeSources, sortAndFilterAgents, toFilter, toScope } from '../views/agentsView';
-import { effectiveSelection, groupOf, sessionItemContext, sessionRows } from '../views/sessionsView';
+import { effectiveSelection, groupOf, sessionItemContext, sessionRows, sessionRowStatus } from '../views/sessionsView';
 import { agentTooltip, buildSpaces, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
@@ -34,8 +34,8 @@ suite('status presentation', () => {
 		assert.deepStrictEqual(statusIconSpec('blocked'), { id: 'circle-filled', color: 'charts.orange' });
 		assert.deepStrictEqual(statusIconSpec('working'), { id: 'circle-filled', color: 'charts.blue' });
 		assert.deepStrictEqual(statusIconSpec('done'), { id: 'circle-filled', color: 'charts.green' });
-		assert.deepStrictEqual(statusIconSpec('idle'), { id: 'circle-outline' });
-		assert.deepStrictEqual(statusIconSpec('unknown'), { id: 'circle-outline' });
+		assert.deepStrictEqual(statusIconSpec('idle'), { id: 'circle-filled', color: 'disabledForeground' });
+		assert.deepStrictEqual(statusIconSpec('unknown'), { id: 'circle-filled', color: 'disabledForeground' });
 		assert.deepStrictEqual(
 			(['blocked', 'working', 'done', 'idle', 'unknown'] as const).map(statusRank),
 			[0, 1, 2, 3, 4],
@@ -88,12 +88,12 @@ suite('Spaces items', () => {
 		assert.strictEqual(agentItem.contextValue, 'herdr.pane.agent');
 		assert.strictEqual((agentItem.iconPath as vscode.ThemeIcon).id, 'circle-filled');
 		assert.deepStrictEqual(agentItem.command?.arguments, ['host/code-wksp', 'w2:p1']);
-		assert.strictEqual(agentItem.command?.command, 'herdr.addToLayout', 'the default of herdr.openPaneIn');
+		assert.strictEqual(agentItem.command?.command, 'herdr.openPaneTab');
 
 		const shellItem = spacesTreeItem(shellPane);
 		assert.strictEqual(shellItem.description, '/src/api/test', 'foreground_cwd before cwd');
 		assert.strictEqual(shellItem.contextValue, 'herdr.pane.shell');
-		assert.strictEqual((shellItem.iconPath as vscode.ThemeIcon).id, 'terminal');
+		assert.strictEqual(shellItem.iconPath, undefined, 'a shell has no icon');
 
 		const codex = spaces[0].children[0].children[0];
 		assert.strictEqual(codex.label, 'Codex', 'display_agent when agents[] has no name');
@@ -117,15 +117,10 @@ suite('Spaces items', () => {
 suite('pane row clicks', () => {
 	const ref = { sessionKey: 'host/s', paneId: 'w1:p1' };
 
-	test('per herdr.openPaneIn', () => {
-		assert.deepStrictEqual(paneClickCommand('layout', ref), { command: 'herdr.addToLayout', title: 'Add to Layout', arguments: ['host/s', 'w1:p1'] });
-		assert.deepStrictEqual(paneClickCommand('herdr', ref), { command: 'herdr.openPaneTab', title: 'Open in herdr Space', arguments: ['host/s', 'w1:p1'] });
-	});
-
-	test('a row takes the setting when it is built', () => {
+	test('pane and agent rows open the pane in its space', () => {
+		assert.deepStrictEqual(paneClickCommand(ref), { command: 'herdr.openPaneTab', title: 'Open in herdr Space', arguments: ['host/s', 'w1:p1'] });
 		const pane = snapshot().panes[0];
-		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref, 'herdr').command?.command, 'herdr.openPaneTab');
-		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref, 'layout').command?.command, 'herdr.addToLayout');
+		assert.strictEqual(paneTreeItem('i', 'l', undefined, pane, ref).command?.command, 'herdr.openPaneTab');
 	});
 
 	test('tab rows open their space on that tab; space rows open the space', () => {
@@ -468,6 +463,23 @@ suite('Sessions rows', () => {
 		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT));
 		raw.panes = raw.panes.filter((p: { agent?: string }) => !p.agent);
 		assert.strictEqual(stripTabs(snapshot(raw), 'w2', undefined)[0].status, 'shell');
+	});
+
+	test('icons: off is an empty circle; idle (and a connected session or space without agents) is filled gray', () => {
+		assert.strictEqual(statusIcon(undefined).id, 'circle-outline');
+		const idle = statusIcon('idle');
+		assert.strictEqual(idle.id, 'circle-filled');
+		assert.strictEqual((idle.color as vscode.ThemeColor).id, 'disabledForeground');
+		const raw = JSON.parse(JSON.stringify(RAW_SNAPSHOT));
+		raw.panes = raw.panes.filter((p: { agent?: string }) => !p.agent);
+		const noAgents = snapshot(raw);
+		assert.strictEqual(sessionRowStatus(undefined), undefined, 'not connected: off');
+		assert.strictEqual(sessionRowStatus(noAgents), 'idle');
+		assert.strictEqual(sessionRowStatus(snapshot()), 'blocked');
+		const space = buildSpaces(noAgents, 'host/s')[0];
+		const icon = spacesTreeItem(space).iconPath as vscode.ThemeIcon;
+		assert.strictEqual(icon.id, 'circle-filled');
+		assert.strictEqual((icon.color as vscode.ThemeColor).id, 'disabledForeground');
 	});
 
 	test('tile headers', () => {

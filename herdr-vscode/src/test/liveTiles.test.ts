@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
-import { LayoutStore } from '../layouts';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
@@ -77,8 +76,7 @@ function controllers(): string[] {
 			return c && { shell: c.env.shell, name: c.name };
 		}, log);
 		focus = new FocusTracker(model, () => 'hv-row');
-		const noLayouts = new LayoutStore({ get: () => undefined, update: () => Promise.resolve() });
-		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, layouts: noLayouts, rowLabel: () => 'hv-row', log });
+		panels = new TilesPanels({ extensionUri: ext.extensionUri, model, streams, focus, rowLabel: () => 'hv-row', log });
 
 		// A new tab holding three panes: one split right, then the right one split down.
 		const workspaceId = model.connection(key)!.snapshot!.workspaces[0].workspace_id;
@@ -108,14 +106,13 @@ function controllers(): string[] {
 
 	test('opens with the same arrangement and live output in each tile', async () => {
 		panel = panels.openTab(key, tabId)!;
-		assert.strictEqual(panel.panel.title, spaceLabel(), 'titled with the space');
+		assert.strictEqual(panel.panel.title, `hv-test · ${spaceLabel()}`, 'titled with the session and space');
 		assert.strictEqual(panels.openTab(key, tabId), panel, 'the same tab reveals the same panel');
 		const { value, after } = await waitFor('three painted tiles', 15000, async () => {
 			const p = await panel.probe();
 			return p.tiles.length === 3 && p.tiles.every((t) => t.text.length > 0) && p;
 		});
 		console.log(`[live-tiles] three painted tiles after ${after} ms`, JSON.stringify(value.tiles.map((t) => [t.title, t.x, t.y, t.width, t.height, t.cols, t.rows])));
-		assert.strictEqual(value.breadcrumb, `hv-row › ${spaceLabel()}`);
 		assert.ok(value.strip.includes('*mirror'), `strip ${value.strip}`);
 		const [a, b, c] = [tile(value.tiles, p1)!, tile(value.tiles, p2)!, tile(value.tiles, p3)!];
 		assert.ok(b.x > a.x, 'p2 is right of p1');
@@ -143,11 +140,9 @@ function controllers(): string[] {
 		panel.onMessage({ type: 'input', paneKey: pk(p2), text: '\x03' });
 	});
 
-	test('Split Right: the new tile appears within 1 s, existing terminals are kept', async () => {
+	test('Split Right (tile menu): the new tile appears within 1 s, existing terminals are kept', async () => {
 		const before = await panel.probe();
-		panel.onMessage({ type: 'focus', paneKey: pk(p3) });
-		await sleep(50);
-		panel.onMessage({ type: 'split', direction: 'right' });
+		void panel.split(p3, 'right');
 		const { value, after } = await waitFor('a fourth painted tile', 3000, async () => {
 			const p = await panel.probe();
 			return p.tiles.length === 4 && p.tiles.every((t) => t.text.length > 0) && p;
@@ -244,7 +239,7 @@ function controllers(): string[] {
 			const p = await panel.probe();
 			return p.tiles.length === 3 && p.tiles.every((t) => t.text.length > 0);
 		});
-		assert.strictEqual(restored.title, spaceLabel());
+		assert.strictEqual(restored.title, `hv-test · ${spaceLabel()}`);
 	});
 
 	test('the shown herdr tab closed: the panel shows the space\'s next active tab and releases the old streams', async () => {
@@ -267,7 +262,7 @@ function controllers(): string[] {
 		const id = created.root_pane.pane_id;
 		await waitFor('new pane', 5000, () => model.connection(key)?.snapshot?.panes.some((p) => p.pane_id === id));
 		const opened = panels.openPaneTab(key, id)!;
-		assert.strictEqual(opened.panel.title, spaceLabel());
+		assert.strictEqual(opened.panel.title, `hv-test · ${spaceLabel()}`);
 		await waitFor('third shown', 5000, async () => (await opened.probe()).strip.includes('*third'));
 		await waitFor('focus report', 10000, () => focus.lastFocused === pk(id));
 		opened.panel.dispose();

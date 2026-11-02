@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Environment, HOST_KEY } from '../environments';
 import { EnvState, SessionConnection, SessionModel, sessionKey, Snapshot, hasAgent } from '../sessions';
-import { countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
+import { AgentStatus, countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
 
 /** The session the Spaces view shows, by session key. */
 export const SELECTED_SESSION_STATE = 'herdr.selectedSession';
@@ -50,6 +50,11 @@ export function groupOf(env: Pick<Environment, 'kind' | 'key' | 'alias'>): Group
 }
 
 /** A connected session's agent status counts, as the row description. */
+/** A session row's icon status: connected, the worst agent status (idle with none); not connected, off (undefined). */
+export function sessionRowStatus(snapshot: Snapshot | undefined): AgentStatus | undefined {
+	return snapshot ? (worstStatus(snapshot.panes.filter(hasAgent).map((p) => p.agent_status)) ?? 'idle') : undefined;
+}
+
 export function snapshotDescription(snapshot: Snapshot): string {
 	return countsDescription(countStatuses(snapshot.panes.filter(hasAgent).map((p) => p.agent_status)));
 }
@@ -290,9 +295,7 @@ export class SessionsView implements vscode.TreeDataProvider<SessionsNode>, vsco
 		item.description = node.description;
 		item.contextValue = sessionItemContext(node, this.model.environments.get(node.envKey)?.kind);
 		item.tooltip = node.tooltip;
-		item.iconPath = statusIcon(
-			node.snapshot ? worstStatus(node.snapshot.panes.filter(hasAgent).map((p) => p.agent_status)) : undefined,
-		);
+		item.iconPath = statusIcon(sessionRowStatus(node.snapshot));
 		return item;
 	}
 

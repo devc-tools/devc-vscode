@@ -6,16 +6,13 @@ import '@xterm/xterm/css/xterm.css';
 import './tiles.css';
 import { componentStates, PaneComponentState, SPLIT_ID_PREFIX, StoredLayoutConfig } from '../layoutMapping';
 import { changedRatios, dropZone, DropZone, offeredZone, sameRatio } from '../mirrorEdit';
-import { addPaneAtRoot, addPlacement, layoutPaneKeys, PANE_MIME, parseTileDrag, rewritePane } from '../layouts';
-import { DropPoint, HostMessage, makePaneKey, ProbeAction, StripTab, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
-import { GlDrop } from './glDrop';
+import { HostMessage, makePaneKey, ProbeAction, StripTab, TileMeta, TileProbe, TileStreamState, WebviewMessage } from '../tilesProtocol';
 import { createWheelAccumulator, wrapPaste } from './input';
 import { findPathLinks } from './links';
 
 /**
- * The `herdr.tiles` webview: a toolbar, and a Golden Layout area of xterm tiles,
- * mirroring a herdr tab or holding a saved layout (`init` says which, as a class
- * on <body>). herdr's frames are complete screen paints with no terminal modes in them, so
+ * The `herdr.tiles` webview: a tab strip of the space's herdr tabs, and a Golden
+ * Layout area of xterm tiles mirroring the shown tab. herdr's frames are complete screen paints with no terminal modes in them, so
  * each xterm is a plain screen painter: no scrollback (herdr owns it, and the
  * wheel scrolls it), and input goes out as typed.
  */
@@ -26,8 +23,6 @@ const vscode = acquireVsCodeApi();
 const post = (msg: WebviewMessage) => vscode.postMessage(msg);
 
 const RESIZE_DEBOUNCE_MS = 100;
-/** A Layout panel's Golden Layout config goes to the host this long after it last changed. */
-const SAVE_DEBOUNCE_MS = 500;
 /** Below this a tile is hidden or being laid out, not really that small. */
 const MIN_FIT_PX = 20;
 
@@ -51,24 +46,15 @@ const containers = new Map<string, ComponentContainer>();
 const tabs = new Map<string, HTMLElement>();
 const metas = new Map<string, TileMeta>();
 let focusedKey: string | undefined;
-/** The stack that last held the focused tile: it outlives that tile being closed. */
-let lastStack: Stack | undefined;
 let pendingFocus: string | undefined;
+/** Whether {@link pendingFocus} came from the host. */
+let pendingAnnounce = false;
 let nextSerial = 0;
 let font: { fontFamily: string; fontSize: number } | undefined;
-let kind: 'mirror' | 'layout' | undefined;
-/** A Layout panel's layout id, for grip drags. */
-let layoutId: string | undefined;
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
-const breadcrumbEl = document.getElementById('breadcrumb') as HTMLElement;
 const messageEl = document.getElementById('message') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
 const rootEl = document.getElementById('tiles') as HTMLElement;
-const placeOverlayEl = document.getElementById('place-overlay') as HTMLElement;
-const placeTitleEl = document.getElementById('place-title') as HTMLElement;
-const placeHintEl = document.getElementById('place-hint') as HTMLElement;
-const placeTextEl = document.getElementById('place-text') as HTMLElement;
 
 // ── Theme ───────────────────────────────────────────────────────────────────
 
@@ -116,6 +102,7 @@ function createTile(paneKey: string): Tile {
 	host.className = 'tile-host';
 	host.dataset.paneKey = paneKey;
 	host.append(termEl, overlay);
+	setMenuContext(host, paneKey);
 
 	const term = new Terminal({
 		scrollback: 0,
@@ -270,9 +257,30 @@ function disposeTile(tile: Tile): void {
 	}
 }
 
+/**
+ * A tile's right-click menu (`webview/context` in package.json): VS Code reads
+ * `data-vscode-context` up from the clicked element. `zoomed` picks Zoom or Unzoom.
+ */
+function setMenuContext(el: HTMLElement, paneKey: string): void {
+	el.dataset.vscodeContext = JSON.stringify({
+		webviewSection: 'tile',
+		paneKey,
+		zoomed: appliedZoom === paneKey,
+		preventDefaultContextMenuItems: true,
+	});
+}
+
+function updateMenuContexts(): void {
+	for (const tile of tiles.values()) {
+		setMenuContext(tile.host, tile.paneKey);
+	}
+	for (const [paneKey, tab] of tabs) {
+		setMenuContext(tab, paneKey);
+	}
+}
+
 function setFocused(paneKey: string): void {
 	focusedKey = paneKey;
-	lastStack = focusedStack() ?? lastStack;
 	for (const tile of tiles.values()) {
 		tile.host.classList.toggle('tile-focused', tile.paneKey === paneKey);
 	}
@@ -290,10 +298,13 @@ function settleTile(tile: Tile): void {
 	tile.term.refresh(0, tile.term.rows - 1);
 }
 
-function focusTile(paneKey: string): void {
+/** `announce`: the host asked, so the panel's focused tile changes even if the keyboard stays elsewhere. */
+function focusTile(paneKey: string, announce = false): void {
 	const tile = tiles.get(paneKey);
 	if (tile?.term.element) {
+		const wanted = pendingFocus === paneKey && pendingAnnounce;
 		pendingFocus = undefined;
+		pendingAnnounce = false;
 		// A tile behind another tab in its stack comes to the front first.
 		const item = containers.get(paneKey)?.parent;
 		const stack = item?.parentItem;
@@ -301,8 +312,12 @@ function focusTile(paneKey: string): void {
 			stack.setActiveComponentItem(item, false);
 		}
 		tile.term.focus();
+		if (announce || wanted) {
+			setFocused(paneKey);
+		}
 	} else {
 		pendingFocus = paneKey;
+		pendingAnnounce = announce;
 	}
 }
 
@@ -331,16 +346,6 @@ function showStreamState(paneKey: string, state: TileStreamState): void {
 		case 'ended':
 			text.textContent = `Disconnected: ${state.reason}.`;
 			action('Reconnect', () => post({ type: 'reconnect', paneKey }));
-			break;
-		case 'waiting':
-			text.textContent = `Waiting for ${state.label}…`;
-			tile.overlay.append(text);
-			tile.term.reset();
-			break;
-		case 'gone':
-			text.textContent = 'This pane is gone.';
-			action('Remove', () => containers.get(paneKey)?.close());
-			tile.term.reset();
 			break;
 	}
 }
@@ -387,9 +392,7 @@ layout.on('tabCreated', (tab) => {
 	}
 	const paneKey = makePaneKey(state.sessionKey, state.paneId);
 	tabs.set(paneKey, tab.element);
-	if (kind === 'layout') {
-		tab.element.prepend(createGrip(paneKey, state));
-	}
+	setMenuContext(tab.element, paneKey);
 	applyTileMeta(paneKey);
 });
 
@@ -412,12 +415,11 @@ function paneKeyAt(target: Element): string | undefined {
 	return (hosts.find((host) => host.offsetParent !== null) ?? hosts[0])?.dataset.paneKey;
 }
 
-// In a mirrored tab close goes to herdr: Golden Layout's own handlers must not run, or the tile would
-// go before the user has answered. The layout changes when herdr says so. Capture phase, so this
-// comes first. In a Layout tab Golden Layout's close is what it should be: the tile leaves the layout.
+// Close goes to herdr: Golden Layout's own handlers must not run, or the tile would go before the
+// user has answered. The layout changes when herdr says so. Capture phase, so this comes first.
 function interceptClose(ev: Event): void {
 	const target = ev.target as Element;
-	if (kind === 'layout' || !target.closest('.lm_close, .lm_close_tab')) {
+	if (!target.closest('.lm_close, .lm_close_tab')) {
 		return;
 	}
 	ev.stopPropagation();
@@ -435,8 +437,8 @@ rootEl.addEventListener(
 		if (!target.closest('.lm_header')) {
 			return;
 		}
-		// Middle click on a tab is Golden Layout's close: in a mirrored tab, not without asking.
-		if (ev.button === 1 && kind !== 'layout') {
+		// Middle click on a tab is Golden Layout's close: not without asking.
+		if (ev.button === 1) {
 			ev.stopPropagation();
 			return;
 		}
@@ -470,21 +472,13 @@ function applyLayout(config: StoredLayoutConfig | LayoutConfig): void {
 	for (const paneKey of wanted) {
 		applyTileMeta(paneKey);
 	}
+	updateMenuContexts();
 	if (pendingFocus) {
 		focusTile(pendingFocus);
 	} else if (hadFocus && focusedKey) {
 		// Re-parenting the terminal drops the keyboard focus; typing must not notice a re-layout.
 		focusTile(focusedKey);
 	}
-}
-
-// ── Layout tabs ─────────────────────────────────────────────────────────────
-
-/** The stack holding the panel's focused tile. */
-function focusedStack(): Stack | undefined {
-	const item: ComponentItem | undefined = focusedKey ? containers.get(focusedKey)?.parent : undefined;
-	const stack = item?.parentItem;
-	return stack instanceof Stack ? stack : undefined;
 }
 
 /** Every stack in the layout, in tree order. */
@@ -495,90 +489,9 @@ function allStacks(item: ContentItem | undefined = layout.rootItem): Stack[] {
 	return item instanceof Stack ? [item] : item.contentItems.flatMap((child) => allStacks(child));
 }
 
-/** Where a new pane goes: the focused stack, else the last one focused, else the first. */
-function targetStack(): Stack | undefined {
-	const stacks = allStacks();
-	return focusedStack() ?? (lastStack && stacks.includes(lastStack) ? lastStack : stacks[0]);
-}
-
-/** Adds a pane as a tab in {@link targetStack}; a split is only ever the user's drag. A pane already here is only focused. */
-function addOrReveal(msg: Extract<HostMessage, { type: 'addTile' }>): void {
-	const state: PaneComponentState = { sessionKey: msg.sessionKey, paneId: msg.paneId };
-	const paneKey = makePaneKey(msg.sessionKey, msg.paneId);
-	const stack = targetStack();
-	const placement = addPlacement(layout.saveLayout() as unknown as StoredLayoutConfig, state, stack !== undefined);
-	if (placement === 'focusedStack' && stack) {
-		stack.addComponent('pane', state as unknown as JsonValue, msg.title);
-		const tile = tiles.get(paneKey);
-		if (tile) {
-			settleTile(tile);
-		}
-	} else if (placement === 'root') {
-		const current = LayoutConfig.fromResolved(layout.saveLayout());
-		applyLayout(addPaneAtRoot(current as unknown as StoredLayoutConfig, state, msg.title));
-	}
-	focusTile(paneKey);
-	// The webview may not have the keyboard yet, so xterm's focus event may not come.
-	setFocused(paneKey);
-}
-
-/** A pane got a new id: the tile follows, on a new stream, and the old stream is released. */
-function movePane(msg: Extract<HostMessage, { type: 'paneMoved' }>): void {
-	if (isDragging()) {
-		setTimeout(() => movePane(msg), 200);
-		return;
-	}
-	const from = makePaneKey(msg.sessionKey, msg.from);
-	const current = LayoutConfig.fromResolved(layout.saveLayout()) as unknown as StoredLayoutConfig;
-	const moved = rewritePane(current, msg.sessionKey, msg.from, msg.to);
-	if (moved === current) {
-		return;
-	}
-	const wasFocused = focusedKey === from;
-	applyLayout(moved);
-	if (wasFocused) {
-		focusTile(makePaneKey(msg.sessionKey, msg.to));
-		setFocused(makePaneKey(msg.sessionKey, msg.to));
-	}
-}
-
-function saveNow(): void {
-	saveTimer = undefined;
-	post({ type: 'layoutChanged', config: layout.saveLayout() as unknown as StoredLayoutConfig });
-}
-
 // Golden Layout throttles this to an animation frame, so a drag's proxy is in the document by the
 // time its first `stateChanged` arrives; the drop sends another.
-function onLayoutChanged(): void {
-	if (kind === 'mirror') {
-		onMirrorStateChanged();
-		return;
-	}
-	if (kind !== 'layout' || isDragging()) {
-		return;
-	}
-	const wanted = new Set(layoutPaneKeys(layout.saveLayout() as unknown as StoredLayoutConfig));
-	document.body.classList.toggle('layout-empty', wanted.size === 0);
-	// A tile closed in Golden Layout: its pane stays in herdr, only the terminal and stream go.
-	for (const tile of [...tiles.values()]) {
-		if (!wanted.has(tile.paneKey)) {
-			disposeTile(tile);
-		}
-	}
-	clearTimeout(saveTimer);
-	saveTimer = setTimeout(saveNow, SAVE_DEBOUNCE_MS);
-}
-layout.on('stateChanged', onLayoutChanged);
-// Closing the only stack changes state without saying so: only the destroyed item tells.
-layout.on('itemDestroyed', () => setTimeout(onLayoutChanged));
-
-// The panel closing or the window reloading must not lose the last half second.
-window.addEventListener('pagehide', () => {
-	if (saveTimer !== undefined) {
-		clearTimeout(saveTimer);
-		saveNow();
-	}
-});
+layout.on('stateChanged', () => onMirrorStateChanged());
 
 function showEmpty(text: string): void {
 	for (const tile of [...tiles.values()]) {
@@ -592,228 +505,7 @@ function showEmpty(text: string): void {
 	messageEl.hidden = false;
 }
 
-// ── Dragging panes in ───────────────────────────────────────────────────────
-
-const drop = new GlDrop(layout);
-
-/** Puts a pane at a point by Golden Layout's drop zones; a pane already here moves or is only focused. */
-function placePaneAt(x: number, y: number, sessionKey: string, paneId: string, title: string): boolean {
-	const paneKey = makePaneKey(sessionKey, paneId);
-	drop.calculateAreas();
-	const result = drop.dropAt(x, y, { sessionKey, paneId }, title, containers.get(paneKey)?.parent, targetStack);
-	if (result.kind === 'none') {
-		return false;
-	}
-	const tile = tiles.get(paneKey);
-	if (tile) {
-		settleTile(tile);
-	}
-	focusTile(paneKey);
-	setFocused(paneKey);
-	return true;
-}
-
-/** A tree drag armed this panel: the pane goes where the pointer next presses or lets go. */
-let placing: { sessionKey: string; paneId: string; title: string; hovered: boolean } | undefined;
-/** The click that follows a press used for placing goes nowhere else either. */
-let swallowClickUntil = 0;
-
-function startPlacing(msg: Extract<HostMessage, { type: 'placePane' }>): void {
-	placing = { sessionKey: msg.sessionKey, paneId: msg.paneId, title: msg.title, hovered: false };
-	document.body.classList.add('placing');
-	placeTitleEl.textContent = `Place "${msg.title}"`;
-	placeOverlayEl.hidden = false;
-	placeHintEl.hidden = true;
-}
-
-function endPlacing(): void {
-	placing = undefined;
-	document.body.classList.remove('placing');
-	placeOverlayEl.hidden = true;
-	placeHintEl.hidden = true;
-	drop.clear();
-}
-
-function cancelPlacing(): void {
-	if (placing) {
-		endPlacing();
-		post({ type: 'placeCancel' });
-	}
-}
-
-function hoverPlacing(): void {
-	if (!placing || placing.hovered) {
-		return;
-	}
-	placing.hovered = true;
-	placeOverlayEl.hidden = true;
-	post({ type: 'placeHover' });
-	layout.maximisedStack?.toggleMaximise();
-	drop.calculateAreas();
-	placeTextEl.textContent = `Placing "${placing.title}"`;
-	placeHintEl.hidden = false;
-}
-
-/** Places the armed pane at the point; with no zone there, placing goes on. */
-function placeArmedAt(x: number, y: number): void {
-	if (!placing) {
-		return;
-	}
-	const { sessionKey, paneId, title } = placing;
-	if (placePaneAt(x, y, sessionKey, paneId, title)) {
-		endPlacing();
-		post({ type: 'placed', sessionKey, paneId });
-	}
-}
-
-/** The toolbar keeps working while placing: its Cancel is how a mouse cancels. */
-const inToolbar = (ev: Event) => Boolean((ev.target as Element | null)?.closest?.('#toolbar'));
-
-window.addEventListener(
-	'pointermove',
-	(ev) => {
-		if (placing) {
-			hoverPlacing();
-			drop.highlight(ev.pageX, ev.pageY);
-		}
-	},
-	true,
-);
-window.addEventListener('pointerover', () => hoverPlacing(), true);
-// Capture phase, and the press swallowed: otherwise xterm starts a selection or takes the focus,
-// and Golden Layout starts a tab or splitter drag.
-for (const type of ['pointerdown', 'pointerup'] as const) {
-	window.addEventListener(
-		type,
-		(ev) => {
-			if (!placing || inToolbar(ev)) {
-				return;
-			}
-			ev.preventDefault();
-			ev.stopPropagation();
-			swallowClickUntil = performance.now() + 1000;
-			if (type === 'pointerdown' && ev.button !== 0) {
-				return;
-			}
-			hoverPlacing();
-			placeArmedAt(ev.pageX, ev.pageY);
-		},
-		true,
-	);
-}
-window.addEventListener(
-	'click',
-	(ev) => {
-		if (performance.now() < swallowClickUntil && !inToolbar(ev)) {
-			swallowClickUntil = 0;
-			ev.preventDefault();
-			ev.stopPropagation();
-		}
-	},
-	true,
-);
-window.addEventListener(
-	'keydown',
-	(ev) => {
-		if (placing && ev.key === 'Escape') {
-			ev.preventDefault();
-			ev.stopPropagation();
-			cancelPlacing();
-		}
-	},
-	true,
-);
-document.documentElement.addEventListener('pointerleave', () => {
-	if (placing?.hovered) {
-		cancelPlacing();
-	}
-});
-
-/** A tile's grip: an HTML5 drag, which (unlike a tree drag) reaches other Layout tabs of the window. */
-function createGrip(paneKey: string, state: PaneComponentState): HTMLElement {
-	const grip = document.createElement('span');
-	grip.className = 'tile-grip';
-	grip.draggable = true;
-	grip.title = 'Drag to another Layout tab';
-	// Golden Layout starts its own tab drag on pointerdown; not preventDefault, which would stop this one.
-	grip.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-	grip.addEventListener('dragstart', (ev) => {
-		if (!ev.dataTransfer || !layoutId) {
-			return;
-		}
-		const title = containers.get(paneKey)?.title ?? '';
-		ev.dataTransfer.setData(PANE_MIME, JSON.stringify({ sessionKey: state.sessionKey, paneId: state.paneId, title, layoutId }));
-		ev.dataTransfer.effectAllowed = 'move';
-	});
-	return grip;
-}
-
-/** Drags with a pane in them, entered and not yet left: at 0 the highlight goes. */
-let dragDepth = 0;
-
-function carriesPane(ev: DragEvent): boolean {
-	return [...(ev.dataTransfer?.types ?? [])].includes(PANE_MIME);
-}
-
-function onDragOver(ev: DragEvent): void {
-	if (!carriesPane(ev)) {
-		return;
-	}
-	if (kind !== 'layout') {
-		if (ev.dataTransfer) {
-			ev.dataTransfer.dropEffect = 'none';
-		}
-		return;
-	}
-	ev.preventDefault();
-	if (ev.dataTransfer) {
-		ev.dataTransfer.dropEffect = 'move';
-	}
-	const first = dragDepth === 0;
-	if (ev.type === 'dragenter' || first) {
-		dragDepth++;
-	}
-	if (first) {
-		drop.calculateAreas();
-	}
-	drop.highlight(ev.pageX, ev.pageY);
-}
-window.addEventListener('dragenter', onDragOver, true);
-window.addEventListener('dragover', onDragOver, true);
-window.addEventListener(
-	'dragleave',
-	(ev) => {
-		if (kind === 'layout' && carriesPane(ev) && dragDepth > 0 && --dragDepth === 0) {
-			drop.clear();
-		}
-	},
-	true,
-);
-window.addEventListener(
-	'drop',
-	(ev) => {
-		if (kind !== 'layout' || !carriesPane(ev)) {
-			return;
-		}
-		dragDepth = 0;
-		const tile = parseTileDrag(ev.dataTransfer?.getData(PANE_MIME) ?? '');
-		if (tile) {
-			ev.preventDefault();
-			if (placePaneAt(ev.pageX, ev.pageY, tile.sessionKey, tile.paneId, tile.title) && tile.layoutId !== layoutId) {
-				post({ type: 'tileMovedIn', sessionKey: tile.sessionKey, paneId: tile.paneId, fromLayoutId: tile.layoutId });
-			}
-		} else if (placing) {
-			ev.preventDefault();
-			hoverPlacing();
-			placeArmedAt(ev.pageX, ev.pageY);
-		} else {
-			drop.clear();
-		}
-	},
-	true,
-);
-
-// ── Mirrored tabs: editing herdr's layout ───────────────────────────────────
+// ── Editing herdr's layout ───────────────────────────────────
 
 /** A Golden Layout row or column, with the members its `.d.ts` leaves out. */
 type SplitItem = ContentItem & { updateSize(force: boolean): void };
@@ -907,6 +599,7 @@ function flushPendingRatios(): void {
 /** herdr's zoom: that pane's stack maximised, or none. Recorded first, so the `stateChanged` posts nothing. */
 function applyZoom(paneKey: string | null): void {
 	appliedZoom = paneKey;
+	updateMenuContexts();
 	const item = paneKey === null ? undefined : containers.get(paneKey)?.parent.parentItem;
 	const stack = item instanceof Stack ? item : undefined;
 	if (stack?.isMaximised) {
@@ -930,6 +623,7 @@ function onMirrorStateChanged(): void {
 	const zoom = max ? (paneKeyAt(max.element) ?? null) : null;
 	if (zoom !== appliedZoom) {
 		appliedZoom = zoom;
+		updateMenuContexts();
 		post({ type: 'setZoom', paneKey: zoom });
 	}
 	if (splitterReleased === undefined) {
@@ -948,7 +642,7 @@ function onMirrorStateChanged(): void {
 window.addEventListener(
 	'pointerdown',
 	(ev) => {
-		if (kind === 'mirror' && ev.button === 0 && (ev.target as Element | null)?.closest?.('.lm_splitter')) {
+		if (ev.button === 0 && (ev.target as Element | null)?.closest?.('.lm_splitter')) {
 			splitterDown = true;
 		}
 	},
@@ -969,10 +663,25 @@ window.addEventListener(
 	true,
 );
 
-/** Our own tile drag in a mirrored tab: Golden Layout's would build stacks herdr cannot hold. */
+/** Our own tile drag: Golden Layout's would build stacks herdr cannot hold. */
 let mirrorDrag:
-	| { paneKey: string; x: number; y: number; active: boolean; ghost?: HTMLElement; indicator?: HTMLElement }
+	| { paneKey: string; x: number; y: number; active: boolean; ghost?: HTMLElement; indicator?: HTMLElement; stripTarget?: HTMLElement }
 	| undefined;
+
+/**
+ * The strip entry (another tab's) or + under a point, with the tab it stands
+ * for (null: a new tab). The shown tab's own entry is no target.
+ */
+function stripDropTarget(x: number, y: number): { el: HTMLElement; tabId: string | null } | undefined {
+	const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('.strip-tab, #strip-new');
+	if (!el || !stripEl.contains(el)) {
+		return undefined;
+	}
+	if (el.id === 'strip-new') {
+		return { el, tabId: null };
+	}
+	return el.dataset.tabId && !el.classList.contains('strip-active') ? { el, tabId: el.dataset.tabId } : undefined;
+}
 
 /** The tile under a point, other than the dragged one, with its stack's rectangle. */
 function mirrorDropTarget(x: number, y: number, dragged: string): { paneKey: string; rect: DOMRect } | undefined {
@@ -1007,6 +716,7 @@ function startMirrorDrag(drag: NonNullable<typeof mirrorDrag>): void {
 
 function endMirrorDrag(): void {
 	const wasActive = mirrorDrag?.active;
+	mirrorDrag?.stripTarget?.classList.remove('strip-drop');
 	mirrorDrag?.ghost?.remove();
 	mirrorDrag?.indicator?.remove();
 	mirrorDrag = undefined;
@@ -1023,7 +733,13 @@ function moveMirrorDrag(x: number, y: number): void {
 	}
 	drag.ghost.style.left = `${x + 12}px`;
 	drag.ghost.style.top = `${y + 12}px`;
-	const target = mirrorDropTarget(x, y, drag.paneKey);
+	const strip = stripDropTarget(x, y);
+	if (strip?.el !== drag.stripTarget) {
+		drag.stripTarget?.classList.remove('strip-drop');
+		strip?.el.classList.add('strip-drop');
+		drag.stripTarget = strip?.el;
+	}
+	const target = strip ? undefined : mirrorDropTarget(x, y, drag.paneKey);
 	drag.indicator.hidden = !target;
 	if (!target) {
 		return;
@@ -1043,7 +759,7 @@ window.addEventListener(
 	'pointerdown',
 	(ev) => {
 		const target = ev.target as Element | null;
-		if (kind !== 'mirror' || ev.button !== 0 || !target?.closest?.('.lm_tab') || target.closest('.lm_close_tab, .lm_controls')) {
+		if (ev.button !== 0 || !target?.closest?.('.lm_tab') || target.closest('.lm_close_tab, .lm_controls')) {
 			return;
 		}
 		const paneKey = paneKeyAt(target);
@@ -1062,8 +778,8 @@ window.addEventListener(
 			if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) <= MIRROR_DRAG_START_PX) {
 				return;
 			}
-			// Nothing to drop on: one tile, or one maximised.
-			if (allStacks().length < 2 || layout.maximisedStack) {
+			// herdr refuses moves in a zoomed tab.
+			if (layout.maximisedStack) {
 				mirrorDrag = undefined;
 				return;
 			}
@@ -1082,8 +798,11 @@ window.addEventListener(
 			return;
 		}
 		if (drag.active) {
-			const target = mirrorDropTarget(ev.clientX, ev.clientY, drag.paneKey);
-			if (target) {
+			const strip = stripDropTarget(ev.clientX, ev.clientY);
+			const target = strip ? undefined : mirrorDropTarget(ev.clientX, ev.clientY, drag.paneKey);
+			if (strip) {
+				post({ type: 'movePaneToTab', paneKey: drag.paneKey, tabId: strip.tabId });
+			} else if (target) {
 				post({ type: 'movePane', paneKey: drag.paneKey, targetPaneKey: target.paneKey, zone: mirrorZone(target, ev.clientX, ev.clientY) });
 			}
 		}
@@ -1120,17 +839,7 @@ function applyTileMeta(paneKey: string): void {
 	if (!tab) {
 		return;
 	}
-	let dot = tab.querySelector<HTMLElement>('.tile-dot');
-	if (!dot) {
-		dot = document.createElement('span');
-		const grip = tab.querySelector('.tile-grip');
-		if (grip) {
-			grip.after(dot);
-		} else {
-			tab.prepend(dot);
-		}
-	}
-	dot.className = `tile-dot tile-dot-${meta.status}`;
+	setDot(tab, meta.status, (dot) => tab.prepend(dot));
 	let detail = tab.querySelector<HTMLElement>('.tile-detail');
 	if (!detail) {
 		detail = document.createElement('span');
@@ -1139,6 +848,20 @@ function applyTileMeta(paneKey: string): void {
 	}
 	detail.textContent = meta.detail ?? '';
 	detail.hidden = !meta.detail;
+}
+
+/** A tab's (or strip entry's) status dot; a shell has none. */
+function setDot(parent: HTMLElement, status: TileMeta['status'], insert: (dot: HTMLElement) => void): void {
+	let dot = parent.querySelector<HTMLElement>(':scope > .tile-dot');
+	if (status === 'shell') {
+		dot?.remove();
+		return;
+	}
+	if (!dot) {
+		dot = document.createElement('span');
+		insert(dot);
+	}
+	dot.className = `tile-dot tile-dot-${status}`;
 }
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -1163,7 +886,8 @@ function probeTile(tile: Tile): TileProbe {
 		title: tabs.get(tile.paneKey)?.textContent ?? '',
 		overlay: tile.overlay.hidden ? '' : (tile.overlay.textContent ?? ''),
 		overLink: tile.termEl.querySelector('.xterm-cursor-pointer') !== null,
-		grip: Boolean(tabs.get(tile.paneKey)?.querySelector('.tile-grip[draggable="true"]')),
+		dot: tabs.get(tile.paneKey)?.querySelector(':scope > .tile-dot')?.className ?? '',
+		context: tile.host.dataset.vscodeContext ?? '',
 	};
 }
 
@@ -1176,8 +900,6 @@ function runProbeAction(action: ProbeAction): void {
 		tile?.host.closest('.lm_stack')?.querySelector<HTMLElement>('.lm_controls .lm_close')?.click();
 	} else if (action.kind === 'clickTabClose') {
 		tabs.get(action.paneKey)?.querySelector<HTMLElement>('.lm_close_tab')?.click();
-	} else if (action.kind === 'clickRemove') {
-		tile?.overlay.querySelector('button')?.click();
 	} else if (action.kind === 'hoverCell' || action.kind === 'clickCell') {
 		const screen = tile?.termEl.querySelector('.xterm-screen');
 		if (tile && screen) {
@@ -1191,12 +913,16 @@ function runProbeAction(action: ProbeAction): void {
 				mouse('mouseup');
 			}
 		}
-	} else if (action.kind === 'dragToRightEdge') {
-		dragToRightEdge(action.paneKey);
 	} else if (action.kind === 'dragSplitter') {
 		dragSplitter(action.splitId, action.fraction);
 	} else if (action.kind === 'dragTile') {
 		dragTile(action.paneKey, action.targetPaneKey, action.zone);
+	} else if (action.kind === 'dragTileToStrip') {
+		const el = action.tabId === null ? document.getElementById('strip-new') : stripEntry(action.tabId);
+		const r = el?.getBoundingClientRect();
+		if (r) {
+			dragTabTo(action.paneKey, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+		}
 	} else if (action.kind === 'clickStrip') {
 		const entry = stripEntry(action.tabId);
 		if (action.part === 'close') {
@@ -1211,76 +937,7 @@ function runProbeAction(action: ProbeAction): void {
 		document.getElementById('strip-new')?.click();
 	} else if (action.kind === 'clickMaximise') {
 		tile?.host.closest('.lm_stack')?.querySelector<HTMLElement>('.lm_controls .lm_maximise')?.click();
-	} else if (action.kind === 'placeAt') {
-		const at = dropPoint(action.at);
-		if (at) {
-			const target = document.elementFromPoint(at.x, at.y) ?? rootEl;
-			const pointer = (type: string, buttons: number) =>
-				target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, isPrimary: true, button: 0, buttons, clientX: at.x, clientY: at.y }));
-			pointer('pointermove', 0);
-			pointer('pointerdown', 1);
-		}
-	} else if (action.kind === 'dropTileAt') {
-		const at = dropPoint(action.at);
-		if (at) {
-			const target = document.elementFromPoint(at.x, at.y) ?? rootEl;
-			const dataTransfer = new DataTransfer();
-			dataTransfer.setData(PANE_MIME, action.data);
-			for (const type of ['dragenter', 'dragover', 'drop']) {
-				target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, dataTransfer }));
-			}
-		}
 	}
-}
-
-/** A probe's drop point, worked out from the live layout. */
-function dropPoint(at: DropPoint): { x: number; y: number } | undefined {
-	const area = rootEl.getBoundingClientRect();
-	if ('center' in at) {
-		return { x: area.left + area.width / 2, y: area.top + area.height / 2 };
-	}
-	if ('edge' in at) {
-		const [midX, midY] = [area.left + area.width / 2, area.top + area.height / 2];
-		switch (at.edge) {
-			case 'left':
-				return { x: area.left + 20, y: midY };
-			case 'right':
-				return { x: area.right - 20, y: midY };
-			case 'top':
-				return { x: midX, y: area.top + 20 };
-			case 'bottom':
-				return { x: midX, y: area.bottom - 20 };
-		}
-	}
-	const stack = containers.get(at.paneKey)?.parent.parentItem;
-	if (!(stack instanceof Stack)) {
-		return undefined;
-	}
-	if (at.segment === 'header') {
-		const header = stack.header.element.getBoundingClientRect();
-		const last = stack.header.tabs[stack.header.tabs.length - 1]?.element.getBoundingClientRect();
-		return { x: (last?.right ?? header.left) + 5, y: header.top + header.height / 2 };
-	}
-	const body = stack.childElementContainer.getBoundingClientRect();
-	const share = { left: [0.1, 0.5], right: [0.9, 0.5], top: [0.5, 0.2], bottom: [0.5, 0.8] }[at.segment];
-	return { x: body.left + body.width * share[0], y: body.top + body.height * share[1] };
-}
-
-function dragToRightEdge(paneKey: string): void {
-	const tab = tabs.get(paneKey);
-	if (!tab) {
-		return;
-	}
-	const start = tab.getBoundingClientRect();
-	const area = rootEl.getBoundingClientRect();
-	const pointer = (type: string, target: EventTarget, x: number, y: number) =>
-		target.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y }));
-	const [x, y] = [start.x + 5, start.y + 5];
-	const [endX, endY] = [area.right - 5, area.y + area.height / 2];
-	pointer('pointerdown', tab, x, y);
-	pointer('pointermove', document, x + 15, y + 15);
-	pointer('pointermove', document, endX, endY);
-	pointer('pointerup', document, endX, endY);
 }
 
 const synthetic = (type: string, target: EventTarget, x: number, y: number) =>
@@ -1316,8 +973,7 @@ function dragTile(paneKey: string, targetPaneKey: string, zone: DropZone): void 
 		return;
 	}
 	const start = tab.getBoundingClientRect();
-	const [x, y] = [start.x + 5, start.y + 5];
-	let end = { x: x + 40, y: y + 40 };
+	let end = { x: start.x + 45, y: start.y + 45 };
 	const stack = containers.get(targetPaneKey)?.parent.parentItem;
 	if (stack instanceof Stack) {
 		const r = stack.element.getBoundingClientRect();
@@ -1325,6 +981,17 @@ function dragTile(paneKey: string, targetPaneKey: string, zone: DropZone): void 
 		const [fx, fy] = { center: [0.5, 0.5], left: [0.1, 0.5], right: [0.9, 0.5], top: [0.5, 0.1], bottom: [0.5, 0.9] }[zone];
 		end = { x: r.left + r.width * fx, y: top + height * fy };
 	}
+	dragTabTo(paneKey, end);
+}
+
+/** Drags a tile's tab to a point with synthetic pointer events. */
+function dragTabTo(paneKey: string, end: { x: number; y: number }): void {
+	const tab = tabs.get(paneKey);
+	if (!tab) {
+		return;
+	}
+	const start = tab.getBoundingClientRect();
+	const [x, y] = [start.x + 5, start.y + 5];
 	synthetic('pointerdown', tab, x, y);
 	synthetic('pointermove', document, x + 15, y + 15);
 	synthetic('pointermove', document, end.x, end.y);
@@ -1335,10 +1002,6 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	const msg = ev.data;
 	switch (msg.type) {
 		case 'init':
-			// A space panel (or one restored from a tab's state) is a mirror of herdr's layout.
-			kind = msg.state.kind === 'layout' ? 'layout' : 'mirror';
-			layoutId = msg.state.kind === 'layout' ? msg.state.layoutId : undefined;
-			document.body.classList.add(`kind-${kind}`);
 			vscode.setState(msg.state);
 			break;
 		case 'font':
@@ -1350,35 +1013,10 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			}
 			break;
 		case 'layout':
-			if (kind === 'mirror') {
-				// A new tree is never maximised, and saying so to herdr would unzoom it: `zoom` follows.
-				appliedZoom = null;
-			}
+			// A new tree is never maximised, and saying so to herdr would unzoom it: `zoom` follows.
+			appliedZoom = null;
 			applyLayout(msg.config);
-			if (kind === 'mirror') {
-				appliedRatios = liveRatios();
-			}
-			document.body.classList.toggle('layout-empty', kind === 'layout' && !msg.config.root);
-			if (placing?.hovered) {
-				drop.calculateAreas();
-			}
-			break;
-		case 'placePane':
-			if (kind === 'layout') {
-				startPlacing(msg);
-			}
-			break;
-		case 'placeEnd':
-			endPlacing();
-			break;
-		case 'removeTile':
-			containers.get(msg.paneKey)?.close();
-			break;
-		case 'addTile':
-			addOrReveal(msg);
-			break;
-		case 'paneMoved':
-			movePane(msg);
+			appliedRatios = liveRatios();
 			break;
 		case 'empty':
 			endMirrorDrag();
@@ -1393,7 +1031,6 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			applyZoom(msg.paneKey);
 			break;
 		case 'meta':
-			breadcrumbEl.textContent = msg.breadcrumb;
 			if (msg.strip) {
 				renderStrip(msg.strip);
 			}
@@ -1410,7 +1047,8 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 			showStreamState(msg.paneKey, msg.state);
 			break;
 		case 'focusTile':
-			focusTile(msg.paneKey);
+			// The webview may not have the keyboard yet, so xterm's focus event may not come: say it here.
+			focusTile(msg.paneKey, true);
 			break;
 		case 'probe':
 			if (msg.action) {
@@ -1420,7 +1058,7 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 				type: 'probeResult',
 				id: msg.id,
 				tiles: [...tiles.values()].map(probeTile),
-				breadcrumb: breadcrumbEl.textContent ?? '',
+				toolbar: [...(document.getElementById('toolbar')?.children ?? [])].map((el) => el.id),
 				strip: [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')].map(
 					(el) => `${el.classList.contains('strip-active') ? '*' : ''}${el.querySelector('.strip-label')?.textContent ?? ''}`,
 				),
@@ -1434,27 +1072,7 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 	}
 });
 
-for (const [id, direction] of [
-	['split-right', 'right'],
-	['split-down', 'down'],
-] as const) {
-	const button = document.getElementById(id) as HTMLElement;
-	// Keeps the keyboard focus in the tile.
-	button.addEventListener('mousedown', (ev) => ev.preventDefault());
-	button.addEventListener('click', () => post({ type: 'split', direction }));
-}
-
-for (const [id, send] of [
-	['place-cancel', () => cancelPlacing()],
-	['copy-layout', () => layout.rootItem && post({ type: 'copyAsLayout', config: layout.saveLayout() as unknown as StoredLayoutConfig })],
-	['rename-layout', () => post({ type: 'renameLayout' })],
-] as const) {
-	const button = document.getElementById(id) as HTMLElement;
-	button.addEventListener('mousedown', (ev) => ev.preventDefault());
-	button.addEventListener('click', () => send());
-}
-
-// ── Tab strip (space panels) ─────────────────────────────────────────────────
+// ── Tab strip ─────────────────────────────────────────────────
 
 function stripEntry(tabId: string): HTMLElement | undefined {
 	return [...stripEl.querySelectorAll<HTMLElement>('.strip-tab')].find((el) => el.dataset.tabId === tabId);
@@ -1473,14 +1091,13 @@ function renderStrip(entries: StripTab[]): void {
 			const el = document.createElement('span');
 			el.className = 'strip-tab';
 			el.dataset.tabId = entry.tabId;
-			const dot = document.createElement('span');
 			const label = document.createElement('span');
 			label.className = 'strip-label';
 			const close = document.createElement('span');
 			close.className = 'strip-close';
 			close.textContent = '×';
 			close.title = 'Close Tab';
-			el.append(dot, label, close);
+			el.append(label, close);
 			stripEl.append(el);
 		}
 		const add = document.createElement('span');
@@ -1494,7 +1111,7 @@ function renderStrip(entries: StripTab[]): void {
 		const el = els[i];
 		el.classList.toggle('strip-active', entry.active);
 		el.title = entry.label;
-		(el.firstElementChild as HTMLElement).className = `tile-dot tile-dot-${entry.status}`;
+		setDot(el, entry.status, (dot) => el.prepend(dot));
 		const label = el.querySelector('.strip-label') as HTMLElement;
 		if (label.textContent !== entry.label) {
 			label.textContent = entry.label;

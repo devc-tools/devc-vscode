@@ -12,12 +12,12 @@ export const MIN_RATIO = 0.05;
 export const MAX_RATIO = 0.95;
 
 /**
- * Whether a tile dropped near an edge of another tile moves the pane there. herdr
- * 0.9.5 refuses `pane.move` within a tab (`same_tab`) and its `layout.apply`
- * replaces the tab with new panes, so a mirrored tab offers only the centre:
- * a swap. Measured in the plan's step 1.
+ * Whether a tile dropped near an edge of another tile moves the pane there.
+ * herdr 0.9.5 refuses `pane.move` within a tab (`same_tab`), so an edge drop
+ * moves the pane out to a new tab and back next to the target (see
+ * {@link dropRequests}); pane and terminal ids are kept.
  */
-export const EDGE_ZONES_OFFERED = false;
+export const EDGE_ZONES_OFFERED = true;
 
 /** herdr's `path` param for a path key: one boolean per step, `true` = `second`. */
 export function herdrPath(pathKey: string): boolean[] {
@@ -105,19 +105,59 @@ export interface HerdrRequest {
 	params: Record<string, unknown>;
 }
 
+/** What an edge drop needs besides the two panes: the shown tab, its space, and a label for the passing tab. */
+export interface DropContext {
+	tabId: string;
+	workspaceId: string;
+	/** The temporary tab's label: the dragged pane's label, so a pane left there is easy to find. */
+	label: string;
+}
+
 /**
- * The requests for dropping pane `source` on `target` in `tabId`, in order. The
- * centre swaps the two panes. Edge zones are not offered (see
- * {@link EDGE_ZONES_OFFERED}), so they have no requests.
+ * The requests for dropping pane `source` on `target`, in order. The centre
+ * swaps the two panes. An edge moves `source` to a new tab, then back into the
+ * shown tab split around `target` (herdr puts the moved pane `second`, at
+ * `ratio` for the `first`), then swaps them for left and top; herdr closes the
+ * emptied passing tab itself.
  */
-export function dropRequests(zone: DropZone, source: string, target: string, _tabId: string): HerdrRequest[] {
+export function dropRequests(zone: DropZone, source: string, target: string, ctx: DropContext): HerdrRequest[] {
 	if (source === target) {
 		return [];
 	}
 	if (zone === 'center') {
 		return [{ method: 'pane.swap', params: { source_pane_id: source, target_pane_id: target } }];
 	}
-	return [];
+	if (!EDGE_ZONES_OFFERED) {
+		return [];
+	}
+	const split = zone === 'left' || zone === 'right' ? 'right' : 'down';
+	return [
+		{
+			method: 'pane.move',
+			params: { pane_id: source, destination: { type: 'new_tab', workspace_id: ctx.workspaceId, label: ctx.label }, focus: false },
+		},
+		{
+			method: 'pane.move',
+			params: {
+				pane_id: source,
+				destination: { type: 'tab', tab_id: ctx.tabId, split, target_pane_id: target, ratio: 0.5 },
+				focus: false,
+			},
+		},
+		...(zone === 'left' || zone === 'top' ? [{ method: 'pane.swap', params: { source_pane_id: source, target_pane_id: target } }] : []),
+	];
+}
+
+/** A tile dropped on a strip entry (`tabId`) or the strip's + (null): the pane moves to that tab, or a new one. */
+export function stripDropRequest(source: string, workspaceId: string, tabId: string | null): HerdrRequest {
+	return {
+		method: 'pane.move',
+		params: {
+			pane_id: source,
+			destination: tabId === null ? { type: 'new_tab', workspace_id: workspaceId } : { type: 'tab', tab_id: tabId, split: 'right' },
+			focus: false,
+		},
+	};
 }
 
 /**

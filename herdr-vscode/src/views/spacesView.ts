@@ -3,7 +3,7 @@ import { formatElapsed } from '../agentState';
 import { hasAgent, paneLabel, Snapshot, SnapshotPane } from '../sessions';
 import { customToken, renderRow, SidebarRows, SidebarRowsSource } from '../sidebarConfig';
 import { SpaceGit, spaceDirectory, splitGitDescription } from '../spaceGit';
-import { countsDescription, countStatuses, SHELL_ICON, statusIcon, worstStatus } from '../status';
+import { countsDescription, countStatuses, statusIcon, worstStatus } from '../status';
 import { SessionsView } from './sessionsView';
 
 /** A pane across every session. */
@@ -16,20 +16,10 @@ export const FOCUS_PANE_COMMAND = 'herdr.focusPane';
 export const OPEN_SPACE_COMMAND = 'herdr.openSpace';
 export const OPEN_TAB_COMMAND = 'herdr.openTab';
 export const OPEN_PANE_TAB_COMMAND = 'herdr.openPaneTab';
-export const ADD_TO_LAYOUT_COMMAND = 'herdr.addToLayout';
 
-export type OpenPaneIn = 'layout' | 'herdr';
-
-/** `herdr.openPaneIn`, where anything but `herdr` is the default. */
-export function openPaneIn(): OpenPaneIn {
-	return vscode.workspace.getConfiguration('herdr').get('openPaneIn') === 'herdr' ? 'herdr' : 'layout';
-}
-
-/** What clicking a pane or agent row runs. */
-export function paneClickCommand(target: OpenPaneIn, ref: PaneRef): vscode.Command {
-	return target === 'herdr'
-		? { command: OPEN_PANE_TAB_COMMAND, title: 'Open in herdr Space', arguments: [ref.sessionKey, ref.paneId] }
-		: { command: ADD_TO_LAYOUT_COMMAND, title: 'Add to Layout', arguments: [ref.sessionKey, ref.paneId] };
+/** What clicking a pane or agent row runs: its space's editor tab, showing its herdr tab, with its tile focused. */
+export function paneClickCommand(ref: PaneRef): vscode.Command {
+	return { command: OPEN_PANE_TAB_COMMAND, title: 'Open in herdr Space', arguments: [ref.sessionKey, ref.paneId] };
 }
 
 export interface SpaceNode {
@@ -203,7 +193,8 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			item.id = node.id;
 			item.description = node.description;
 			item.tooltip = node.tooltip;
-			item.iconPath = node.noIcon ? undefined : statusIcon(node.status);
+			// A space is always in a connected snapshot: no agents is idle, not off.
+			item.iconPath = node.noIcon ? undefined : statusIcon(node.status ?? 'idle');
 			item.contextValue = 'herdr.space';
 			item.command = { command: OPEN_SPACE_COMMAND, title: 'Open herdr Space', arguments: [node.sessionKey, node.workspaceId] };
 			return item;
@@ -221,23 +212,22 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 	}
 }
 
-/** A pane or agent row: status icon (or `terminal`), and a click per `herdr.openPaneIn`. */
+/** A pane or agent row: status icon (none for a shell), and a click that opens its space's tab. */
 export function paneTreeItem(
 	id: string,
 	label: string,
 	description: string | undefined,
 	pane: SnapshotPane,
 	ref: PaneRef,
-	target: OpenPaneIn = openPaneIn(),
 ): vscode.TreeItem {
 	const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
 	item.id = id;
 	item.description = description;
 	const agent = hasAgent(pane);
-	item.iconPath = agent ? statusIcon(pane.agent_status) : SHELL_ICON;
+	item.iconPath = agent ? statusIcon(pane.agent_status) : undefined;
 	item.contextValue = agent ? 'herdr.pane.agent' : 'herdr.pane.shell';
 	item.tooltip = agent ? agentTooltip(pane) : pane.pane_id;
-	item.command = paneClickCommand(target, ref);
+	item.command = paneClickCommand(ref);
 	return item;
 }
 
@@ -257,9 +247,8 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 		private readonly git?: SpaceGit,
 		/** herdr's `[ui.sidebar.*]` rows; phase 19's rows without it. */
 		private readonly sidebar?: SidebarRowsSource,
-		dragAndDropController?: vscode.TreeDragAndDropController<SpacesNode>,
 	) {
-		this.treeView = vscode.window.createTreeView('herdr.spaces', { treeDataProvider: this, dragAndDropController });
+		this.treeView = vscode.window.createTreeView('herdr.spaces', { treeDataProvider: this });
 		this.disposables.push(
 			this.treeView,
 			this.emitter,
@@ -268,11 +257,6 @@ export class SpacesView implements vscode.TreeDataProvider<SpacesNode>, vscode.D
 			sessions.onDidChangeSelected(() => this.update()),
 			...(git ? [git.onDidChange(() => this.update())] : []),
 			...(sidebar ? [sidebar.onDidChange(() => this.update())] : []),
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration('herdr.openPaneIn')) {
-					this.emitter.fire();
-				}
-			}),
 		);
 		this.update();
 	}

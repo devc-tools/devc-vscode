@@ -7,22 +7,20 @@ import { PaneDecorations } from './decorations';
 import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
-import { LayoutStore, nextLayoutName, SavedLayout } from './layouts';
 import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView, SinceNode } from './paneContext';
-import { CANCEL_PLACEMENT_COMMAND, PaneDragController, paneRowRef } from './paneDrag';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { createdTabId, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
-import { SessionModel, sessionKey, Snapshot } from './sessions';
+import { SessionModel, sessionKey } from './sessions';
 import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
 import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './status';
 import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
-import { AgentRow, AgentSource, AgentsView } from './views/agentsView';
+import { AgentSource, AgentsView } from './views/agentsView';
 import { SessionRowNode, SessionsView } from './views/sessionsView';
-import { ADD_TO_LAYOUT_COMMAND, FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesNode, SpacesView, TabNode } from './views/spacesView';
+import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -38,6 +36,14 @@ const NO_DISCOVERY = process.env.HERDR_VSCODE_NO_DISCOVERY === '1';
 function paneArg(arg?: string | { ref?: PaneRef }, paneId?: string): PaneRef | undefined {
 	return typeof arg === 'object' ? arg.ref : arg && paneId ? { sessionKey: arg, paneId } : undefined;
 }
+
+/** What a tile's `data-vscode-context` gives a `webview/context` command (see the webview's `setMenuContext`). */
+interface TileMenuContext {
+	paneKey?: string;
+}
+
+/** Saved Layout tabs of earlier builds, cleared on activation (Layout tabs are gone). */
+const OLD_LAYOUTS_KEY = 'herdr.layouts';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel('herdr');
@@ -59,15 +65,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		const conn = m.connection(key);
 		return conn && { shell: conn.env.shell, name: conn.name };
 	}, log);
-	const layouts = new LayoutStore(context.workspaceState);
-	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, layouts, rowLabel, log });
+	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, rowLabel, log });
 	context.subscriptions.push(sessions, focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
-
-	// Pane rows drag into Layout tabs.
-	const connectedSnapshot = (key: string): Snapshot | undefined => {
-		const conn = m.connection(key);
-		return conn?.state === 'connected' ? conn.snapshot : undefined;
-	};
+	if (context.workspaceState.get(OLD_LAYOUTS_KEY) !== undefined) {
+		void context.workspaceState.update(OLD_LAYOUTS_KEY, undefined);
+	}
 	// Rows from this machine's herdr config.toml; the test host never reads the real one.
 	const sidebarConfig = new SidebarConfigSource(NO_DISCOVERY ? undefined : sidebarConfigPath(process.env, os.homedir()), log);
 	const useSidebarConfig = () => vscode.workspace.getConfiguration('herdr').get<boolean>('useHerdrSidebarConfig', true);
@@ -87,7 +89,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		m.onDidChange,
 		spaceGit,
 		sidebarConfig,
-		new PaneDragController<SpacesNode>(panels.placement, paneRowRef, connectedSnapshot),
 	);
 	const agentSources = (): AgentSource[] =>
 		m
@@ -106,7 +107,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		context.workspaceState,
 		sessions,
 		sidebarConfig,
-		new PaneDragController<AgentRow>(panels.placement, (row) => row.ref, connectedSnapshot),
 	);
 	const statusBar = new BlockedStatusBar();
 	const sessionBar = new SessionStatusBar();
@@ -153,11 +153,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		sessions,
 		panels,
 		paths,
-		createHost: (treeDataProvider) =>
-			vscode.window.createTreeView(PANE_CONTEXT_VIEW, {
-				treeDataProvider,
-				dragAndDropController: new PaneDragController<PaneContextNode>(panels.placement, paneRowRef, connectedSnapshot),
-			}),
+		createHost: (treeDataProvider) => vscode.window.createTreeView(PANE_CONTEXT_VIEW, { treeDataProvider }),
 		log,
 		baselines: new BaselineStore(context.workspaceState),
 		decorations,
@@ -188,30 +184,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		log,
 	});
 	context.subscriptions.push(agentReview, ...agentReview.registerCommands());
-
-	const pickLayout = async (placeHolder: string): Promise<SavedLayout | undefined> => {
-		const saved = layouts.list();
-		if (saved.length === 0) {
-			void vscode.window.showInformationMessage('herdr: there are no saved layouts.');
-			return undefined;
-		}
-		const picked = await vscode.window.showQuickPick(
-			saved.map((layout) => ({ label: layout.name, layout })),
-			{ placeHolder },
-		);
-		return picked?.layout;
-	};
-	const askLayoutName = (value: string, prompt: string, own?: string) =>
-		vscode.window.showInputBox({
-			prompt,
-			value,
-			validateInput: (name) => {
-				if (!name.trim()) {
-					return 'Enter a name.';
-				}
-				return name.trim() !== own && layouts.names().includes(name.trim()) ? 'There is a layout with this name.' : undefined;
-			},
-		});
 
 	const warn = (err: unknown) => void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
 	/** Opens a tab that was just created, once the snapshot has it. */
@@ -244,9 +216,19 @@ export function activate(context: vscode.ExtensionContext): void {
 		return node && splitPane(node.ref.sessionKey, node.pane.tab_id, node.ref.paneId, direction);
 	};
 
+	const tileCommand = async (
+		ctx: TileMenuContext | undefined,
+		run: (panel: NonNullable<ReturnType<TilesPanels['panelOfPane']>>, paneId: string, paneKey: string) => Promise<void>,
+	): Promise<void> => {
+		const paneKey = ctx?.paneKey;
+		const panel = paneKey ? panels.panelOfPane(paneKey) : undefined;
+		if (paneKey && panel) {
+			await run(panel, splitPaneKey(paneKey).paneId, paneKey);
+		}
+	};
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
-		vscode.commands.registerCommand(CANCEL_PLACEMENT_COMMAND, () => panels.placement.cancel()),
 		vscode.commands.registerCommand('herdr.startSession', async (row?: SessionRowNode) => {
 			const session = row?.session;
 			const env = row && environments.get(row.envKey);
@@ -347,50 +329,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				panels.openPaneTab(ref.sessionKey, ref.paneId);
 			}
 		}),
-		vscode.commands.registerCommand(ADD_TO_LAYOUT_COMMAND, (arg?: string | { ref?: PaneRef }, paneId?: string) => {
-			const ref = paneArg(arg, paneId);
-			if (ref) {
-				m.markSeen(ref.sessionKey, ref.paneId);
-				panels.addToLayout(ref.sessionKey, ref.paneId);
-			}
-		}),
-		vscode.commands.registerCommand('herdr.newLayout', async () => {
-			const name = await askLayoutName(nextLayoutName(layouts.names()), 'Name of the new layout');
-			if (name) {
-				panels.newLayout(name.trim());
-			}
-		}),
-		vscode.commands.registerCommand('herdr.openLayout', async () => {
-			const layout = await pickLayout('Layout to open');
-			if (layout) {
-				panels.openLayout(layout.id);
-			}
-		}),
-		// The Layout panel's toolbar passes its layout; the command palette asks.
-		vscode.commands.registerCommand('herdr.renameLayout', async (layoutId?: string) => {
-			const layout = layoutId ? layouts.get(layoutId) : await pickLayout('Layout to rename');
-			if (!layout) {
-				return;
-			}
-			const name = await askLayoutName(layout.name, `New name of "${layout.name}"`, layout.name);
-			if (name) {
-				panels.renameLayout(layout.id, name.trim());
-			}
-		}),
-		vscode.commands.registerCommand('herdr.deleteLayout', async () => {
-			const layout = await pickLayout('Layout to delete');
-			if (!layout) {
-				return;
-			}
-			const answer = await vscode.window.showWarningMessage(
-				`Delete layout "${layout.name}"? Its panes stay in herdr.`,
-				{ modal: true },
-				'Delete Layout',
-			);
-			if (answer === 'Delete Layout') {
-				panels.deleteLayout(layout.id);
-			}
-		}),
+		// A tile's right-click menu: the pane is whatever tile was clicked, in whichever panel shows it.
+		vscode.commands.registerCommand('herdr.tile.splitRight', (ctx?: TileMenuContext) => tileCommand(ctx, (panel, paneId) => panel.split(paneId, 'right'))),
+		vscode.commands.registerCommand('herdr.tile.splitDown', (ctx?: TileMenuContext) => tileCommand(ctx, (panel, paneId) => panel.split(paneId, 'down'))),
+		vscode.commands.registerCommand('herdr.tile.zoom', (ctx?: TileMenuContext) => tileCommand(ctx, (panel, paneId) => panel.zoomFromMenu(paneId))),
+		vscode.commands.registerCommand('herdr.tile.unzoom', (ctx?: TileMenuContext) => tileCommand(ctx, (panel) => panel.zoomFromMenu(null))),
+		vscode.commands.registerCommand('herdr.tile.close', (ctx?: TileMenuContext, confirm?: boolean) =>
+			tileCommand(ctx, (panel, _paneId, paneKey) => panel.closePane(paneKey, confirm !== false)),
+		),
 		vscode.commands.registerCommand(REVEAL_FOCUSED_COMMAND, () => {
 			if (focus.lastFocused) {
 				const { sessionKey, paneId } = splitPaneKey(focus.lastFocused);

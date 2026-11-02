@@ -109,32 +109,6 @@
         "category": "herdr"
       },
       {
-        "command": "herdr.addToLayout",
-        "title": "Add to Layout",
-        "category": "herdr"
-      },
-      {
-        "command": "herdr.newLayout",
-        "title": "New Layout",
-        "category": "herdr",
-        "icon": "$(new-file)"
-      },
-      {
-        "command": "herdr.openLayout",
-        "title": "Open Layout…",
-        "category": "herdr"
-      },
-      {
-        "command": "herdr.renameLayout",
-        "title": "Rename Layout…",
-        "category": "herdr"
-      },
-      {
-        "command": "herdr.deleteLayout",
-        "title": "Delete Layout…",
-        "category": "herdr"
-      },
-      {
         "command": "herdr.focusPane",
         "title": "Focus in herdr TUI",
         "category": "herdr"
@@ -300,11 +274,6 @@
         "icon": "$(split-vertical)"
       },
       {
-        "command": "herdr.cancelPlacement",
-        "title": "Cancel Placing Pane",
-        "category": "herdr"
-      },
-      {
         "command": "herdr.askAgent",
         "title": "Ask herdr Agent About Selection",
         "category": "herdr"
@@ -330,6 +299,31 @@
         "command": "herdr.agentReview.resend",
         "title": "Resend",
         "category": "herdr"
+      },
+      {
+        "command": "herdr.tile.splitRight",
+        "title": "Split Right",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.tile.splitDown",
+        "title": "Split Down",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.tile.zoom",
+        "title": "Zoom",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.tile.unzoom",
+        "title": "Unzoom",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.tile.close",
+        "title": "Close Pane",
+        "category": "herdr"
       }
     ],
     "menus": {
@@ -337,11 +331,6 @@
         {
           "command": "herdr.newSpace",
           "when": "view == herdr.spaces && herdr.sessionSelected",
-          "group": "navigation@1"
-        },
-        {
-          "command": "herdr.newLayout",
-          "when": "view == herdr.sessions",
           "group": "navigation@1"
         },
         {
@@ -410,11 +399,6 @@
           "command": "herdr.splitDown",
           "when": "view == herdr.spaces && viewItem =~ /^herdr\\.(tab|pane\\.(agent|shell))$/",
           "group": "inline@2"
-        },
-        {
-          "command": "herdr.addToLayout",
-          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
-          "group": "navigation@1"
         },
         {
           "command": "herdr.openPaneTab",
@@ -542,10 +526,6 @@
           "when": "false"
         },
         {
-          "command": "herdr.addToLayout",
-          "when": "false"
-        },
-        {
           "command": "herdr.paneContext.addToWorkspace",
           "when": "false"
         },
@@ -614,10 +594,6 @@
           "when": "false"
         },
         {
-          "command": "herdr.cancelPlacement",
-          "when": "false"
-        },
-        {
           "command": "herdr.askAgent",
           "when": "herdr.hasAgents && editorIsOpen"
         },
@@ -636,6 +612,53 @@
         {
           "command": "herdr.agentReview.resend",
           "when": "false"
+        },
+        {
+          "command": "herdr.tile.splitRight",
+          "when": "false"
+        },
+        {
+          "command": "herdr.tile.splitDown",
+          "when": "false"
+        },
+        {
+          "command": "herdr.tile.zoom",
+          "when": "false"
+        },
+        {
+          "command": "herdr.tile.unzoom",
+          "when": "false"
+        },
+        {
+          "command": "herdr.tile.close",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "herdr.tile.splitRight",
+          "when": "webviewId == 'herdr.tiles' && webviewSection == 'tile'",
+          "group": "1_split@1"
+        },
+        {
+          "command": "herdr.tile.splitDown",
+          "when": "webviewId == 'herdr.tiles' && webviewSection == 'tile'",
+          "group": "1_split@2"
+        },
+        {
+          "command": "herdr.tile.zoom",
+          "when": "webviewId == 'herdr.tiles' && webviewSection == 'tile' && !zoomed",
+          "group": "2_view@1"
+        },
+        {
+          "command": "herdr.tile.unzoom",
+          "when": "webviewId == 'herdr.tiles' && webviewSection == 'tile' && zoomed",
+          "group": "2_view@1"
+        },
+        {
+          "command": "herdr.tile.close",
+          "when": "webviewId == 'herdr.tiles' && webviewSection == 'tile'",
+          "group": "3_close@1"
         }
       ]
     },
@@ -653,13 +676,6 @@
           "label": "ssh: ${authority} › ${path}",
           "separator": "/"
         }
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "herdr.cancelPlacement",
-        "key": "escape",
-        "when": "herdr.placingPane"
       }
     ],
     "configuration": {
@@ -692,20 +708,6 @@
           "default": false,
           "scope": "window",
           "description": "List stopped herdr sessions on SSH hosts and in dev containers too. This machine's are always listed."
-        },
-        "herdr.openPaneIn": {
-          "type": "string",
-          "enum": [
-            "layout",
-            "herdr"
-          ],
-          "enumDescriptions": [
-            "Add the pane to a Layout tab.",
-            "Open the pane's herdr space, showing its tab."
-          ],
-          "default": "layout",
-          "scope": "window",
-          "description": "What clicking a pane or agent row does."
         },
         "herdr.useHerdrSidebarConfig": {
           "type": "boolean",

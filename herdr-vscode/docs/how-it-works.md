@@ -111,9 +111,11 @@ when its session stops and when its environment goes away.
 - The selected session is stored in workspace state `herdr.selectedSession`. If it is not
   running, the view falls back to this machine's default session, else the first running
   session, without overwriting the stored choice, so it comes back when the session does.
-- Status icons: blocked `circle-filled` orange, working blue, done green, idle and unknown
-  `circle-outline`; panes without an agent `terminal`. Sessions and spaces show their worst
-  status.
+- Status icons: `circle-filled` in `charts.orange` (blocked), `charts.blue` (working),
+  `charts.green` (done) and `disabledForeground` (idle, unknown). Sessions and spaces show their
+  worst status, and idle when connected with no agents. `circle-outline` is "off": a session row
+  that is not running or not connected. Panes without an agent have no icon. Tile and strip dots
+  follow the same colors; a shell pane, and a strip tab with no agents, has no dot.
 - **Agents** filter (`all`, `blocked`, `working`, `done`) and scope (`all`, `session`: the selected
   session) are stored in workspace state and in the context keys `herdr.agentsFilter` and
   `herdr.agentsScope`. Counts in the view description and in **Filter Agents…** are over the agents in
@@ -167,11 +169,11 @@ another `v` is ignored.
   skipping a space whose run is still going. A result taken in another directory is dropped. The
   tooltip has the label, repo name, directory and counts.
 - **Tab rows:** the agent kinds in snapshot order (`claude ×2, codex`) and `+ <n> shell(s)`.
-- **Spaces** tab rows run `herdr.openTab`. Pane and agent rows run `herdr.addToLayout` on click, or
-  `herdr.openPaneTab` when `herdr.openPaneIn` is `herdr`; the command is chosen when the item is
-  built, and the views refresh when the setting changes. Their context menu has **Add to Layout**,
-  **Open in herdr Tab** and **Focus in herdr TUI** (`herdr.focusPane`). Session rows have no inline
-  action.
+- **Spaces** tab rows run `herdr.openTab`. Pane and agent rows (Spaces, Agents, Pane Context) run
+  `herdr.openPaneTab`: the pane's space panel, `tab.focus` when its tab is not active, then its tile
+  focused (the webview reports that focus itself, since it may not have the keyboard). Their context
+  menu has **Open in herdr Space** and **Focus in herdr TUI** (`herdr.focusPane`). Session rows have
+  no inline action.
 
 ### Rows from herdr's config
 
@@ -343,17 +345,23 @@ such as `Cmd+P`, bubble up and work. On the Mac `Cmd+C/V` reach the workbench, w
 and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, so the webview takes
 `Ctrl+Shift+C/V` itself and goes through `vscode.env.clipboard`.
 
-### Tiles and toolbar
+### Tiles and the tab strip
 
-- A tile's header is the Golden Layout tab plus two elements of ours: the status dot (as in the
-  status table; square for a shell) and the faded terminal title. They follow the session model
-  with no re-layout.
+- The toolbar holds only the strip (the space's tabs, then **+**), from the left. The editor tab's
+  title is the space's label, or `<session> · <space>` when herdr's session name is not `default`.
+- A tile's header is the Golden Layout tab plus two elements of ours: the status dot (none for a
+  shell) and the faded terminal title. They follow the session model with no re-layout.
 - Golden Layout's close controls are intercepted in the capture phase: its own handlers would
   remove the tile before the user answers. The tile goes when herdr says the pane closed.
 - **New Space** and **New Tab** call `workspace.create` and `tab.create` with `focus:false`, wait for the
   snapshot to hold the tab, and open it. A new tab starts in the space's focused pane's directory.
-- **Split Right** / **Split Down** call `pane.split` on the panel's focused tile, else herdr's
-  focused pane if it is in this tab, with `focus:false` and the pane's `foreground_cwd ?? cwd`.
+- **Tile context menu.** Each tile's host element and Golden Layout tab carry `data-vscode-context`
+  `{"webviewSection":"tile","paneKey","zoomed","preventDefaultContextMenuItems":true}`, rewritten when
+  the zoom changes. `webview/context` menus (`webviewId == 'herdr.tiles' && webviewSection == 'tile'`)
+  run `herdr.tile.splitRight` / `splitDown` (`pane.split` on that pane, `focus:false`, its
+  `foreground_cwd ?? cwd`), `herdr.tile.zoom` (`!zoomed`) / `unzoom` (`zoomed`), and `herdr.tile.close`
+  (the same modal, then `pane.close`). The command gets the context object; `TilesPanels.panelOfPane`
+  finds the panel whose shown tab has the pane.
 - The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last
   focused pane, fires `onDidChangeLastFocused`, and shows it in the status bar.
 
@@ -368,7 +376,12 @@ Measured against herdr 0.9.5 (the plan's step 1):
   are not path keys.
 - `pane.move` to the pane's own tab is refused: `move_result.changed:false`, `reason:"same_tab"`
   (`zoomed_tab` first when zoomed). `layout.apply` with a `tab_id` does not rearrange in place: it
-  replaces the tab, with new pane ids and new shells. So a mirrored tab cannot move a pane to an edge.
+  replaces the tab, with new pane ids and new shells.
+- `pane.move` to another tab of the workspace works, keeping `pane_id` and `terminal_id`
+  (2026-11-02): `{"type":"new_tab","workspace_id","label"?}` makes a tab (labelled with its number
+  without `label`) and does not change the space's `active_tab_id`; `{"type":"tab","tab_id","split",
+  "target_pane_id"?,"ratio"?}` wraps the target (without one, the tab's root) in a new split with the
+  moved pane `second` and `ratio` the `first` child's share. A tab its last pane leaves closes.
 - `pane.swap` `{"source_pane_id","target_pane_id"}` exchanges two panes of a tab, ratios kept, and
   focuses the source; across tabs `reason:"cross_tab"`. It works while zoomed.
 - `pane.zoom` `{"pane_id","mode":"on"|"off"}` focuses the pane; `on` for another pane while zoomed
@@ -387,14 +400,24 @@ split's `updateSize(false)`: no `loadLayout`. During a drag it waits for the rel
 
 **Dragging tiles.** Golden Layout's drag stays off (`reorderEnabled: false` per component): its drop
 builds stacks and splits herdr cannot hold. The webview runs its own: a press on a tile's tab and a
-move over 10 px (not with one tile, nor while a stack is maximised) start it, `body.mirror-moving`, a
-label ghost, and an indicator over the tile under the pointer (the dragged one excepted). The zone
-function (`dropZone` in `src/mirrorEdit.ts`: header or a quarter in from every edge is the centre,
-else the nearest edge) is there, but since herdr cannot move within a tab (`EDGE_ZONES_OFFERED` is
-false) every zone is the centre: the whole tile is highlighted and a drop posts `movePane`, which the
-host turns into `pane.swap`, unless either pane is not in the last export or herdr is zoomed. A
-refusal (`changed:false`) or an error shows `herdr: <reason>` and re-exports. Escape and
-`pointercancel` cancel. The tiles move when the re-export says so.
+move over 10 px (not while a stack is maximised) start it, `body.mirror-moving`, a label ghost, and
+either an indicator over the tile under the pointer (the dragged one excepted) or `.strip-drop` on the
+strip entry or **+** under it (the shown tab's own entry is no target). `dropZone` in
+`src/mirrorEdit.ts`: the header, or a quarter in from every edge, is the centre, else the nearest edge;
+the indicator covers the whole tile or that half.
+
+- Centre: `movePane` → `pane.swap`.
+- Edge (`EDGE_ZONES_OFFERED`): `movePane` → `pane.move` to a `new_tab` labelled with the pane, then
+  `pane.move` back to the shown tab, `split` `right` (left/right) or `down` (top/bottom) around the
+  target at `ratio` 0.5, then for left and top `pane.swap` of the two. herdr closes the passing tab.
+- Strip entry / **+**: `movePaneToTab` → `pane.move` `{"type":"tab","tab_id","split":"right"}` or
+  `{"type":"new_tab","workspace_id"}`, `focus:false`; the panel keeps its shown tab.
+
+The host checks both panes are in the last export and herdr is not zoomed, then sends the requests in
+order; the first refusal (`changed:false`) or error stops them with `herdr: <reason>`, or, when it is the
+move back, `the pane could not be moved back (<reason>); it is in tab "<label>".` While they run, the
+panel's syncs and re-exports wait, so the passing tab never shows on the strip; one sync and re-export
+follow. Escape and `pointercancel` cancel. The tiles move when the re-export says so.
 
 **Zoom.** After every `layout`, and when the zoomed pane changes, the host posts `zoom`; the webview
 records it, then maximises that pane's stack (minimising any other first) or minimises, and ignores
@@ -403,136 +426,19 @@ sends `pane.zoom` `off` for herdr's zoomed pane first when another is zoomed, th
 re-exports' zoom until the answer, and posts `zoom` back when herdr's answer is not what was asked
 (`single_pane`).
 
-## Layout tabs
+### Restore
 
-A Layout panel is the same view type, bundle and stream manager as a mirrored tab
-(`src/tilesPanel.ts`: `TilesPanel` is what they share, `MirrorPanel` and `LayoutPanel` what they
-don't), with webview state `{"kind":"layout","layoutId"}`. `init` puts `kind-layout` or `kind-mirror`
-on `<body>`, which picks the toolbar buttons and the tab close buttons. A Layout panel sends herdr no
-request that changes anything: only `terminal session control`, per tile.
-
-### Store
-
-`src/layouts.ts`: workspace state `herdr.layouts`, an array of `{"id","name","config"}`. `config` is
-`layout.saveLayout()`'s `ResolvedLayoutConfig`, sent by the webview 500 ms after Golden Layout's last
-`stateChanged` (and on `pagehide`), or the short form of a layout that has never had a tile, with no
-`root`. Golden Layout fires `stateChanged` on an animation frame, and not at all when the only stack
-closes, so the webview also listens to `itemDestroyed`.
-
-A tile being dragged is out of the tree, in Golden Layout's proxy. While `.lm_dragProxy` is in the
-document nothing is saved, no terminal is disposed and no size is sent; the drop fires `stateChanged`
-again. A terminal is disposed only when a settled layout no longer holds its pane, and that is also
-all that closing a tile does (`tileClose`, then the last viewer releases the stream).
-
-### Adding a pane
-
-`herdr.addToLayout` picks the panel (`selectLayoutTarget`: active, else most recently active still
-open, else a new `Layout <n>`, never a closed one) and posts `addTile`. The webview decides what that
-means from its current layout (`addPlacement`), since the host's copy can be up to 500 ms old:
-
-- pane present: focus its tile, bringing its tab to the front;
-- a focused tile: `stack.addComponent` in its stack;
-- neither: `saveLayout()` as a `LayoutConfig`, the pane added at the right of the root
-  (`addPaneAtRoot`), `loadLayout`. As in a mirrored tab, terminals survive that in the tile map.
-
-### Tile states
-
-`LayoutPanel` runs a tile's stream only while `paneAvailability` says `live`, and follows the session
-model:
-
-| The session | The pane | The tile |
-| --- | --- | --- |
-| not connected, or no snapshot yet | | *Waiting for <row label>…*, stream closed; never "gone" before there is a snapshot to say so |
-| connected | not in the snapshot | *This pane is gone.* with **Remove**, stream closed |
-| connected | in the snapshot | live; a stream that ends shows *Disconnected: …* or *Opened in another viewer.*, as in a mirrored tab |
-
-Going back to `live` opens a new stream with the tile's last size. herdr keeps pane ids across a
-server restart (with new terminals), so tiles come back.
-
-A tile behind another in its stack has no size. It announces itself (`tileOpen`) when it first comes to
-the front, so a restored stack only opens streams for its front tiles; once announced it keeps its
-stream while behind.
+Webview state `{"kind":"space","sessionKey","workspaceId"}`; `{"kind":"mirror",…}` from builds where an
+editor tab was one herdr tab comes back as that tab's space. `{"kind":"layout",…}` (Layout tabs, removed)
+is disposed at once, and activation clears the old workspace-state key `herdr.layouts`.
 
 ### Moved panes
 
 `pane.moved` data, measured on herdr 0.9.5: `{"pane":{"pane_id",…,"terminal_id"},"previous_pane_id",
 "previous_tab_id","previous_workspace_id","created_tab"?,"created_workspace"?,"closed_tab_id"?}`. A
 move inside a workspace keeps the id; a move to another workspace gives a new one
-(`previous_pane_id` is the old), on the same terminal. `TilesPanels` rewrites that pane in every saved
-layout, open or not, and an open panel's webview rewrites its live layout: the tile gets a new
-terminal and a new stream on the new id, and the full first frame repaints the same screen. A move
-while the extension is not running is not seen, and the tile says *This pane is gone.*.
-
-### Dragging panes in
-
-Measured on 2026-10-31 with VS Code 1.144.0 under Xvfb and a real X pointer (XTest), with a tree view
-whose controller has `dragMimeTypes: ["application/vnd.herdr.pane"]` and two webview panels side by side:
-
-| Drag | Shift | Reached the target webview |
-| --- | --- | --- |
-| tree row → webview | no / held | no events at all |
-| webview A (a `draggable` element) → webview B | no / held | yes: `dragenter`, `dragover`, `drop`, with A's data |
-| webview A → over the side bar → webview B | no / held | yes |
-| webview A → webview A | no / held | yes |
-
-Webviews are out-of-process iframes, and Chromium does not drop a drag from one renderer process into a
-frame of another. The workbench is one process; the webviews of one extension in one window share an
-origin, hence a process. (VS Code also sets `pointer-events: none` on webview iframes during a workbench
-drag, `auto` again while Shift is held; that does not help.) A tree drag's native `DataTransfer` holds
-only `application/vnd.code.tree.<view>` and the controller's MIME types with the value `""`: what
-`handleDrag` sets reaches other trees and text editors, never a webview. macOS was not measured.
-
-So a tree drag only **arms** (`src/paneDrag.ts`). `PaneDragController` on `herdr.spaces`, `herdr.agents`
-and `herdr.paneContext` takes a pane row's `handleDrag` (pane in a connected snapshot) to
-`PanePlacement.arm`: `placePane` to every open Layout panel whose `WebviewPanel.visible` is true, context
-key `herdr.placingPane`, a 15 s timer. Any other row's drag disarms. The panel the pointer reaches first
-posts `placeHover`, takes the placement and the others get `placeEnd`. It ends on `placed`,
-`placeCancel`, `herdr.cancelPlacement` (Escape while `herdr.placingPane`: after a tree drag the
-keyboard is still in the tree), the timer, a new drag, or the panel closing.
-
-The webview, armed, shows an overlay until the first `pointermove`/`pointerover`, then un-maximises,
-highlights the zone under the pointer, and places on the first `pointerdown` or `pointerup` (whichever
-comes; `pointerup` only if the platform delivers the tree drag's release), or on an HTML5 `drop` whose
-data is not a tile. Placing listens in the capture phase on `window` and swallows the press, the release
-and the next click: otherwise xterm would start a selection or take the focus, and Golden Layout a tab
-or splitter drag.
-
-Tile grips are real HTML5 drags (`application/vnd.herdr.pane` =
-`{"sessionKey","paneId","title","layoutId"}`, `effectAllowed: "move"`); the grip's `pointerdown` stops
-propagation so Golden Layout does not start its own tab drag. A drop from another layout posts
-`tileMovedIn`; the host closes that pane's tile in the source panel (`removeTile`), whose layout then
-saves as usual. A drop from another window's Layout tab (an unknown `layoutId`) only adds. Mirrored
-panels ignore both: `dropEffect: "none"`, no grips, never armed.
-
-Zones are Golden Layout 2.6.0's own drag-proxy logic, reached through `src/webview/glDrop.ts`, the one
-place that touches its `@internal` members: `calculateItemAreas()`, `getArea(x, y)` (smallest area
-wins), `contentItem.highlightDropZone(x, y, area)` (which also records the segment and tab index; it is
-called again at the drop point right before `onDrop`), `ItemConfig.resolve`, `onDrop(item, area)`,
-`dropTargetIndicator` and `tabDropPlaceholder` (removed after each drop or cancel). `golden-layout` is
-pinned at 2.6.0, and the layout panel tests fail if these change.
-
-| Pointer over | Result |
-| --- | --- |
-| a stack's header | a tab there, at the position under the pointer |
-| a stack's body, left / right 25% | a split beside it (its size halved), or the stack wrapped in a new row at 50/50 |
-| a stack's body, middle half, upper / lower half | a split above / below, in a column likewise |
-| an empty stack's body; an empty layout | the only tile |
-| a 50 px band along an edge of the tile area, when the root is a row or column | a new stack at that edge of the root |
-
-A pane already in the layout, component `T` in stack `S`: on `S`'s header, or any zone of `S` while
-`S` holds only `T`, nothing moves and `T` is focused. Otherwise `S.removeChild(T, true)`, then areas,
-`getArea` and `highlightDropZone` again at the same point (the removal may have collapsed `S`'s row or
-column) and `onDrop(T, area)`: the component, and its terminal, are kept. Removal and drop run in one
-task: the webview's `itemDestroyed` and `stateChanged` handlers are deferred and must find `T` back in
-the tree, or they would dispose its terminal.
-
-### Copy as Layout
-
-The mirrored panel's webview posts its `saveLayout()`; `asLayoutConfig` turns on reorder in the settings
-**and on each component**. Golden Layout's tab takes a component's `reorderEnabled` before the
-settings', and a component without one resolves to `true`, so a mirrored tab's components carry
-`reorderEnabled: false` themselves. It also blanks the `split:` ids and sets every `maximised` to
-`false`: a Layout tab never zooms herdr, and opens unmaximised.
+(`previous_pane_id` is the old), on the same terminal. `parsePaneMoved` (`src/sessions.ts`) reads it for
+the focus tracker, Pane Context's pin and baselines, and Ask Agent's threads.
 
 ## Pane Context
 

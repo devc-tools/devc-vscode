@@ -9,6 +9,7 @@ import {
 	offeredZone,
 	pathKeyOf,
 	refusal,
+	stripDropRequest,
 	zoomedAfter,
 	zoomRequests,
 } from '../mirrorEdit';
@@ -49,21 +50,43 @@ suite('mirror edit', () => {
 		assert.strictEqual(body(0.25, 0.3), 'center', 'a quarter in is the centre');
 	});
 
-	test('edges are not offered (herdr 0.9.5 refuses same-tab moves): every zone acts as the centre', () => {
-		assert.strictEqual(EDGE_ZONES_OFFERED, false);
+	test('edges are offered: every zone is itself', () => {
+		assert.strictEqual(EDGE_ZONES_OFFERED, true);
 		for (const zone of ['center', 'left', 'right', 'top', 'bottom'] as const) {
-			assert.strictEqual(offeredZone(zone), 'center');
+			assert.strictEqual(offeredZone(zone), zone);
 		}
 	});
 
-	test('drop requests: the centre is one pane.swap; edges have none; onto itself nothing', () => {
-		assert.deepStrictEqual(JSON.parse(JSON.stringify(dropRequests('center', 'w1:p1', 'w1:p2', 'w1:t1'))), [
-			{ method: 'pane.swap', params: { source_pane_id: 'w1:p1', target_pane_id: 'w1:p2' } },
-		]);
-		for (const zone of ['left', 'right', 'top', 'bottom'] as const) {
-			assert.deepStrictEqual(dropRequests(zone, 'w1:p1', 'w1:p2', 'w1:t1'), [], zone);
-		}
-		assert.deepStrictEqual(dropRequests('center', 'w1:p1', 'w1:p1', 'w1:t1'), []);
+	const ctx = { tabId: 'w1:t1', workspaceId: 'w1', label: 'claude' };
+	const out = { method: 'pane.move', params: { pane_id: 'w1:p1', destination: { type: 'new_tab', workspace_id: 'w1', label: 'claude' }, focus: false } };
+	const back = (split: string) => ({
+		method: 'pane.move',
+		params: { pane_id: 'w1:p1', destination: { type: 'tab', tab_id: 'w1:t1', split, target_pane_id: 'w1:p2', ratio: 0.5 }, focus: false },
+	});
+	const swap = { method: 'pane.swap', params: { source_pane_id: 'w1:p1', target_pane_id: 'w1:p2' } };
+
+	test('drop requests: the centre is one pane.swap; onto itself nothing', () => {
+		assert.deepStrictEqual(dropRequests('center', 'w1:p1', 'w1:p2', ctx), [swap]);
+		assert.deepStrictEqual(dropRequests('center', 'w1:p1', 'w1:p1', ctx), []);
+		assert.deepStrictEqual(dropRequests('left', 'w1:p1', 'w1:p1', ctx), []);
+	});
+
+	test('drop requests: an edge moves out to a new tab and back split around the target; left and top also swap', () => {
+		assert.deepStrictEqual(dropRequests('right', 'w1:p1', 'w1:p2', ctx), [out, back('right')]);
+		assert.deepStrictEqual(dropRequests('bottom', 'w1:p1', 'w1:p2', ctx), [out, back('down')]);
+		assert.deepStrictEqual(dropRequests('left', 'w1:p1', 'w1:p2', ctx), [out, back('right'), swap]);
+		assert.deepStrictEqual(dropRequests('top', 'w1:p1', 'w1:p2', ctx), [out, back('down'), swap]);
+	});
+
+	test('strip drops: another tab is a move there (split right); + is a move to a new tab', () => {
+		assert.deepStrictEqual(stripDropRequest('w1:p1', 'w1', 'w1:t2'), {
+			method: 'pane.move',
+			params: { pane_id: 'w1:p1', destination: { type: 'tab', tab_id: 'w1:t2', split: 'right' }, focus: false },
+		});
+		assert.deepStrictEqual(stripDropRequest('w1:p1', 'w1', null), {
+			method: 'pane.move',
+			params: { pane_id: 'w1:p1', destination: { type: 'new_tab', workspace_id: 'w1' }, focus: false },
+		});
 	});
 
 	test('zoom requests: another pane off first; null turns herdr off; nothing when nothing changes', () => {

@@ -19,13 +19,12 @@ import {
 	WorktreeId,
 	worktreeMarker,
 } from './git';
-import { parsePaneMoved } from './layouts';
 import { environmentUri, EnvironmentPaths, isUnder, parseLinkText, resolveLinkPath } from './paths';
-import { paneLabel, SessionModel, Snapshot, SnapshotPane } from './sessions';
+import { paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPane } from './sessions';
 import { TilesPanels } from './tilesPanel';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 import { SessionsView } from './views/sessionsView';
-import { openPaneIn, paneClickCommand, paneDescription, paneTreeItem, PaneRef } from './views/spacesView';
+import { paneClickCommand, paneDescription, paneTreeItem, PaneRef } from './views/spacesView';
 
 export const PANE_CONTEXT_VIEW = 'herdr.paneContext';
 /** Context key: whether the view is pinned. */
@@ -373,11 +372,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			deps.panels.onDidRequestLink((link) => void this.openLink(link.paneKey, link.text)),
 			this.host.onDidChangeVisibility(() => this.visibilityChanged()),
 			vscode.workspace.onDidChangeWorkspaceFolders(() => this.emitter.fire()),
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration('herdr.openPaneIn')) {
-					this.emitter.fire();
-				}
-			}),
 		);
 		void vscode.commands.executeCommand('setContext', PANE_CONTEXT_PINNED_KEY, false);
 		this.update();
@@ -933,7 +927,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	async showPane(): Promise<void> {
 		const key = this.followed;
 		if (key) {
-			const target = paneClickCommand(openPaneIn(), splitPaneKey(key));
+			const target = paneClickCommand(splitPaneKey(key));
 			await vscode.commands.executeCommand(target.command, ...(target.arguments ?? []));
 		}
 	}
