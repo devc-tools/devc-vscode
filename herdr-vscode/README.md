@@ -117,15 +117,19 @@ another view changes nothing, and **Pin** stops it following.
   repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.
   **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area; elsewhere,
   **Split Pane Here** makes a herdr pane below, in that folder.
-- **Changed in This Pane · since 10:31:** every file that changed in the pane's worktree since you first
-  followed the pane there, with `A`, `M` or `D` and ` · 2 commits` when HEAD moved on. Git cannot say which
-  process changed a file, so this is everything changed in that worktree since then, **whoever changed it**: two
-  agents in one worktree see each other's edits. The time is kept across reloads, per pane and repo, until the pane
-  closes or a week passes. **Reset Baseline** starts it again from now. Click for a
-  `since 10:31 ↔ working tree` diff; **Open File** opens the file as it is now. Taking the baseline writes git objects into the repo (unreferenced, so `git gc`
-  prunes them) and never touches its index, working tree or refs.
-- **All Changes** (collapsed): the repo's whole `git status`. Click for a `HEAD ↔ working tree` diff;
+- **Uncommitted:** the repo's whole `git status`. Click for a `HEAD ↔ working tree` diff;
   **Open File** opens the file as it is now.
+- **Commits · vs origin/main:** the commits on your branch since it left the default branch (`origin/HEAD`, else
+  `main` or `master`), or the 20 most recent (`recent`) on the default branch itself. Expand a commit for its files
+  (`A`, `M`, `D` against its first parent); click one for its diff in that commit, and **Open File** for the file as
+  it is now (or as the commit has it, when it is gone).
+- **Show Only This Pane's Files** (the filter in the title bar; **Show All Files** turns it off) narrows Uncommitted
+  and Commits to the files this pane's agent changed while it was **working**: herdr-vscode snapshots the worktree
+  when an agent starts and stops working, in every connected session, whether or not this view is open. Git cannot
+  say which process changed a file, so two agents working in one worktree at the same time see each other's files.
+  A reload mid-span loses what changed before it. Kept per pane and repo until the pane closes or a week passes. A
+  shell pane shows everything, with a note. The snapshots go to a temporary directory: **nothing is written to the
+  repo's `.git`**.
 - **Files:** the tree; click to open. Git markers (`M`, `A`, `U`, `D`, `R`, `!`) in Git's colours, and a dot on
   folders holding changes; the same badges show on editor tabs of those files. For a local repo that VS Code's own
   Git has open (a workspace folder, or after **Open in Source Control**), Git's badges are shown instead of a second

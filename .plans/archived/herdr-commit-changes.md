@@ -17,20 +17,20 @@ files; that limitation is documented, not solved. Phase 20 rejected snapshotting
 "would snapshot every pane of every session"; that was for polling a moving baseline. Here it is two snapshots per
 working span, each a stat-only `git add -A` into a copied index, which is cheap enough.
 
-Depends on phases 20 and 27 ([herdr-pane-identity](archived/herdr-pane-identity.md): the pane row sits above these sections).
+Depends on phases 20 and 27 ([herdr-pane-identity](herdr-pane-identity.md): the pane row sits above these sections).
 Paths are under `herdr-vscode/` unless they start with `.plans/`.
 
 ## Checklist
 
-- [ ] 1. Remove Changed in This Pane: the section, `src/baselines.ts`, **Reset Baseline**, the since-decorations,
+- [x] 1. Remove Changed in This Pane: the section, `src/baselines.ts`, **Reset Baseline**, the since-decorations,
       `countCommits`; clear the old `herdr.paneContext.baselines` workspaceState key on activation
-- [ ] 2. Rename **All Changes** to **Uncommitted**, expanded by default
-- [ ] 3. **Commits** section: base detection, `git log` parse, commit rows, lazily loaded file rows, diffs
-- [ ] 4. Touched-files recorder over every agent pane of every connected session; `TouchedStore` (persisted,
+- [x] 2. Rename **All Changes** to **Uncommitted**, expanded by default
+- [x] 3. **Commits** section: base detection, `git log` parse, commit rows, lazily loaded file rows, diffs
+- [x] 4. Touched-files recorder over every agent pane of every connected session; `TouchedStore` (persisted,
       pruned, moved on `pane.moved`)
-- [ ] 5. Title toggle **Show Only This Pane's Files** / **Show All Files** and its filtering of Uncommitted and Commits
-- [ ] 6. Tests (Validation)
-- [ ] 7. README, CHANGELOG, `docs/how-it-works.md` (replace "Baselines: changed in this pane")
+- [x] 5. Title toggle **Show Only This Pane's Files** / **Show All Files** and its filtering of Uncommitted and Commits
+- [x] 6. Tests (Validation)
+- [x] 7. README, CHANGELOG, `docs/how-it-works.md` (replace "Baselines: changed in this pane")
 
 ## Contracts
 
@@ -184,32 +184,32 @@ activation, `context.workspaceState.update('herdr.paneContext.baselines', undefi
 
 ## Validation
 
-- [ ] `cd herdr-vscode && npm run compile && npm run lint` succeed
-- [ ] Bundle with a Linux esbuild binary as in phase 27's Validation
-- [ ] `xvfb-run -a npx vscode-test` passes, including new tests over a temp repo:
-  - [ ] top-level labels `Uncommitted`, `Commits`, `Files` after the pane and repo rows; Uncommitted expanded;
+- [x] `cd herdr-vscode && npm run compile && npm run lint` succeed
+- [x] Bundle with a Linux esbuild binary as in phase 27's Validation
+- [x] `xvfb-run -a npx vscode-test` passes, including new tests over a temp repo:
+  - [x] top-level labels `Uncommitted`, `Commits`, `Files` after the pane and repo rows; Uncommitted expanded;
         no `Changed in This Pane`; `herdr.paneContext.resetBaseline` is neither registered nor contributed
-  - [ ] base detection: a clone with `origin/HEAD` → `vs origin/main` and only the branch's commits; no remote but a
+  - [x] base detection: a clone with `origin/HEAD` → `vs origin/main` and only the branch's commits; no remote but a
         `main` → `vs main`; on `main` itself → `recent`, at most 20 commits
-  - [ ] `git log` parse: multi-line `%B` keeps its body in the tooltip; a root commit has no parents; a malformed
+  - [x] `git log` parse: multi-line `%B` keeps its body in the tooltip; a root commit has no parents; a malformed
         record is skipped
-  - [ ] commit files: modify / add / delete / root commit letters; click on `M` opens a diff titled `<name> (<sha7>)`
+  - [x] commit files: modify / add / delete / root commit letters; click on `M` opens a diff titled `<name> (<sha7>)`
         whose sides are `herdr-git` URIs at the parent and the commit; `D` opens the parent revision; Open File opens
         the working tree file, or the revision when it no longer exists
-  - [ ] recorder with a fake model: idle → working → idle around a file write records that path for that
+  - [x] recorder with a fake model: idle → working → idle around a file write records that path for that
         (pane, toplevel); a write while idle is not recorded; first sight while working starts a span; a pane that
         disappears mid-span ends it; two panes on one toplevel never run two snapshots at once
-  - [ ] span snapshots in a temp repo: `.git/objects` file count and `.git/index` mtime unchanged across a span;
+  - [x] span snapshots in a temp repo: `.git/objects` file count and `.git/index` mtime unchanged across a span;
         the span directory is gone after the span; modify / add / delete inside the span → `M` / `A` / `D`; a
         modification made before the span is not reported; a linked worktree (relative vs absolute objects path)
         works
-  - [ ] `TouchedStore`: persisted through a memento round trip, pruned at 7 days and for closed panes, moved on
+  - [x] `TouchedStore`: persisted through a memento round trip, pruned at 7 days and for closed panes, moved on
         `pane.moved`
-  - [ ] pane mode: Uncommitted and Commits filtered to the touched set; untracked directory row kept when a touched
+  - [x] pane mode: Uncommitted and Commits filtered to the touched set; untracked directory row kept when a touched
         path is under it; commits without touched files hidden; `Nothing recorded for this pane`; shell pane note and
         unfiltered rows; toggle commands flip the context key and the workspaceState value
-  - [ ] the old `herdr.paneContext.baselines` key is cleared on activation
-- [ ] Live (`HERDR_VSCODE_LIVE_SESSION`, throwaway session): an agent pane going working → idle while a file is
+  - [x] the old `herdr.paneContext.baselines` key is cleared on activation
+- [x] Live (`HERDR_VSCODE_LIVE_SESSION`, throwaway session): an agent pane going working → idle while a file is
       written records it; record the snapshot timings under Implementation notes
 - [ ] Manual (left to the user): on this repo, Commits shows recent commits, expanding one lists its files, clicking
       shows its diff; with the filter on, only files an agent touched remain
@@ -230,3 +230,53 @@ activation, `context.workspaceState.update('herdr.paneContext.baselines', undefi
 - `.plans/PLAN.md`
 
 ## Implementation notes
+
+Implemented 2026-11-02 on `herdr-vscode-active-pane`.
+
+- **Tests:** `xvfb-run -a npx vscode-test`: 308 passing, 60 pending (opt-in live suites), 0 failing (baseline 296 / 59 / 0).
+  New: `touched.test.ts` (store round trip, prune, move; the recorder over a temp repo with a fake model: idle → working →
+  idle, idle writes, first sight while working, blocked ends, a pane leaving mid-span, shell and non-repo panes,
+  `pane.moved` re-keying the open span, one snapshot at a time per toplevel with ends after starts, failed start / end
+  snapshots, leftover span directories); in `git.test.ts` the span snapshot suite (M / A / D, a pre-span change not
+  reported, linked worktree vs plain repo, no index, racily clean, failures, type change) and commits (log parse, base
+  detection: clone with `origin/HEAD`, local `main`, on `main`, `master`, neither, no HEAD; commit files incl. root);
+  in `paneContext.test.ts` sections, commit rows / files / diffs / Open File, poll, pane mode, nothing-recorded, shell
+  pane, toggle helper, contributions. `baselines.test.ts` deleted; the since-row decoration test removed.
+- **Deviation (required by "nothing writes to `.git`"): no alternate while snapshotting.** The prescribed span script
+  (`GIT_ALTERNATE_OBJECT_DIRECTORIES=<repo objects>` during `add -A` / `write-tree`) adds no files to `.git/objects`
+  and leaves `.git/index` alone, but git **freshens** objects it would write that already exist: `utime` on the loose
+  file in the repo's `.git/objects`. Caught by the linked-worktree test, which compares every file under `.git` with
+  size and mtime: three objects (the checkout's racily clean blobs and a tree) got new mtimes. Reproduced in a scratch
+  repo (`touch` a committed file, same content: `.git CHANGED` with the alternate, unchanged without). The snapshot now
+  exports only `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` and runs `write-tree --missing-ok` (the blobs only the repo
+  has are not checked); the **diff** keeps all three variables, so unchanged subtrees are read from the repo, read-only.
+  Both span tests (plain and linked) assert the whole `.git` listing, mtimes included, is unchanged, plus the
+  mandatory `.git/objects` count and `.git/index` mtime. Documented in `docs/how-it-works.md`.
+- **Deviation: `--no-commit-id` on the root-commit `diff-tree`.** With a single commit argument, `diff-tree -z` prints
+  the commit's SHA as a first NUL-terminated record, which `parseDiffTree` would pair with the first letter. The
+  two-argument (first parent) form prints no header and is as prescribed.
+- **Commits group is expanded** (the plan does not say); commit rows are collapsed as prescribed. The `git log` /
+  base detection runs on every load; the 5 s poll runs `rev-parse -q --verify HEAD` and re-reads Commits only when HEAD
+  moved (so a fetched `origin/main` shows on the next load or Refresh).
+- **Pane mode Uncommitted** is shown in a repo whenever the followed pane has an agent (even with a clean status, so the
+  note is visible; e.g. `0 of 0`). A shell pane's sections keep their normal visibility, with the note first.
+- **Toggle:** `applyPaneFilesOnly` / `storedPaneFilesOnly` in `paneContext.ts` (unit-tested with a memento and a fake
+  `setContext`; the real commands are only executed in the test host, since context keys cannot be read back). The
+  retired keys (`herdr.layouts`, `herdr.paneContext.baselines`) are cleared by `clearRetiredState` in `extension.ts`.
+  The view refreshes on `TouchedStore.onDidChange` while the filter is on, and fully (not just the pane row) when the
+  followed pane gains or loses its agent in pane mode.
+- **Recorder:** spans end when the pane's `raw_status` is not `working`, the pane has no agent, it left the snapshot, or
+  its session is no longer connected. Pruning runs on every model change, synchronously, so a pane that left mid-span
+  has its files recorded and then pruned on the next change (it is closed). On `dispose`, open spans' directories are
+  removed (their files are lost, as with a reload).
+- **Live run** (throwaway `hv-test` in an isolated `HOME=/tmp/hvp`, every `HERDR_*` variable stripped; the user's
+  sessions untouched; stopped and the home removed afterwards), `--grep "live pane context"`: the new test passes —
+  `pane.report_agent` working → write → idle recorded `by-agent.txt` only, `.git/objects` count and `.git/index` mtime
+  unchanged. Timings: start snapshot 38 ms, end snapshot 15 ms, diff 12 ms; `idle` reported → path recorded 339 ms.
+  13 passing, 4 failing: the four `links printed in a real tile` tests (hover never sets `overLink`) fail identically
+  at HEAD (3cf4068, run in a temporary worktree) and with the new test skipped, so they are pre-existing and
+  unrelated (no link code changed). Other live suites were not run.
+- **Partial clones:** `git show` / `diff-tree` on a promisor repo could lazily fetch missing objects into `.git`; not
+  handled (no `GIT_NO_LAZY_FETCH`), noted for completeness.
+- **Manual (pending, left to the user):** on this repo, Commits shows recent commits, expanding one lists its files,
+  clicking shows its diff; with the filter on, only files an agent touched remain.

@@ -4,18 +4,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { BaselineStore, memoryMemento } from '../baselines';
 import { bridgeRequest, herdrArgv } from '../bridge';
 import { Environments } from '../environments';
 import { FocusTracker } from '../focus';
-import { GitHeadContentProvider, parseGitHeadUri } from '../git';
-import { ChangeNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, PaneRowNode, RootNode, SinceNode } from '../paneContext';
+import { cleanupSpanDirs, GitHeadContentProvider, makeSpanDir, parseGitHeadUri, readToplevel, removeSpanDir, spanDiff, spanSnapshot } from '../git';
+import { ChangeNode, CommitNode, EntryNode, GroupNode, PaneContextNode, PaneContextView, PaneRowNode, RootNode } from '../paneContext';
 import { EnvironmentPaths } from '../paths';
 import { LocalShell } from '../remoteShell';
 import { SessionModel } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TilesPanels } from '../tilesPanel';
 import { makePaneKey, TileProbe } from '../tilesProtocol';
+import { memoryMemento, TouchedRecorder, TouchedStore } from '../touched';
 
 /**
  * The Pane Context view in a real tree view, over a real herdr session and a real
@@ -54,7 +54,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 	let panels: TilesPanels;
 	let paths: EnvironmentPaths;
 	let view: PaneContextView;
-	let baselines: BaselineStore;
+	let touched: TouchedStore;
 	let tree: vscode.TreeView<PaneContextNode>;
 	let panel: MirrorPanel;
 	let repo: string;
@@ -111,9 +111,9 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await waitFor('panes in snapshot', 5000, () => model.connection(key)?.snapshot?.panes.filter((p) => p.tab_id === tabId).length === 2);
 
 		const noSelectionChange = new vscode.EventEmitter<void>();
-		baselines = new BaselineStore(memoryMemento());
+		touched = new TouchedStore(memoryMemento());
 		view = new PaneContextView({
-			baselines,
+			touched,
 			model,
 			focus,
 			sessions: { selected: key, onDidChangeSelected: noSelectionChange.event },
@@ -170,18 +170,16 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		assert.strictEqual(changes[0].uri.fsPath, path.join(repo, 'src', 'auth', 'middleware.ts'));
 	});
 
-	test('following the pane recorded a baseline; a change from before is only in All Changes', async () => {
-		const baseline = baselines.get(pk(p1), repo);
-		assert.ok(baseline, baselines.keys().join(', '));
-		assert.strictEqual(baseline.head, git('rev-parse', 'HEAD').trim());
-		const since = (await group('since'))!;
-		assert.match(String(since.description), /^since \d\d:\d\d$/);
-		assert.deepStrictEqual(
-			(await view.getChildren(since)).map((n) => (n as { label: string }).label),
-			[`No changes ${since.description}`],
-		);
-		const all = (await view.getChildren(await group('changes'))) as ChangeNode[];
+	test('Uncommitted holds the change, Commits the one commit (recent, on main)', async () => {
+		const uncommitted = (await group('changes'))!;
+		assert.strictEqual(uncommitted.label, 'Uncommitted');
+		const all = (await view.getChildren(uncommitted)) as ChangeNode[];
 		assert.deepStrictEqual(all.map((c) => c.label), ['middleware.ts']);
+		const commits = (await group('commits'))!;
+		assert.strictEqual(commits.description, 'recent');
+		const rows = (await view.getChildren(commits)) as CommitNode[];
+		assert.deepStrictEqual(rows.map((r) => r.label), ['one']);
+		assert.strictEqual(rows[0].commit.sha, git('rev-parse', 'HEAD').trim());
 	});
 
 	// `Show Pane` runs the extension's own command, whose model discovers nothing here: so what it runs.
@@ -266,20 +264,59 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await req('pane.close', { pane_id: fresh.pane_id });
 	});
 
-	test('a file written from the pane is in Changed in This Pane within a poll; the earlier change is not', async () => {
+	test('a file written from the pane is in Uncommitted within a poll', async () => {
 		await waitFor('p1 painted', 15000, async () => (await tileOf(p1))?.text.length);
 		const start = Date.now();
 		say(p1, `printf 'from pane\\n' > ${repo}/from-pane.txt`);
-		const rows = await waitFor('the since row', 8000, async () => {
-			const r = (await view.getChildren(await group('since'))) as SinceNode[];
-			return r.some((n) => n.label === 'from-pane.txt') && r;
-		});
-		console.log(`[live-pane-context] file from pane to Changed in This Pane: ${Date.now() - start} ms`);
-		assert.ok(!rows.some((n) => n.label === 'middleware.ts'), 'changed before following');
-		assert.strictEqual(rows.find((n) => n.label === 'from-pane.txt')?.status, 'A');
+		await waitFor('the change row', 8000, async () => ((await view.getChildren(await group('changes'))) as ChangeNode[]).some((n) => n.label === 'from-pane.txt'));
+		console.log(`[live-pane-context] file from pane to Uncommitted: ${Date.now() - start} ms`);
 		assert.strictEqual(fs.readFileSync(path.join(repo, 'from-pane.txt'), 'utf8'), 'from pane\n');
-		const all = (await view.getChildren(await group('changes'))) as ChangeNode[];
-		assert.ok(all.some((c) => c.label === 'middleware.ts'));
+	});
+
+	test("an agent pane going working → idle while a file is written records it; nothing in the repo's .git changes", async () => {
+		const objects = () => cp.execFileSync('find', [path.join(repo, '.git', 'objects'), '-type', 'f'], { encoding: 'utf8' }).split('\n').filter(Boolean).length;
+		const indexMtime = () => fs.statSync(path.join(repo, '.git', 'index')).mtimeMs;
+		const before = { objects: objects(), index: indexMtime() };
+		const store = new TouchedStore(memoryMemento());
+		const timings: string[] = [];
+		const timed = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
+			const t = Date.now();
+			try {
+				return await run();
+			} finally {
+				timings.push(`${what} ${Date.now() - t} ms`);
+			}
+		};
+		const recorder = new TouchedRecorder({
+			model,
+			store,
+			log: (l) => console.log(`[live-pane-context] ${l}`),
+			git: {
+				toplevel: readToplevel,
+				makeDir: makeSpanDir,
+				snapshot: (sh, top, d) => timed('snapshot', () => spanSnapshot(sh, top, d)),
+				diff: (sh, top, d, a, b) => timed('diff', () => spanDiff(sh, top, d, a, b)),
+				removeDir: removeSpanDir,
+				cleanup: cleanupSpanDirs,
+			},
+		});
+		const report = (state: string) => req('pane.report_agent', { pane_id: p1, source: 'herdr-vscode-test', agent: 'claude', state });
+		try {
+			await report('working');
+			await waitFor('the span', 5000, () => recorder.openSpans().includes(pk(p1)));
+			await recorder.settled();
+			fs.writeFileSync(path.join(repo, 'by-agent.txt'), 'agent\n');
+			const start = Date.now();
+			await report('idle');
+			await waitFor('recorded', 8000, () => store.get(pk(p1), repo)?.paths.includes('by-agent.txt'));
+			console.log(`[live-pane-context] idle to recorded: ${Date.now() - start} ms; ${timings.join(', ')}`);
+			assert.deepStrictEqual(store.get(pk(p1), repo)?.paths, ['by-agent.txt'], 'from-pane.txt and middleware.ts changed before the span');
+			assert.strictEqual(objects(), before.objects, '.git/objects file count');
+			assert.strictEqual(indexMtime(), before.index, '.git/index mtime');
+		} finally {
+			recorder.dispose();
+			store.dispose();
+		}
 	});
 
 	suite('links printed in a real tile', () => {

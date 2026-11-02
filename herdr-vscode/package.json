@@ -204,10 +204,16 @@
         "icon": "$(go-to-file)"
       },
       {
-        "command": "herdr.paneContext.resetBaseline",
-        "title": "Reset Baseline",
+        "command": "herdr.paneContext.showPaneFiles",
+        "title": "Show Only This Pane's Files",
         "category": "herdr",
-        "icon": "$(history)"
+        "icon": "$(filter)"
+      },
+      {
+        "command": "herdr.paneContext.showAllFiles",
+        "title": "Show All Files",
+        "category": "herdr",
+        "icon": "$(filter-filled)"
       },
       {
         "command": "herdr.paneContext.openSourceControl",
@@ -386,9 +392,19 @@
           "group": "navigation@1"
         },
         {
+          "command": "herdr.paneContext.showPaneFiles",
+          "when": "view == herdr.paneContext && !herdr.paneContext.paneFilesOnly",
+          "group": "navigation@2"
+        },
+        {
+          "command": "herdr.paneContext.showAllFiles",
+          "when": "view == herdr.paneContext && herdr.paneContext.paneFilesOnly",
+          "group": "navigation@2"
+        },
+        {
           "command": "herdr.paneContext.refresh",
           "when": "view == herdr.paneContext",
-          "group": "navigation@2"
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -458,13 +474,8 @@
           "group": "inline@5"
         },
         {
-          "command": "herdr.paneContext.resetBaseline",
-          "when": "view == herdr.paneContext && viewItem == herdr.paneContext.since",
-          "group": "inline@1"
-        },
-        {
           "command": "herdr.paneContext.openFile",
-          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(change|sinceChange)$/",
+          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(change|commitFile)$/",
           "group": "inline@1"
         },
         {
@@ -576,7 +587,11 @@
           "when": "false"
         },
         {
-          "command": "herdr.paneContext.resetBaseline",
+          "command": "herdr.paneContext.showPaneFiles",
+          "when": "false"
+        },
+        {
+          "command": "herdr.paneContext.showAllFiles",
           "when": "false"
         },
         {

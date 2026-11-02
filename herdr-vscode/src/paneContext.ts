@@ -1,25 +1,31 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { Baseline, baselineTime, BaselineStore, memoryMemento, paneStateIn, sinceLabel } from './baselines';
-import { GIT_EXTENSION_ID, GitApiLike, GitExtensionLike, PaneDecorations, SINCE_FRAGMENT } from './decorations';
+import { GIT_EXTENSION_ID, GitApiLike, GitExtensionLike, PaneDecorations } from './decorations';
 import { Environment } from './environments';
 import { FocusTracker } from './focus';
 import {
-	countCommits,
-	diffTrees,
+	Commit,
+	CommitList,
+	commitSubject,
+	EMPTY_TREE,
 	gitHeadUri,
 	GitInfo,
 	gitRevisionUri,
+	isoLocal,
+	readCommitFiles,
+	readCommits,
+	readHeadSha,
 	readStatus,
 	readToplevel,
-	SinceChange,
-	SinceStatus,
-	takeSnapshot,
+	shortTime,
+	TreeChange,
+	TreeStatus,
 } from './git';
 import { environmentUri, EnvironmentPaths, isUnder, parseLinkText, resolveLinkPath } from './paths';
 import { hasAgent, paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPane } from './sessions';
 import { agentIcon } from './status';
 import { TilesPanels } from './tilesPanel';
+import { memoryMemento, TouchedStore } from './touched';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
 import { SessionsView } from './views/sessionsView';
 import { agentTooltip, paneClickCommand, PaneRef } from './views/spacesView';
@@ -29,7 +35,15 @@ export const PANE_CONTEXT_VIEW = 'herdr.paneContext';
 export const OPEN_CHANGES_COMMAND = 'herdr.paneContext.openChanges';
 /** Context key: whether the view is pinned. */
 export const PANE_CONTEXT_PINNED_KEY = 'herdr.paneContextPinned';
+/** Context key and workspaceState key: change sections show only the followed pane's files. */
+export const PANE_FILES_ONLY_KEY = 'herdr.paneContext.paneFilesOnly';
 export const NO_PANE_MESSAGE = 'Click into a herdr pane to see its files.';
+/** A change section with nothing this pane touched. */
+export const NOTHING_RECORDED = 'Nothing recorded for this pane';
+/** First row of each change section for a shell pane in pane mode. */
+export const NO_AGENT_NOTE = 'No agent in this pane: showing all files';
+/** How many commits' files load at once (pane mode loads them all). */
+const COMMIT_FILES_PARALLEL = 4;
 
 const POLL_MS = 5000;
 const WATCH_DEBOUNCE_MS = 500;
@@ -85,6 +99,29 @@ export function sortEntries(entries: [string, vscode.FileType][]): [string, vsco
 	);
 }
 
+/** The parts of a `Memento` the toggle uses. */
+export interface PaneFilesMemento {
+	get<T>(key: string): T | undefined;
+	update(key: string, value: unknown): Thenable<void>;
+}
+
+/** **Show Only This Pane's Files** / **Show All Files**: the view, the workspaceState value and the context key. */
+export async function applyPaneFilesOnly(
+	on: boolean,
+	view: Pick<PaneContextView, 'setPaneFilesOnly'>,
+	memento: PaneFilesMemento,
+	setContext: (key: string, value: boolean) => Thenable<unknown> = (key, value) => vscode.commands.executeCommand('setContext', key, value),
+): Promise<void> {
+	view.setPaneFilesOnly(on);
+	await memento.update(PANE_FILES_ONLY_KEY, on);
+	await setContext(PANE_FILES_ONLY_KEY, on);
+}
+
+/** The mode stored in workspaceState (default off). */
+export function storedPaneFilesOnly(memento: PaneFilesMemento): boolean {
+	return memento.get<boolean>(PANE_FILES_ONLY_KEY) === true;
+}
+
 // ── Tree nodes ──────────────────────────────────────────────────────────────
 
 /** The followed pane itself: the first row. */
@@ -115,30 +152,39 @@ export interface RootNode {
 
 export interface GroupNode {
 	type: 'group';
-	/** `since`: Changed in This Pane; `changes`: All Changes. */
-	group: 'since' | 'changes' | 'files';
+	/** `changes`: Uncommitted; `commits`: Commits. */
+	group: 'changes' | 'commits' | 'files';
 	id: string;
 	label: string;
 	description?: string;
 }
 
-/** A Changed in This Pane row: a path that changed since the pane's baseline. */
-export interface SinceNode {
-	type: 'since';
+/** A commit in Commits; its files load on expand. */
+export interface CommitNode {
+	type: 'commit';
+	/** `<root uri>|commit|<sha>`. */
 	id: string;
 	label: string;
-	/** The directory, relative to the toplevel; none at the top level. */
-	description?: string;
-	/** The file's URI with fragment `herdr-since`: what gives the row its since-letter. */
-	uri: vscode.Uri;
-	/** The plain file URI, which a click opens. */
-	fileUri: vscode.Uri;
-	/** The file as the baseline has it (`herdr-git` at the baseline tree). */
-	baseUri: vscode.Uri;
-	status: SinceStatus;
-	/** `HH:MM` (or `Mon D HH:MM`) of the baseline. */
-	time: string;
+	description: string;
 	tooltip: string;
+	commit: Commit;
+}
+
+/** A file a commit changed, against its first parent. */
+export interface CommitFileNode {
+	type: 'commitFile';
+	id: string;
+	label: string;
+	description: string;
+	path: string;
+	status: TreeStatus;
+	sha: string;
+	/** The file at the first parent (the empty tree for a root commit). */
+	leftUri: vscode.Uri;
+	/** The file at the commit. */
+	rightUri: vscode.Uri;
+	/** The working tree file. */
+	fileUri: vscode.Uri;
 }
 
 export interface ChangeNode {
@@ -172,7 +218,7 @@ export interface NoteNode {
 	plain?: boolean;
 }
 
-export type PaneContextNode = PaneRowNode | RootNode | GroupNode | ChangeNode | SinceNode | EntryNode | NoteNode;
+export type PaneContextNode = PaneRowNode | RootNode | GroupNode | ChangeNode | CommitNode | CommitFileNode | EntryNode | NoteNode;
 
 /** The Repo row's context value, which the inline actions' `when` clauses read. */
 export function rootContextValue(node: Pick<RootNode, 'canAdd' | 'scm' | 'terminal'>): string {
@@ -184,12 +230,27 @@ export function paneRowContextValue(node: Pick<PaneRowNode, 'shown'>): string {
 	return `herdr.paneContext.pane${node.shown ? '' : ' hidden'}`;
 }
 
-const SINCE_WORDS: Record<SinceStatus, string> = { A: 'Added', M: 'Modified', D: 'Deleted' };
+/** A commit row's description: `<sha7> · <time>`. */
+export function commitDescription(commit: Pick<Commit, 'sha' | 'at'>, now: number = Date.now()): string {
+	return `${commit.sha.slice(0, 7)} · ${shortTime(commit.at, now)}`;
+}
 
-/** Changed in This Pane's description: `since 10:31`, then ` · 2 commits` when there are any. */
-export function sinceDescription(at: number, commits: number | undefined, now: number = Date.now()): string {
-	const count = commits && commits > 0 ? ` · ${commits} commit${commits === 1 ? '' : 's'}` : '';
-	return `${sinceLabel(at, now)}${count}`;
+/** A commit row's tooltip: the full SHA, author and date, and the message. */
+export function commitTooltip(commit: Commit): string {
+	return `${commit.sha}\n${commit.author} · ${isoLocal(commit.at)}\n\n${commit.body.trim()}`;
+}
+
+/** Whether a change row's path (`dir/` for an untracked directory) is among the touched paths. */
+export function touchedChange(changePath: string, touched: ReadonlySet<string>): boolean {
+	if (!changePath.endsWith('/')) {
+		return touched.has(changePath);
+	}
+	for (const p of touched) {
+		if (p.startsWith(changePath)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** `<marker> · <description>`, or the marker alone; unchanged without one. */
@@ -222,21 +283,28 @@ export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 			return item;
 		}
 		case 'group': {
-			const collapsed = node.group === 'changes';
-			const item = new vscode.TreeItem(node.label, collapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
+			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
 			item.id = node.id;
 			item.description = node.description;
 			item.contextValue = `herdr.paneContext.${node.group}`;
 			return item;
 		}
-		case 'since': {
+		case 'commit': {
+			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Collapsed);
+			item.id = node.id;
+			item.description = node.description;
+			item.tooltip = node.tooltip;
+			item.iconPath = new vscode.ThemeIcon('git-commit');
+			item.contextValue = 'herdr.paneContext.commit';
+			return item;
+		}
+		case 'commitFile': {
 			const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
 			item.id = node.id;
 			item.description = node.description;
-			item.resourceUri = node.uri;
+			item.tooltip = node.path;
 			item.iconPath = vscode.ThemeIcon.File;
-			item.tooltip = node.tooltip;
-			item.contextValue = 'herdr.paneContext.sinceChange';
+			item.contextValue = 'herdr.paneContext.commitFile';
 			item.command = { command: OPEN_CHANGES_COMMAND, title: 'Open Changes', arguments: [node] };
 			return item;
 		}
@@ -288,25 +356,18 @@ export interface PaneContextDeps {
 	paths: Pick<EnvironmentPaths, 'mounts' | 'uriFor' | 'home'>;
 	createHost(provider: vscode.TreeDataProvider<PaneContextNode>): PaneContextHost;
 	log(line: string): void;
-	/** Where baselines are kept (`workspaceState`); in memory when absent. */
-	baselines?: BaselineStore;
+	/** The files each pane's agent touched (recorded by `TouchedRecorder`); in memory when absent. */
+	touched?: TouchedStore;
+	/** Whether the change sections start out showing only the pane's files. */
+	paneFilesOnly?: boolean;
 	/** The git markers of the followed repo. */
 	decorations?: Pick<PaneDecorations, 'set'>;
 	/** The clock, for tests. */
 	now?: () => number;
 }
 
-/** Changed in This Pane: the baseline, and what changed since. */
-interface SinceState {
-	baseline?: Baseline;
-	changes: SinceChange[];
-	commits?: number;
-	/** A failed snapshot. */
-	error?: string;
-	/** The tree and HEAD last seen, so the same tree is not diffed again. */
-	lastTree?: string;
-	lastHead?: string;
-}
+/** How the change sections are filtered: not at all, a shell pane in pane mode, or to the touched paths. */
+type SectionFilter = { kind: 'all' } | { kind: 'shell' } | { kind: 'pane'; touched: ReadonlySet<string> };
 
 /** What the tree shows now: a pane's directory, resolved in its environment. */
 interface Loaded {
@@ -318,7 +379,8 @@ interface Loaded {
 	rootUri: vscode.Uri;
 	toplevel?: string;
 	git?: GitInfo;
-	since?: SinceState;
+	/** Commits: undefined when there is no HEAD (or no repo). */
+	commits?: CommitList;
 	mounts: Awaited<ReturnType<EnvironmentPaths['mounts']>>;
 }
 
@@ -348,29 +410,32 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	private pollTimer: NodeJS.Timeout | undefined;
 	private polling = false;
 	private disposed = false;
-	private readonly store: BaselineStore;
+	private readonly store: TouchedStore;
 	private readonly now: () => number;
-	/** Snapshots run one at a time. */
-	private sinceQueue: Promise<unknown> = Promise.resolve();
-	/** `<env key>\n<dir>` → its worktree, until the next load or Refresh. */
+	private paneFilesOnlyNow: boolean;
+	/** `<env key>\n<toplevel>\n<sha>` → the commit's files, for the view's lifetime. */
+	private readonly commitFiles = new Map<string, Promise<TreeChange[] | undefined>>();
 
 	constructor(private readonly deps: PaneContextDeps) {
-		this.store = deps.baselines ?? new BaselineStore(memoryMemento());
+		this.store = deps.touched ?? new TouchedStore(memoryMemento());
+		if (!deps.touched) {
+			this.disposables.push(this.store);
+		}
 		this.now = deps.now ?? Date.now;
+		this.paneFilesOnlyNow = deps.paneFilesOnly ?? false;
 		this.host = deps.createHost(this);
 		this.disposables.push(
 			this.emitter,
 			this.host,
-			deps.model.onDidChange(() => {
-				this.prune();
-				this.update();
+			deps.model.onDidChange(() => this.update()),
+			this.store.onDidChange(() => {
+				if (this.paneFilesOnlyNow && this.loaded) {
+					this.emitter.fire();
+				}
 			}),
 			deps.model.onDidEvent((e) => {
 				if (e.event.event === 'pane.moved') {
 					const moved = parsePaneMoved(e.event.data);
-					if (moved) {
-						void this.store.move(makePaneKey(e.sessionKey, moved.from), makePaneKey(e.sessionKey, moved.to));
-					}
 					if (moved && this.pinnedKey === makePaneKey(e.sessionKey, moved.from)) {
 						this.pinnedKey = makePaneKey(e.sessionKey, moved.to);
 						this.update();
@@ -406,6 +471,18 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 
 	get pinned(): boolean {
 		return this.pinnedKey !== undefined;
+	}
+
+	/** Whether the change sections show only the followed pane's files. */
+	get paneFilesOnly(): boolean {
+		return this.paneFilesOnlyNow;
+	}
+
+	setPaneFilesOnly(on: boolean): void {
+		if (on !== this.paneFilesOnlyNow) {
+			this.paneFilesOnlyNow = on;
+			this.emitter.fire();
+		}
 	}
 
 	pin(): void {
@@ -492,19 +569,14 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			previous.pane.agent === pane.agent &&
 			previous.pane.agent_status === pane.agent_status &&
 			previous.pane.state_since === pane.state_since;
+		const agentChanged = hasAgent(previous.pane) !== hasAgent(pane);
 		// The tree holds the node it was given: update it in place and fire it.
 		Object.assign(previous, next);
-		if (!same) {
+		if (agentChanged && this.paneFilesOnlyNow) {
+			this.emitter.fire(); // The sections' filter depends on it.
+		} else if (!same) {
 			this.emitter.fire(previous);
 		}
-	}
-
-	/** Baselines of closed panes and old ones go. */
-	private prune(): void {
-		void this.store.prune(
-			paneStateIn((key) => this.deps.model.connection(key)),
-			this.now(),
-		);
 	}
 
 	private clear(): void {
@@ -529,16 +601,13 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		const gen = ++this.loadGen;
 		let toplevel: string | undefined;
 		let git: GitInfo | undefined;
-		let since: SinceState | undefined;
+		let commits: CommitList | undefined;
 		try {
 			toplevel = await readToplevel(env.shell, dir);
 			git = toplevel ? await readStatus(env.shell, toplevel) : undefined;
+			commits = toplevel && git ? await readCommits(env.shell, toplevel) : undefined;
 		} catch (err) {
 			this.deps.log(`pane context: git in ${dir}: ${errorText(err)}`);
-		}
-		if (toplevel && gen === this.loadGen) {
-			const previous = this.loaded?.paneKey === paneKey && this.loaded.toplevel === toplevel ? this.loaded.since : undefined;
-			since = await this.readSince(env, paneKey, toplevel, previous);
 		}
 		const mounts = await this.deps.paths.mounts(env);
 		if (gen !== this.loadGen || this.disposed) {
@@ -550,60 +619,10 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.entries.clear();
 			this.filesGroup = undefined;
 		}
-		this.loaded = { paneKey, env, dir, rootPath, rootUri, toplevel, git, since, mounts };
+		this.loaded = { paneKey, env, dir, rootPath, rootUri, toplevel, git, commits, mounts };
 		this.setWatchedRoot(rootUri);
 		this.pushDecorations();
 		this.emitter.fire();
-	}
-
-	/** Runs snapshots one at a time. */
-	private queued<T>(run: () => Promise<T>): Promise<T> {
-		const next = this.sinceQueue.then(run, run);
-		this.sinceQueue = next.catch(() => undefined);
-		return next;
-	}
-
-	/**
-	 * The baseline of (pane, toplevel), taken now when there is none, and what
-	 * changed since: a snapshot of the working state diffed against it. A
-	 * baseline git has pruned is replaced by a new one.
-	 */
-	private readSince(env: Environment, paneKey: string, toplevel: string, previous: SinceState | undefined): Promise<SinceState> {
-		return this.queued(async () => {
-			let baseline = this.store.get(paneKey, toplevel);
-			let current;
-			try {
-				current = await takeSnapshot(env.shell, toplevel);
-			} catch (err) {
-				return { baseline, changes: [], error: errorText(err) };
-			}
-			if (!baseline) {
-				baseline = { tree: current.tree, head: current.head, at: this.now() };
-				await this.store.set(paneKey, toplevel, baseline);
-				return { baseline, changes: [], commits: 0, lastTree: current.tree, lastHead: current.head };
-			}
-			const sameBaseline = previous?.baseline?.tree === baseline.tree && previous.baseline.at === baseline.at && !previous.error;
-			let changes: SinceChange[];
-			if (current.tree === baseline.tree) {
-				changes = [];
-			} else if (sameBaseline && previous.lastTree === current.tree) {
-				changes = previous.changes;
-			} else {
-				const diff = await diffTrees(env.shell, toplevel, baseline.tree, current.tree);
-				if (!diff) {
-					this.deps.log(`pane context: baseline for ${toplevel} was lost; recorded a new one`);
-					baseline = { tree: current.tree, head: current.head, at: this.now() };
-					await this.store.set(paneKey, toplevel, baseline);
-					return { baseline, changes: [], commits: 0, lastTree: current.tree, lastHead: current.head };
-				}
-				changes = diff;
-			}
-			let commits: number | undefined = 0;
-			if (current.head !== baseline.head) {
-				commits = sameBaseline && previous.lastHead === current.head ? previous.commits : await countCommits(env.shell, toplevel, baseline.head);
-			}
-			return { baseline, changes, commits, lastTree: current.tree, lastHead: current.head };
-		});
 	}
 
 	/** The followed repo's markers, for the decoration provider. */
@@ -619,12 +638,9 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			return;
 		}
 		const uriOf = (file: string) => environmentUri(loaded.env, `${toplevel}/${file.replace(/\/+$/, '')}`, loaded.mounts);
-		const baseline = loaded.since?.baseline;
 		decorations.set({
 			status: loaded.git.changes.map((c) => ({ uri: uriOf(c.path), xy: c.xy })),
 			untrackedDirs: loaded.git.changes.filter((c) => c.xy === '??' && c.path.endsWith('/')).map((c) => uriOf(c.path)),
-			since: loaded.since?.error ? [] : (loaded.since?.changes ?? []).map((c) => ({ uri: uriOf(c.path).with({ fragment: SINCE_FRAGMENT }), status: c.status })),
-			sinceTime: baseline && baselineTime(baseline.at, this.now()),
 		});
 	}
 
@@ -699,15 +715,17 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 					this.reload(); // The repo went away, or git refuses it now.
 					return;
 				}
-				const since = await this.readSince(loaded.env, loaded.paneKey, loaded.toplevel, loaded.since);
+				// Commits are read again only when HEAD moved.
+				const head = await readHeadSha(loaded.env.shell, loaded.toplevel);
+				const commits = head === loaded.commits?.head ? loaded.commits : await readCommits(loaded.env.shell, loaded.toplevel);
 				if (this.loaded !== loaded) {
 					return;
 				}
 				const gitChanged = JSON.stringify(git) !== JSON.stringify(loaded.git);
-				const sinceChanged = JSON.stringify(since) !== JSON.stringify(loaded.since);
-				if (gitChanged || sinceChanged) {
+				const commitsChanged = commits !== loaded.commits;
+				if (gitChanged || commitsChanged) {
 					loaded.git = git;
-					loaded.since = since;
+					loaded.commits = commits;
 					this.pushDecorations();
 					this.emitter.fire();
 				}
@@ -750,13 +768,16 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		}
 		if (node.type === 'group') {
 			switch (node.group) {
-				case 'since':
-					return this.sinceRows(loaded);
 				case 'changes':
 					return this.changeRows(loaded);
+				case 'commits':
+					return this.commitRows(loaded);
 				case 'files':
 					return this.entryRows(loaded.rootUri, node);
 			}
+		}
+		if (node.type === 'commit') {
+			return this.commitFileRows(loaded, node.commit);
 		}
 		return node.type === 'entry' && node.directory ? this.entryRows(node.uri, node) : [];
 	}
@@ -774,21 +795,35 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			terminal: loaded.env.kind === 'host',
 		};
 		const rows: PaneContextNode[] = [root];
-		if (loaded.toplevel) {
-			const baseline = loaded.since?.baseline;
-			rows.push({
-				type: 'group',
-				group: 'since',
-				id: `${prefix}since`,
-				label: 'Changed in This Pane',
-				description: baseline && !loaded.since?.error ? sinceDescription(baseline.at, loaded.since?.commits, this.now()) : undefined,
-			});
+		const filter = this.filterFor(loaded);
+		const changes = loaded.git?.changes ?? [];
+		if (loaded.toplevel && loaded.git && (changes.length > 0 || filter.kind === 'pane')) {
+			const description =
+				filter.kind === 'pane' ? `${changes.filter((c) => touchedChange(c.path, filter.touched)).length} of ${changes.length}` : String(changes.length);
+			rows.push({ type: 'group', group: 'changes', id: `${prefix}changes`, label: 'Uncommitted', description });
 		}
-		if (loaded.git?.changes.length) {
-			rows.push({ type: 'group', group: 'changes', id: `${prefix}changes`, label: 'All Changes', description: String(loaded.git.changes.length) });
+		if (loaded.toplevel && loaded.commits) {
+			const description = `${loaded.commits.description}${filter.kind === 'pane' ? ' · this pane' : ''}`;
+			rows.push({ type: 'group', group: 'commits', id: `${prefix}commits`, label: 'Commits', description });
 		}
 		rows.push(this.files(loaded));
 		return rows;
+	}
+
+	/** Pane mode filters an agent pane's sections to its touched paths; a shell pane's stay whole. */
+	private filterFor(loaded: Loaded): SectionFilter {
+		if (!this.paneFilesOnlyNow || !loaded.toplevel) {
+			return { kind: 'all' };
+		}
+		const pane = this.find(loaded.paneKey)?.pane;
+		if (!pane || !hasAgent(pane)) {
+			return { kind: 'shell' };
+		}
+		return { kind: 'pane', touched: new Set(this.store.get(loaded.paneKey, loaded.toplevel)?.paths ?? []) };
+	}
+
+	private note(id: string, label: string): NoteNode {
+		return { type: 'note', id, label, plain: true };
 	}
 
 	private files(loaded: Loaded): GroupNode {
@@ -796,12 +831,19 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		return this.filesGroup;
 	}
 
-	private changeRows(loaded: Loaded): ChangeNode[] {
+	private changeRows(loaded: Loaded): (ChangeNode | NoteNode)[] {
 		const toplevel = loaded.toplevel;
 		if (!toplevel || !loaded.git) {
 			return [];
 		}
-		return loaded.git.changes.map((change) => {
+		const prefix = `${loaded.rootUri.toString()}|changes`;
+		const filter = this.filterFor(loaded);
+		const changes = filter.kind === 'pane' ? loaded.git.changes.filter((c) => touchedChange(c.path, filter.touched)) : loaded.git.changes;
+		if (filter.kind === 'pane' && changes.length === 0) {
+			return [this.note(`${prefix}|none`, NOTHING_RECORDED)];
+		}
+		const head: NoteNode[] = filter.kind === 'shell' ? [this.note(`${prefix}|shell`, NO_AGENT_NOTE)] : [];
+		return [...head, ...changes.map((change): ChangeNode => {
 			const directory = change.path.endsWith('/');
 			const file = change.path.replace(/\/+$/, '');
 			const dir = path.posix.dirname(file);
@@ -816,38 +858,84 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 				deleted: change.xy.includes('D'),
 				directory,
 			};
-		});
+		})];
 	}
 
-	private sinceRows(loaded: Loaded): (SinceNode | NoteNode)[] {
+	/** A commit's files, loaded once per view. */
+	private filesOf(loaded: Loaded, commit: Commit): Promise<TreeChange[] | undefined> {
+		const key = `${loaded.env.key}\n${loaded.toplevel}\n${commit.sha}`;
+		let files = this.commitFiles.get(key);
+		if (!files) {
+			files = readCommitFiles(loaded.env.shell, loaded.toplevel!, commit).catch((err) => {
+				this.deps.log(`pane context: files of ${commit.sha}: ${errorText(err)}`);
+				return undefined;
+			});
+			this.commitFiles.set(key, files);
+			// A failure is not kept: the next expand asks again.
+			void files.then((f) => f === undefined && this.commitFiles.get(key) === files && this.commitFiles.delete(key));
+		}
+		return files;
+	}
+
+	private commitNode(loaded: Loaded, commit: Commit): CommitNode {
+		return {
+			type: 'commit',
+			id: `${loaded.rootUri.toString()}|commit|${commit.sha}`,
+			label: commitSubject(commit),
+			description: commitDescription(commit, this.now()),
+			tooltip: commitTooltip(commit),
+			commit,
+		};
+	}
+
+	private async commitRows(loaded: Loaded): Promise<(CommitNode | NoteNode)[]> {
+		const commits = loaded.commits?.commits ?? [];
+		const prefix = `${loaded.rootUri.toString()}|commits`;
+		const filter = this.filterFor(loaded);
+		if (filter.kind !== 'pane') {
+			const head: NoteNode[] = filter.kind === 'shell' ? [this.note(`${prefix}|shell`, NO_AGENT_NOTE)] : [];
+			return [...head, ...commits.map((c) => this.commitNode(loaded, c))];
+		}
+		// Whether a commit has any touched file is known only once its files load: load them all, a few at a time.
+		const files: (TreeChange[] | undefined)[] = new Array(commits.length);
+		let next = 0;
+		const worker = async () => {
+			while (next < commits.length) {
+				const i = next++;
+				files[i] = await this.filesOf(loaded, commits[i]);
+			}
+		};
+		await Promise.all(Array.from({ length: Math.min(COMMIT_FILES_PARALLEL, commits.length) }, worker));
+		const kept = commits.filter((_c, i) => (files[i] ?? []).some((f) => filter.touched.has(f.path)));
+		return kept.length > 0 ? kept.map((c) => this.commitNode(loaded, c)) : [this.note(`${prefix}|none`, NOTHING_RECORDED)];
+	}
+
+	private async commitFileRows(loaded: Loaded, commit: Commit): Promise<(CommitFileNode | NoteNode)[]> {
 		const toplevel = loaded.toplevel;
-		const since = loaded.since;
-		const prefix = `${loaded.rootUri.toString()}|since`;
-		if (!toplevel || !since) {
+		if (!toplevel) {
 			return [];
 		}
-		if (since.error || !since.baseline) {
-			return [{ type: 'note', id: `${prefix}|note`, label: `Could not record a baseline: ${since.error ?? 'unknown error'}` }];
+		const prefix = `${loaded.rootUri.toString()}|commit|${commit.sha}`;
+		const files = await this.filesOf(loaded, commit);
+		if (!files) {
+			return [{ type: 'note', id: `${prefix}|note`, label: "Could not read the commit's files" }];
 		}
-		const baseline = since.baseline;
-		const time = baselineTime(baseline.at, this.now());
-		if (since.changes.length === 0) {
-			return [{ type: 'note', id: `${prefix}|none`, label: `No changes since ${time}`, plain: true }];
-		}
-		return since.changes.map((change) => {
-			const dir = path.posix.dirname(change.path);
-			const fileUri = environmentUri(loaded.env, `${toplevel}/${change.path}`, loaded.mounts);
+		const filter = this.filterFor(loaded);
+		const shown = filter.kind === 'pane' ? files.filter((f) => filter.touched.has(f.path)) : files;
+		const parent = commit.parents[0] ?? EMPTY_TREE;
+		return shown.map((f) => {
+			const dir = path.posix.dirname(f.path);
 			return {
-				type: 'since',
-				id: `${prefix}|${change.path}`,
-				label: path.posix.basename(change.path),
-				description: dir === '.' ? undefined : dir,
-				uri: fileUri.with({ fragment: SINCE_FRAGMENT }),
-				fileUri,
-				baseUri: gitRevisionUri(loaded.env.key, toplevel, change.path, baseline.tree),
-				status: change.status,
-				time,
-				tooltip: `${toplevel}/${change.path} · ${SINCE_WORDS[change.status]} since ${time}`,
+				type: 'commitFile',
+				id: `${prefix}|${f.path}`,
+				label: path.posix.basename(f.path),
+				description: dir === '.' ? f.status : `${dir} · ${f.status}`,
+				path: f.path,
+				status: f.status,
+				sha: commit.sha,
+				leftUri: gitRevisionUri(loaded.env.key, toplevel, f.path, parent),
+				rightUri: gitRevisionUri(loaded.env.key, toplevel, f.path, commit.sha),
+				fileUri: environmentUri(loaded.env, `${toplevel}/${f.path}`, loaded.mounts),
 			};
 		});
 	}
@@ -905,16 +993,16 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		}
 	}
 
-	async openChanges(node?: ChangeNode | SinceNode): Promise<void> {
+	async openChanges(node?: ChangeNode | CommitFileNode): Promise<void> {
 		if (!node) {
 			return;
 		}
-		if (node.type === 'since') {
+		if (node.type === 'commitFile') {
 			if (node.status === 'D') {
-				await vscode.commands.executeCommand('vscode.open', node.baseUri);
+				await vscode.commands.executeCommand('vscode.open', node.leftUri);
 				return;
 			}
-			await vscode.commands.executeCommand('vscode.diff', node.baseUri, node.fileUri, `${node.label} (since ${node.time} ↔ working tree)`);
+			await vscode.commands.executeCommand('vscode.diff', node.leftUri, node.rightUri, `${node.label} (${node.sha.slice(0, 7)})`);
 			return;
 		}
 		if (node.deleted) {
@@ -924,28 +1012,21 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		await vscode.commands.executeCommand('vscode.diff', node.headUri, node.uri, `${node.label} (HEAD ↔ working tree)`);
 	}
 
-	/** **Open File** on a change row: the file as it is now; a deleted one as it was. */
-	async openFile(node?: ChangeNode | SinceNode): Promise<void> {
+	/**
+	 * **Open File** on a change row: the file as it is now; a deleted one as it
+	 * was. On a commit's file: the working tree file while it exists, else the
+	 * commit's version (the parent's for a deletion).
+	 */
+	async openFile(node?: ChangeNode | CommitFileNode): Promise<void> {
 		if (!node) {
 			return;
 		}
-		const uri = node.type === 'since' ? (node.status === 'D' ? node.baseUri : node.fileUri) : node.deleted ? node.headUri : node.uri;
-		await vscode.commands.executeCommand('vscode.open', uri);
-	}
-
-	/** **Reset Baseline**: a new baseline for the loaded (pane, toplevel), now. */
-	async resetBaseline(): Promise<void> {
-		const loaded = this.loaded;
-		if (!loaded?.toplevel) {
+		if (node.type === 'commitFile') {
+			const exists = await this.exists(node.fileUri);
+			await vscode.commands.executeCommand('vscode.open', exists ? node.fileUri : node.status === 'D' ? node.leftUri : node.rightUri);
 			return;
 		}
-		await this.queued(() => Promise.resolve(this.store.delete(loaded.paneKey, loaded.toplevel!)));
-		const since = await this.readSince(loaded.env, loaded.paneKey, loaded.toplevel, undefined);
-		if (this.loaded === loaded) {
-			loaded.since = since;
-			this.pushDecorations();
-			this.emitter.fire();
-		}
+		await vscode.commands.executeCommand('vscode.open', node.deleted ? node.headUri : node.uri);
 	}
 
 	/** **Open in Source Control**: VS Code's Git opens the repo (for this window session), and its view shows. */

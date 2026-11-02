@@ -452,7 +452,7 @@ is disposed at once, and activation clears the old workspace-state key `herdr.la
 "previous_tab_id","previous_workspace_id","created_tab"?,"created_workspace"?,"closed_tab_id"?}`. A
 move inside a workspace keeps the id; a move to another workspace gives a new one
 (`previous_pane_id` is the old), on the same terminal. `parsePaneMoved` (`src/sessions.ts`) reads it for
-the focus tracker, Pane Context's pin and baselines, and Ask Agent's threads.
+the focus tracker, Pane Context's pin, the touched-files store and its open spans, and Ask Agent's threads.
 
 ## Pane Context
 
@@ -475,7 +475,8 @@ tile state fires that row alone.
   for a `file:` root, a `FileSystemWatcher` on the root, debounced 500 ms.
 - While the view is visible, every 5 s: `pane.get` for the pane's directory, and git status. **herdr 0.9.5 emits
   no event for a `cd`, nor `pane.updated` for a rename**, and the snapshot follows only events: when `pane.get`
-  says something new, the session re-takes its snapshot. The tree refreshes only when the status changed.
+  says something new, the session re-takes its snapshot. Then `rev-parse -q --verify HEAD`: Commits is read again
+  only when HEAD moved. The tree refreshes only when the status or the commits changed.
 - A hidden view does not load or poll, and catches up when it is shown. Other Panes refreshes alone when its rows change,
   since terminal titles change all the time and Files may be remote.
 
@@ -487,7 +488,7 @@ tile state fires that row alone.
 git -C <dir> rev-parse --show-toplevel                                  # non-zero: not a repo
 git --no-optional-locks -C <toplevel> status --porcelain=v1 -z --branch
 git -C <toplevel> rev-parse --short HEAD                                # detached only
-git -C <toplevel> show HEAD:<path>                                      # Open Changes; empty on failure
+git -C <toplevel> show <revision>:<path>                                # Open Changes; empty on failure
 ```
 
 `--no-optional-locks`, because this runs every 5 s in a repo an agent is working in, and must not take
@@ -497,64 +498,111 @@ branch)` or `## No commits yet on <branch>`. A rename or copy, in **either** sta
 in `/`, with nothing to open. A deleted path opens as HEAD has it.
 
 The left side of **Open Changes** is `herdr-git://<env key>/<toplevel>/<path>?<revision>#<length of toplevel>`:
-the revision is `HEAD` (All Changes) or the baseline's tree SHA (Changed in This Pane); the provider runs
+the revision is `HEAD` (Uncommitted), or a commit, its first parent or the empty tree (a commit's files); the provider runs
 `git -C <toplevel> show <revision>:<path>`. The query reaches argv, so anything but `HEAD` or 40–64 hex digits gets an
 empty document with nothing run, as does an unknown environment. The fragment says where the toplevel ends, and
 survives a window reload.
 
-### Baselines: changed in this pane
+### Commits
 
-`src/baselines.ts`, `src/git.ts`. Git cannot say which process changed a file, so "changed in this pane" is every
-change in the pane's worktree since a **baseline**: `{tree, head, at}`, the tree of the whole working state (tracked and
-untracked, not ignored), HEAD's SHA (`""` before the first commit), and the time. It is taken when the view loads a
-(pane, toplevel) it has none for, and by **Reset Baseline**. Not on agent status changes: that would snapshot every pane of
-every session.
+`src/git.ts`. The base, resolved once per load:
 
-The snapshot is one round trip (`sh -c <script> sh <toplevel>`, the toplevel as `$1`):
+```
+git -C <top> rev-parse -q --verify HEAD                # none: no Commits section
+git -C <top> rev-parse --abbrev-ref origin/HEAD        # e.g. origin/main; non-zero: none
+git -C <top> rev-parse -q --verify refs/heads/main     # else main, then master
+git -C <top> merge-base HEAD <base>
+git -C <top> log -z -n 20 --format=%H%x1f%P%x1f%an%x1f%at%x1f%B <range>
+```
+
+With a base whose merge-base is not HEAD, the range is `<mb>..HEAD` and the section reads `vs <base>`; otherwise `HEAD`
+and `recent`. Records split on `\0`, fields on `\x1f` (`%B` last, newlines and all); a record with fewer than five fields
+or a SHA that is not 40 or 64 hex digits is skipped. A commit row (`<root uri>|commit|<sha>`, collapsed) is the first line
+of `%B` (`(no message)`), `<sha7> · <HH:MM | Mon D HH:MM>`, and a tooltip of the full SHA, author, ISO 8601 local date and
+the whole message. Its files load on expand, cached by SHA for the view's lifetime:
+
+```
+git -C <top> diff-tree -r -z --no-renames --name-status <first parent> <sha>
+git -C <top> diff-tree --no-commit-id -r -z --no-renames --name-status --root <sha>     # a root commit
+```
+
+(a single commit argument prints its SHA as a first record without `--no-commit-id`). The rows have no `resourceUri`, since
+the working tree's markers would mislead. A click diffs `herdr-git` at the first parent (the empty tree
+`4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a root commit) against `herdr-git` at the commit, titled `<name> (<sha7>)`;
+a `D` opens the parent's version. **Open File** opens the working tree file when `stat` finds it, else the commit's version
+(the parent's for a `D`).
+
+### Touched files: this pane's filter
+
+`src/touched.ts`. Git cannot say which process changed a file, so "files this pane touched" is what changed in the pane's
+worktree while its agent was `working`. `TouchedRecorder` (created in `extension.ts`, independent of the view) watches every
+agent pane of every connected session on each model change. A **span** starts when a pane is seen with `raw_status`
+`working` and no open span (a transition, or first sight, as after a reload), and ends when it is anything else, loses its
+agent, or leaves the snapshot. Its toplevel comes from `foreground_cwd ?? cwd` (`rev-parse --show-toplevel`, cached per
+`<env key>\n<dir>`); outside a repo nothing is recorded. Snapshots of one `<env key>\n<toplevel>` run one at a time, in a
+queue, and an end waits for its start. Spans are not persisted.
+
+**Nothing is written to the repo's `.git`.** Each span has a directory, `mktemp -d "${TMPDIR:-/tmp}/herdr-vscode-span.XXXXXX"`
+in the pane's environment, removed after the end's diff whether it worked or not. The snapshot (`sh -c <script> sh <toplevel>
+<span dir>`, start and end):
 
 ```sh
 set -e
-top=$1
-d=$(mktemp -d "${TMPDIR:-/tmp}/herdr-vscode.XXXXXX")
-trap 'rm -rf "$d"' EXIT
-gi=$(git -C "$top" rev-parse --git-path index)
-case $gi in /*) ;; *) gi=$top/$gi ;; esac
-if [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
-GIT_INDEX_FILE=$d/index git -C "$top" add -A
-GIT_INDEX_FILE=$d/index git -C "$top" write-tree
-git -C "$top" rev-parse -q --verify HEAD || true
+top=$1; d=$2
+mkdir -p "$d/objects"
+gi=$(git -C "$top" rev-parse --git-path index); case $gi in /*) ;; *) gi=$top/$gi ;; esac
+if [ ! -f "$d/index" ] && [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
+export GIT_INDEX_FILE="$d/index" GIT_OBJECT_DIRECTORY="$d/objects"
+git -c core.fsmonitor=false -C "$top" add -A
+git -c core.fsmonitor=false -C "$top" write-tree --missing-ok
 ```
 
-- **A temporary index**, never the user's: their index, working tree, refs and stash are untouched. It writes blobs and
-  trees into `.git/objects`, unreferenced, which `git gc` prunes after `gc.pruneExpire` (two weeks by default). Clean
-  filters (Git LFS) run on changed files, as on any `git add`.
-- **A copy of the real index**, so its stat cache is valid and `add -A` hashes only files that changed; an empty index
-  would hash the whole repo every poll. A fresh `git init` has no index: `git` makes one. `--git-path index` is relative in
-  a plain repo and absolute in a linked worktree.
-- **`touch -r`** keeps the copy's mtime. Git judges a "racily clean" entry, a file written in the same second as the index
-  (an agent's edit right after a commit), against the index file's mtime; with the copy's fresh mtime it would trust a stale
-  stat and record the old content. Measured live: without it, a same-size edit made just after a commit was missing from the
-  baseline and later showed as changed since.
+and the diff, with the repo's objects as a read-only alternate for the subtrees the snapshots did not rewrite:
 
-What changed is `git diff-tree -r -z --no-renames --name-status <baseline tree> <current tree>` (`T` shown as `M`),
-skipped when the tree is the baseline's or the last one diffed. Committed changes are in it, since the current tree is
-the working state. When HEAD moved, `git rev-list --count <baseline head>..HEAD` (`HEAD` alone from no commits) gives
-` · <n> commits`; a failure omits it. A `diff-tree` failure means `git gc` pruned the baseline tree: a new baseline is
-taken and logged. Snapshots run one at a time, on load, on the 5 s poll after git status, and on the watcher's reload.
+```sh
+o=$(git -C "$top" rev-parse --git-path objects); case $o in /*) ;; *) o=$top/$o ;; esac
+export GIT_INDEX_FILE="$d/index" GIT_OBJECT_DIRECTORY="$d/objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$o"
+git -c core.fsmonitor=false -C "$top" diff-tree -r -z --no-renames --name-status <start> <end>
+```
 
-The store is `workspaceState` `herdr.paneContext.baselines`, `{"<pane key>\n<toplevel>": {tree, head, at}}`. On every model
-change it drops entries older than 7 days and every entry of a pane whose session is connected and lacks it; a disconnected
-session keeps its entries. `pane.moved` moves a pane's entries to its new key. herdr ids are not reused while a server runs,
-but a restarted server numbers new workspaces from the highest restored one, so a closed workspace's pane ids come back:
-dropping entries on absence is what keeps a reused id from inheriting an old baseline, as long as this window saw the pane go.
+- **A copy of the real index**, taken only at span start (the end reuses it), so its stat cache is valid and `add -A` hashes
+  only files that changed. `--git-path index` is relative in a plain repo and absolute in a linked worktree; a fresh `git init`
+  has no index and gets one in the span directory.
+- **`touch -r`** keeps the copy's mtime: git judges a "racily clean" entry (a file written in the same second as the index)
+  against the index file's mtime, and a fresh mtime would make it trust a stale stat and record the old content.
+- **No alternate while snapshotting.** With the repo's objects visible, git "freshens" every object it would write that
+  already exists (`utime` on the loose file in `.git/objects`), e.g. the blob of a racily clean or reverted file: measured in
+  a linked worktree, three existing objects got new mtimes. With only the span's objects visible, those blobs are written again
+  into the span directory, and `write-tree --missing-ok` skips the existence check of the blobs that only the repo has. Reading
+  (the diff) never writes or freshens.
+- **`core.fsmonitor=false`**: no fsmonitor daemon or hook is started against the copy.
+
+A failed snapshot or diff drops the span with one log line. Leftover span directories (a window closed or reloaded
+mid-span) are removed the first time the recorder runs a command in an environment:
+`find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'herdr-vscode-span.*' -mmin +1440 -exec rm -rf {} +`. Measured live on herdr
+0.9.5 (a small repo): start snapshot 38 ms, end 15 ms, diff 12 ms; `idle` reported to path recorded, 339 ms.
+
+The store is `workspaceState` `herdr.paneContext.touched`, `{"<pane key>\n<toplevel>": {"paths": [sorted, unique], "at": <ms>}}`.
+On activation and every model change it drops entries older than 7 days and every entry of a pane whose session is
+connected and lacks it; a disconnected session keeps its entries. `pane.moved` moves a pane's entries, and its open span,
+to its new key. herdr ids are not reused while a server runs, but a restarted server numbers new workspaces from the highest
+restored one, so dropping entries on absence is what keeps a reused id from inheriting old files, as long as this window
+saw the pane go. Earlier builds' `herdr.paneContext.baselines` is cleared on activation.
+
+**The filter** (`herdr.paneContext.paneFilesOnly`, workspaceState and context key, default off; **Show Only This Pane's
+Files** / **Show All Files** in the title bar) applies to whichever pane is followed. For an agent pane with touched set `T`:
+Uncommitted keeps rows in `T` (an untracked `dir/` row when a path in `T` is under it) and reads `<shown> of <all>`, and is
+shown even with a clean status; Commits loads every listed commit's files (four at a time) and hides commits with none in
+`T`, its description gaining ` · this pane`. An empty section shows `Nothing recorded for this pane`. A shell pane's sections
+are unfiltered, each with the note `No agent in this pane: showing all files` first. Files is never filtered. A recording
+refreshes the view while the filter is on.
 
 ### Git markers
 
 `src/decorations.ts`, a `FileDecorationProvider` for the followed repo only: each status path's URI
 (`environmentUri(env, <toplevel>/<path>)`) gets its porcelain `XY` as a badge, first match: a conflict pair `!`, `??` `U`, a
 `D` in either column `D`, `R` `R`, `A` or `C` `A`, else `M`, with the `gitDecoration.*` colour and `propagate: true` (folders get
-the colour and a dot). An untracked directory (`dir/`) decorates itself and anything under it. Changed in This Pane rows'
-URIs carry the fragment `herdr-since` and get the since-letter (`propagate: false`), so they show `A` where Files shows `U`.
+the colour and a dot). An untracked directory (`dir/`) decorates itself and anything under it.
 
 Every change fires the explicit array of old ∪ new URIs, never `undefined`: VS Code asks only about URIs it has been told of,
 and a collapsed folder's colour comes from its children's URIs having been fired. Plain `file:` URIs (no fragment) are left to

@@ -5,21 +5,27 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-	countCommits,
-	diffTrees,
+	EMPTY_TREE,
 	GitHeadContentProvider,
 	gitHeadUri,
 	gitRevisionUri,
+	isoLocal,
+	makeSpanDir,
 	parseDiffTree,
 	parseGitHeadUri,
-	parseSnapshot,
+	parseLog,
 	parseStatus,
+	readBase,
+	readCommitFiles,
+	readCommits,
 	readStatus,
 	readToplevel,
 	readWorktreeId,
-	sinceLetter,
+	removeSpanDir,
+	shortTime,
+	spanDiff,
+	spanSnapshot,
 	statusLetter,
-	takeSnapshot,
 	worktreeMarker,
 } from '../git';
 import { LocalShell, RemoteShell } from '../remoteShell';
@@ -158,7 +164,7 @@ suite('git', () => {
 		assert.strictEqual(parseGitHeadUri(uri.with({ fragment: '3' })), undefined);
 	});
 
-	suite('baselines: snapshots and what changed since', () => {
+	suite('span snapshots and commits over temp repos', () => {
 		const shell = new LocalShell();
 		const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 		const run = (cwd: string, ...args: string[]) => cp.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env });
@@ -168,11 +174,14 @@ suite('git', () => {
 			made.push(d);
 			return d;
 		};
+		const configure = (d: string) => {
+			run(d, 'config', 'user.email', 't@example.invalid');
+			run(d, 'config', 'user.name', 'T');
+		};
 		const repo = (commit = true) => {
 			const d = tempDir('hv-snap-');
 			run(d, 'init', '-q', '-b', 'main');
-			run(d, 'config', 'user.email', 't@example.invalid');
-			run(d, 'config', 'user.name', 'T');
+			configure(d);
 			if (commit) {
 				fs.writeFileSync(path.join(d, 'a.txt'), 'a\n');
 				fs.writeFileSync(path.join(d, 'b.txt'), 'b\n');
@@ -181,11 +190,47 @@ suite('git', () => {
 			}
 			return d;
 		};
+		const commit = (d: string, message: string, file = 'f.txt', content = message) => {
+			fs.writeFileSync(path.join(d, file), `${content}\n`);
+			run(d, 'add', file);
+			run(d, 'commit', '-q', '-m', message);
+			return run(d, 'rev-parse', 'HEAD').trim();
+		};
+		/** Every file under a directory with its size and mtime. */
+		const listing = (dir: string): string[] => {
+			const out: string[] = [];
+			const walk = (d: string) => {
+				for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+					const p = path.join(d, e.name);
+					if (e.isDirectory()) {
+						walk(p);
+					} else {
+						const st = fs.statSync(p);
+						out.push(`${path.relative(dir, p)} ${st.size} ${st.mtimeMs}`);
+					}
+				}
+			};
+			walk(dir);
+			return out.sort();
+		};
+		const objectCount = (gitDir: string) => listing(path.join(gitDir, 'objects')).length;
+		/** A whole span, as the recorder runs it. */
+		const span = async (top: string, during: () => void) => {
+			const d = await makeSpanDir(shell);
+			try {
+				const start = await spanSnapshot(shell, top, d);
+				during();
+				const end = await spanSnapshot(shell, top, d);
+				return { dir: d, changes: await spanDiff(shell, top, d, start, end) };
+			} finally {
+				await removeSpanDir(shell, d);
+			}
+		};
 		let savedTmp: string | undefined;
 		let tmp: string;
 
 		setup(() => {
-			// The script's temp dir goes here, so it can be checked to be gone.
+			// Span directories go here, so they can be checked to be gone.
 			savedTmp = process.env.TMPDIR;
 			tmp = tempDir('hv-tmpdir-');
 			process.env.TMPDIR = tmp;
@@ -201,61 +246,81 @@ suite('git', () => {
 			}
 		});
 
-		test('parsing the script output', () => {
-			const t = 'a'.repeat(40);
-			const h = 'b'.repeat(40);
-			assert.deepStrictEqual(parseSnapshot(`${t}\n${h}\n`), { tree: t, head: h });
-			assert.deepStrictEqual(parseSnapshot(`${t}\n`), { tree: t, head: '' });
-			assert.deepStrictEqual(parseSnapshot(`${'c'.repeat(64)}\n${'d'.repeat(64)}\n`), { tree: 'c'.repeat(64), head: 'd'.repeat(64) });
-			assert.strictEqual(parseSnapshot(''), undefined);
-			assert.strictEqual(parseSnapshot('warning: x\n'), undefined);
-			assert.strictEqual(parseSnapshot(`${t}\n${h}\nextra\n`), undefined);
-		});
-
-		test("tree and HEAD; the real index is untouched; no temp dir is left", async () => {
+		test('a span: M / A / D for exactly its files; nothing written to .git; its directory is gone', async () => {
 			const d = repo();
-			fs.writeFileSync(path.join(d, 'a.txt'), 'staged\n');
-			run(d, 'add', 'a.txt');
-			fs.writeFileSync(path.join(d, 'b.txt'), 'unstaged\n');
-			fs.writeFileSync(path.join(d, 'u.txt'), 'untracked\n');
-			const index = () => run(d, 'ls-files', '-s', '--debug');
-			const status = () => run(d, 'status', '--porcelain=v1');
-			const before = [index(), status()];
-			const snap = await takeSnapshot(shell, d);
-			assert.deepStrictEqual([index(), status()], before);
-			assert.strictEqual(snap.head, run(d, 'rev-parse', 'HEAD').trim());
-			assert.match(snap.tree, /^[0-9a-f]{40}$/);
-			// The tree holds the working state: staged, unstaged and untracked.
-			assert.strictEqual(run(d, 'show', `${snap.tree}:a.txt`), 'staged\n');
-			assert.strictEqual(run(d, 'show', `${snap.tree}:b.txt`), 'unstaged\n');
-			assert.strictEqual(run(d, 'show', `${snap.tree}:u.txt`), 'untracked\n');
-			assert.deepStrictEqual(fs.readdirSync(tmp).filter((n) => n.startsWith('herdr-vscode.')), []);
-			assert.deepStrictEqual((await takeSnapshot(shell, d)).tree, snap.tree, 'the same state, the same tree');
+			fs.writeFileSync(path.join(d, 'a.txt'), 'modified before the span\n');
+			fs.writeFileSync(path.join(d, 'gone.txt'), 'untracked, deleted in the span\n');
+			const gitDir = path.join(d, '.git');
+			const index = path.join(gitDir, 'index');
+			run(d, 'status', '--porcelain=v1'); // git status itself refreshes the real index: before the span.
+			const before = { objects: objectCount(gitDir), index: fs.statSync(index).mtimeMs, all: listing(gitDir) };
+			const { dir, changes } = await span(d, () => {
+				fs.writeFileSync(path.join(d, 'b.txt'), 'changed in the span\n');
+				fs.mkdirSync(path.join(d, 'src'));
+				fs.writeFileSync(path.join(d, 'src', 'new.ts'), 'added\n');
+				fs.rmSync(path.join(d, 'gone.txt'));
+			});
+			assert.deepStrictEqual(changes, [
+				{ status: 'M', path: 'b.txt' },
+				{ status: 'D', path: 'gone.txt' },
+				{ status: 'A', path: 'src/new.ts' },
+			]);
+			assert.ok(!changes.some((c) => c.path === 'a.txt'), 'modified before the span: not reported');
+			assert.ok(dir.startsWith(`${tmp}/herdr-vscode-span.`), dir);
+			assert.ok(!fs.existsSync(dir), 'the span directory is gone');
+			assert.deepStrictEqual(fs.readdirSync(tmp).filter((n) => n.startsWith('herdr-vscode-span.')), []);
+			assert.strictEqual(objectCount(gitDir), before.objects, '.git/objects file count');
+			assert.strictEqual(fs.statSync(index).mtimeMs, before.index, '.git/index mtime');
+			assert.deepStrictEqual(listing(gitDir), before.all, 'nothing in .git changed at all, mtimes included');
 		});
 
-		test('in a linked worktree, with no commits, and with no index at all', async () => {
+		test('the snapshot writes its objects to the span directory, and the tree reads through the repo', async () => {
+			const d = repo();
+			fs.writeFileSync(path.join(d, 'u.txt'), 'untracked\n');
+			const spanDir = await makeSpanDir(shell);
+			try {
+				const tree = await spanSnapshot(shell, d, spanDir);
+				assert.match(tree, /^[0-9a-f]{40}$/);
+				assert.ok(fs.existsSync(path.join(spanDir, 'index')), 'the span index');
+				assert.ok(listing(path.join(spanDir, 'objects')).length > 0, 'new objects in the span');
+				assert.throws(() => run(d, 'cat-file', '-e', tree), 'the repo itself does not have the tree');
+				assert.strictEqual(await spanSnapshot(shell, d, spanDir), tree, 'the same state, the same tree');
+			} finally {
+				await removeSpanDir(shell, spanDir);
+			}
+		});
+
+		test('a linked worktree (absolute objects path) and a plain repo (relative) both work', async () => {
 			const main = repo();
 			const linked = path.join(tempDir('hv-wt-'), 'linked');
 			run(main, 'worktree', 'add', '-q', linked);
-			assert.match(run(linked, 'rev-parse', '--git-path', 'index').trim(), /^\//, 'absolute in a linked worktree');
-			fs.writeFileSync(path.join(linked, 'w.txt'), 'w\n');
-			const wt = await takeSnapshot(shell, linked);
-			assert.strictEqual(run(linked, 'show', `${wt.tree}:w.txt`), 'w\n');
-			assert.strictEqual(run(linked, 'status', '--porcelain=v1'), '?? w.txt\n');
+			assert.match(run(main, 'rev-parse', '--git-path', 'objects').trim(), /^\.git\/objects$/, 'relative in a plain repo');
+			assert.match(run(linked, 'rev-parse', '--git-path', 'objects').trim(), /^\//, 'absolute in a linked worktree');
+			const gitDir = path.join(main, '.git');
+			// The checkout's files are racily clean: add -A hashes them again, to blobs the repo already has.
+			const before = listing(gitDir);
+			const { changes } = await span(linked, () => {
+				fs.writeFileSync(path.join(linked, 'w.txt'), 'w\n');
+				fs.writeFileSync(path.join(linked, 'a.txt'), 'changed\n');
+			});
+			assert.deepStrictEqual(changes, [
+				{ status: 'M', path: 'a.txt' },
+				{ status: 'A', path: 'w.txt' },
+			]);
+			assert.deepStrictEqual(listing(gitDir), before, 'the common .git (and the worktree index) unchanged');
+		});
 
+		test('no commits and no index at all', async () => {
 			const empty = repo(false);
 			assert.ok(!fs.existsSync(path.join(empty, '.git', 'index')), 'a fresh git init has no index');
-			fs.writeFileSync(path.join(empty, 'first.txt'), 'f\n');
-			const unborn = await takeSnapshot(shell, empty);
-			assert.strictEqual(unborn.head, '');
-			assert.strictEqual(run(empty, 'show', `${unborn.tree}:first.txt`), 'f\n');
+			const { changes } = await span(empty, () => fs.writeFileSync(path.join(empty, 'first.txt'), 'f\n'));
+			assert.deepStrictEqual(changes, [{ status: 'A', path: 'first.txt' }]);
 			assert.ok(!fs.existsSync(path.join(empty, '.git', 'index')), 'still none');
-			assert.deepStrictEqual(fs.readdirSync(tmp).filter((n) => n.startsWith('herdr-vscode.')), []);
 		});
 
 		test('a racily clean file: the copy keeps the index mtime, so the new content is recorded', async () => {
 			// A same-size rewrite in the second the index was written, as an agent or a test does right after a commit.
-			// ctime is left out of it here, so whole seconds can be set; in the live run it matched by falling in the same second.
+			// ctime is left out of it here, so whole seconds can be set.
 			const d = repo(false);
 			run(d, 'config', 'core.trustctime', 'false');
 			const t = new Date(1700000000 * 1000);
@@ -267,38 +332,27 @@ suite('git', () => {
 			fs.writeFileSync(a, 'bbbb\n');
 			fs.utimesSync(a, t, t);
 			fs.utimesSync(path.join(d, '.git', 'index'), t, t);
-			const snap = await takeSnapshot(shell, d);
-			assert.strictEqual(run(d, 'show', `${snap.tree}:a.txt`), 'bbbb\n');
+			const spanDir = await makeSpanDir(shell);
+			try {
+				const tree = await spanSnapshot(shell, d, spanDir);
+				const head = run(d, 'rev-parse', 'HEAD^{tree}').trim();
+				assert.notStrictEqual(tree, head, 'bbbb was hashed, not taken from the stat cache');
+			} finally {
+				await removeSpanDir(shell, spanDir);
+			}
 		});
 
-		test('a failure says git\'s first stderr line', async () => {
-			const missing = path.join(tmp, 'nope');
-			await assert.rejects(takeSnapshot(shell, missing), (err: Error) => err.message === `fatal: cannot change to '${missing}': No such file or directory`);
-			const plain = tempDir('hv-plain-');
-			await assert.rejects(takeSnapshot(shell, plain), (err: Error) => /^fatal: not a git repository/.test(err.message));
-		});
-
-		test('modify, add, delete an untracked-at-baseline file, and commit: M, A, D by path; commits counted', async () => {
-			const d = repo();
-			fs.writeFileSync(path.join(d, 'u.txt'), 'untracked at baseline\n');
-			const base = await takeSnapshot(shell, d);
-			fs.writeFileSync(path.join(d, 'b.txt'), 'changed\n');
-			fs.writeFileSync(path.join(d, 'new.txt'), 'n\n');
-			fs.rmSync(path.join(d, 'u.txt'));
-			run(d, 'add', 'b.txt');
-			run(d, 'commit', '-q', '-m', 'two');
-			const now = await takeSnapshot(shell, d);
-			assert.deepStrictEqual(await diffTrees(shell, d, base.tree, now.tree), [
-				{ status: 'M', path: 'b.txt' },
-				{ status: 'A', path: 'new.txt' },
-				{ status: 'D', path: 'u.txt' },
-			]);
-			assert.strictEqual(await countCommits(shell, d, base.head), 1);
-			run(d, 'commit', '-q', '--allow-empty', '-m', 'three');
-			assert.strictEqual(await countCommits(shell, d, base.head), 2);
-			assert.strictEqual(await countCommits(shell, d, ''), 3, 'from no commits: all of them');
-			assert.strictEqual(await countCommits(shell, d, 'f'.repeat(40)), undefined, 'an unknown commit');
-			assert.strictEqual(await diffTrees(shell, d, 'f'.repeat(40), now.tree), undefined, 'a pruned baseline');
+		test("a failure says git's first stderr line", async () => {
+			const spanDir = await makeSpanDir(shell);
+			try {
+				const missing = path.join(tmp, 'nope');
+				await assert.rejects(spanSnapshot(shell, missing, spanDir), (err: Error) => err.message === `fatal: cannot change to '${missing}': No such file or directory`);
+				const plain = tempDir('hv-plain-');
+				await assert.rejects(spanSnapshot(shell, plain, spanDir), (err: Error) => /^fatal: not a git repository/.test(err.message));
+				await assert.rejects(spanDiff(shell, repo(), spanDir, 'f'.repeat(40), 'e'.repeat(40)), /^Error: fatal:/);
+			} finally {
+				await removeSpanDir(shell, spanDir);
+			}
 		});
 
 		test('a type change shows as M', async () => {
@@ -307,28 +361,135 @@ suite('git', () => {
 				{ status: 'M', path: 'link' },
 			]);
 			const d = repo();
-			const base = await takeSnapshot(shell, d);
-			fs.rmSync(path.join(d, 'a.txt'));
-			fs.symlinkSync('b.txt', path.join(d, 'a.txt'));
-			const raw = run(d, 'diff-tree', '-r', '--no-renames', '--name-status', base.tree, (await takeSnapshot(shell, d)).tree);
-			assert.strictEqual(raw, 'T\ta.txt\n', 'git says T');
-			assert.deepStrictEqual(await diffTrees(shell, d, base.tree, (await takeSnapshot(shell, d)).tree), [{ status: 'M', path: 'a.txt' }]);
+			const { changes } = await span(d, () => {
+				fs.rmSync(path.join(d, 'a.txt'));
+				fs.symlinkSync('b.txt', path.join(d, 'a.txt'));
+			});
+			assert.deepStrictEqual(changes, [{ status: 'M', path: 'a.txt' }]);
 		});
 
-		test('herdr-git at a tree shows the baseline; an invalid query runs nothing', async () => {
+		test('herdr-git at a commit SHA and the empty tree; an invalid query runs nothing', async () => {
 			const d = repo();
-			const base = await takeSnapshot(shell, d);
+			const first = run(d, 'rev-parse', 'HEAD').trim();
 			fs.writeFileSync(path.join(d, 'a.txt'), 'later\n');
 			let runs = 0;
 			const counting: RemoteShell = { run: (argv, o) => (runs++, shell.run(argv, o)), spawn: () => shell.spawn([]) };
 			const provider = new GitHeadContentProvider((key) => (key === 'host' ? { shell: counting } : undefined));
-			assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'a.txt', base.tree)), 'a\n');
-			assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'gone.txt', base.tree)), '', 'not in the tree: empty');
-			assert.strictEqual(runs, 2);
+			assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'a.txt', first)), 'a\n');
+			assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'gone.txt', first)), '', 'not in the commit: empty');
+			assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'a.txt', EMPTY_TREE)), '', 'the empty tree: empty');
+			assert.strictEqual(runs, 3);
 			for (const bad of ['--output=x', 'HEAD~1', 'head', 'A'.repeat(40), 'a'.repeat(39), '']) {
 				assert.strictEqual(await provider.provideTextDocumentContent(gitRevisionUri('host', d, 'a.txt', bad)), '', bad);
 			}
-			assert.strictEqual(runs, 2, 'nothing spawned for an invalid query');
+			assert.strictEqual(runs, 3, 'nothing spawned for an invalid query');
+		});
+
+		test('git log parse: a multi-line body, a root commit, malformed records', () => {
+			const a = 'a'.repeat(40);
+			const b = 'b'.repeat(40);
+			const c = 'c'.repeat(64);
+			const out = [
+				`${a}\x1f${b}\x1fAnn Author\x1f1793643563\x1fSubject line\n\nBody one\nBody two\n`,
+				`${b}\x1f\x1fRoot\x1f1700000000\x1f\n`,
+				'not a record',
+				`xyz\x1f\x1fX\x1f1\x1fbad sha\n`,
+				`${a}\x1f\x1fshort`,
+				`${c}\x1f${a} ${b}\x1fM\x1f1\x1fmerge\x1fwith a unit separator\n`,
+				'',
+			].join('\0');
+			const commits = parseLog(out);
+			assert.deepStrictEqual(
+				commits.map((x) => [x.sha.slice(0, 3), x.parents.length, x.author, x.at]),
+				[
+					['aaa', 1, 'Ann Author', 1793643563000],
+					['bbb', 0, 'Root', 1700000000000],
+					['ccc', 2, 'M', 1000],
+				],
+			);
+			assert.strictEqual(commits[0].body, 'Subject line\n\nBody one\nBody two\n');
+			assert.deepStrictEqual(commits[1].parents, [], 'a root commit has no parents');
+			assert.strictEqual(commits[2].body, 'merge\x1fwith a unit separator\n');
+		});
+
+		test('base detection: a clone with origin/HEAD, a local main, and on main itself', async () => {
+			const upstream = repo();
+			for (let i = 0; i < 3; i++) {
+				commit(upstream, `up ${i}`);
+			}
+			const clone = path.join(tempDir('hv-clone-'), 'c');
+			cp.execFileSync('git', ['clone', '-q', upstream, clone], { env });
+			configure(clone);
+			assert.strictEqual(await readBase(shell, clone), 'origin/main');
+			run(clone, 'checkout', '-q', '-b', 'feat');
+			const f1 = commit(clone, 'feat one');
+			const f2 = commit(clone, 'feat two');
+			const list = (await readCommits(shell, clone))!;
+			assert.strictEqual(list.description, 'vs origin/main');
+			assert.deepStrictEqual(list.commits.map((c) => c.sha), [f2, f1], "only the branch's commits");
+			assert.strictEqual(list.head, f2);
+
+			// No remote, but a main.
+			const local = repo();
+			run(local, 'checkout', '-q', '-b', 'topic');
+			const t1 = commit(local, 'topic one');
+			assert.strictEqual(await readBase(shell, local), 'main');
+			const vsMain = (await readCommits(shell, local))!;
+			assert.strictEqual(vsMain.description, 'vs main');
+			assert.deepStrictEqual(vsMain.commits.map((c) => c.sha), [t1]);
+
+			// On main itself: recent, at most 20.
+			run(local, 'checkout', '-q', 'main');
+			for (let i = 0; i < 24; i++) {
+				commit(local, `main ${i}`);
+			}
+			const recent = (await readCommits(shell, local))!;
+			assert.strictEqual(recent.description, 'recent');
+			assert.strictEqual(recent.commits.length, 20);
+			assert.strictEqual(recent.commits[0].body, 'main 23\n');
+
+			// A master, and neither.
+			const m = tempDir('hv-master-');
+			run(m, 'init', '-q', '-b', 'master');
+			configure(m);
+			commit(m, 'one');
+			assert.strictEqual(await readBase(shell, m), 'master');
+			const none = tempDir('hv-none-');
+			run(none, 'init', '-q', '-b', 'trunk');
+			configure(none);
+			commit(none, 'one');
+			assert.strictEqual(await readBase(shell, none), undefined);
+			assert.strictEqual((await readCommits(shell, none))!.description, 'recent');
+			assert.strictEqual(await readCommits(shell, repo(false)), undefined, 'no HEAD: no Commits');
+		});
+
+		test('commit files: modify / add / delete, and a root commit', async () => {
+			const d = repo();
+			const root = run(d, 'rev-list', '--max-parents=0', 'HEAD').trim();
+			fs.writeFileSync(path.join(d, 'a.txt'), 'changed\n');
+			fs.rmSync(path.join(d, 'b.txt'));
+			fs.mkdirSync(path.join(d, 'src'));
+			fs.writeFileSync(path.join(d, 'src', 'n.ts'), 'n\n');
+			run(d, 'add', '-A');
+			run(d, 'commit', '-q', '-m', 'two');
+			const [two] = parseLog(run(d, 'log', '-z', '-n', '1', '--format=%H%x1f%P%x1f%an%x1f%at%x1f%B', 'HEAD'));
+			assert.deepStrictEqual(await readCommitFiles(shell, d, two), [
+				{ status: 'M', path: 'a.txt' },
+				{ status: 'D', path: 'b.txt' },
+				{ status: 'A', path: 'src/n.ts' },
+			]);
+			assert.deepStrictEqual(await readCommitFiles(shell, d, { sha: root, parents: [] }), [
+				{ status: 'A', path: 'a.txt' },
+				{ status: 'A', path: 'b.txt' },
+			]);
+			assert.strictEqual(await readCommitFiles(shell, d, { sha: 'f'.repeat(40), parents: [] }), undefined);
+		});
+
+		test('times: HH:MM today, else Mon D HH:MM; ISO 8601 local', () => {
+			const now = new Date(2026, 10, 2, 15, 0).getTime();
+			assert.strictEqual(shortTime(new Date(2026, 10, 2, 9, 5).getTime(), now), '09:05');
+			assert.strictEqual(shortTime(new Date(2026, 9, 30, 9, 5).getTime(), now), 'Oct 30 09:05');
+			assert.match(isoLocal(new Date(2026, 10, 2, 9, 5, 7).getTime()), /^2026-11-02T09:05:07[+-]\d\d:\d\d$/);
 		});
 
 		test('worktrees: same, other, another repo, not a repo; a relative common dir', async () => {
@@ -370,7 +531,5 @@ suite('git', () => {
 		for (const xy of [' M', 'M ', 'MM', ' T', 'T ']) {
 			assert.deepStrictEqual(badge(xy), ['M', 'Modified', 'gitDecoration.modifiedResourceForeground'], xy);
 		}
-		assert.deepStrictEqual([sinceLetter('A').badge, sinceLetter('M').badge, sinceLetter('D').badge], ['A', 'M', 'D']);
-		assert.strictEqual(sinceLetter('D').color, 'gitDecoration.deletedResourceForeground');
 	});
 });

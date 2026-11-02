@@ -1,15 +1,11 @@
 import * as vscode from 'vscode';
-import { sinceLetter, SinceStatus, statusLetter } from './git';
+import { statusLetter } from './git';
 
 /**
  * Git markers for the followed repo: the status letter of each changed file
- * (in Files, editor tabs, anywhere VS Code shows that URI), and the
- * since-letters of Changed in This Pane rows. Plain files of a repo VS Code's
- * own Git has open are left to it.
+ * (in Files, editor tabs, anywhere VS Code shows that URI). Plain files of a
+ * repo VS Code's own Git has open are left to it.
  */
-
-/** The fragment on Changed in This Pane rows' URIs: their since-letter, not the git status. */
-export const SINCE_FRAGMENT = 'herdr-since';
 
 /** The few members of the built-in Git extension's API (`vscode.git`, `getAPI(1)`) used here. */
 export interface GitApiLike {
@@ -44,10 +40,6 @@ export interface RepoDecorations {
 	status: { uri: vscode.Uri; xy: string }[];
 	/** Wholly untracked directories (`dir/` records): they and everything under them are `U`. */
 	untrackedDirs: vscode.Uri[];
-	/** Changed in This Pane rows' URIs (fragment {@link SINCE_FRAGMENT}). */
-	since: { uri: vscode.Uri; status: SinceStatus }[];
-	/** `HH:MM` (or `Mon D HH:MM`) of the baseline. */
-	sinceTime?: string;
 }
 
 function decoration(badge: string, tooltip: string, color: string, propagate: boolean): vscode.FileDecoration {
@@ -111,11 +103,6 @@ export class PaneDecorations implements vscode.FileDecorationProvider, vscode.Di
 		for (const { uri, xy } of repo?.status ?? []) {
 			const letter = statusLetter(xy);
 			next.set(uri.toString(), { uri, decoration: decoration(letter.badge, letter.tooltip, letter.color, true), key: `${letter.badge}` });
-		}
-		for (const { uri, status } of repo?.since ?? []) {
-			const letter = sinceLetter(status);
-			const tooltip = `${letter.tooltip} since ${repo?.sinceTime ?? ''}`.trimEnd();
-			next.set(uri.toString(), { uri, decoration: decoration(letter.badge, tooltip, letter.color, false), key: `${letter.badge}|${tooltip}` });
 		}
 		const dirs = repo?.untrackedDirs ?? [];
 		const changed = new Map<string, vscode.Uri>();

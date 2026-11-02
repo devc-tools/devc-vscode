@@ -2,12 +2,11 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
-import { BaselineStore } from './baselines';
 import { PaneDecorations } from './decorations';
 import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
-import { ChangeNode, PANE_CONTEXT_VIEW, PaneContextNode, PaneContextView, SinceNode } from './paneContext';
+import { applyPaneFilesOnly, ChangeNode, CommitFileNode, PANE_CONTEXT_VIEW, PANE_FILES_ONLY_KEY, PaneContextNode, PaneContextView, storedPaneFilesOnly } from './paneContext';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { createdTabId, sessionDeleteArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
@@ -18,6 +17,7 @@ import { BlockedStatusBar, REVEAL_BLOCKED_COMMAND, SessionStatusBar } from './st
 import { PaneStreams } from './streams';
 import { TILES_VIEW_TYPE, TilesPanels } from './tilesPanel';
 import { splitPaneKey } from './tilesProtocol';
+import { TouchedRecorder, TouchedStore } from './touched';
 import { AgentSource, AgentsView } from './views/agentsView';
 import { firstSpaceId, OPEN_SESSION_COMMAND, SessionRowNode, SessionsView } from './views/sessionsView';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
@@ -42,8 +42,19 @@ interface TileMenuContext {
 	paneKey?: string;
 }
 
-/** Saved Layout tabs of earlier builds, cleared on activation (Layout tabs are gone). */
-const OLD_LAYOUTS_KEY = 'herdr.layouts';
+/** Saved Layout tabs of earlier builds (Layout tabs are gone). */
+export const OLD_LAYOUTS_KEY = 'herdr.layouts';
+/** Changed in This Pane's baselines of earlier builds (the section is gone). */
+export const OLD_BASELINES_KEY = 'herdr.paneContext.baselines';
+
+/** workspaceState of earlier builds' features, cleared on activation. */
+export function clearRetiredState(memento: Pick<vscode.Memento, 'get' | 'update'>): void {
+	for (const key of [OLD_LAYOUTS_KEY, OLD_BASELINES_KEY]) {
+		if (memento.get(key) !== undefined) {
+			void memento.update(key, undefined);
+		}
+	}
+}
 
 export function activate(context: vscode.ExtensionContext): void {
 	const output = vscode.window.createOutputChannel('herdr');
@@ -67,9 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}, log);
 	const panels = new TilesPanels({ extensionUri: context.extensionUri, model: m, streams, focus, rowLabel, log });
 	context.subscriptions.push(sessions, focus, panels, vscode.window.registerWebviewPanelSerializer(TILES_VIEW_TYPE, panels));
-	if (context.workspaceState.get(OLD_LAYOUTS_KEY) !== undefined) {
-		void context.workspaceState.update(OLD_LAYOUTS_KEY, undefined);
-	}
+	clearRetiredState(context.workspaceState);
 	// Rows from this machine's herdr config.toml; the test host never reads the real one.
 	const sidebarConfig = new SidebarConfigSource(NO_DISCOVERY ? undefined : sidebarConfigPath(process.env, os.homedir()), log);
 	const useSidebarConfig = () => vscode.workspace.getConfiguration('herdr').get<boolean>('useHerdrSidebarConfig', true);
@@ -147,6 +156,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 	const sshFs = new SshFileSystemProvider((alias) => environments.find(sshKey(alias))?.shell);
 	const decorations = new PaneDecorations();
+	// Files each agent touched while working: recorded whether or not Active Pane is visible.
+	const touched = new TouchedStore(context.workspaceState);
+	const recorder = new TouchedRecorder({ model: m, store: touched, log });
+	context.subscriptions.push(touched, recorder);
+	const paneFilesOnly = storedPaneFilesOnly(context.workspaceState);
+	void vscode.commands.executeCommand('setContext', PANE_FILES_ONLY_KEY, paneFilesOnly);
 	const paneContext = new PaneContextView({
 		model: m,
 		focus,
@@ -155,7 +170,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		paths,
 		createHost: (treeDataProvider) => vscode.window.createTreeView(PANE_CONTEXT_VIEW, { treeDataProvider }),
 		log,
-		baselines: new BaselineStore(context.workspaceState),
+		touched,
+		paneFilesOnly,
 		decorations,
 	});
 	context.subscriptions.push(
@@ -411,9 +427,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('herdr.paneContext.addToWorkspace', () => paneContext.addToWorkspace()),
 		vscode.commands.registerCommand('herdr.paneContext.splitPane', () => paneContext.splitPane()),
 		vscode.commands.registerCommand('herdr.paneContext.showPane', () => paneContext.showPane()),
-		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode | SinceNode) => paneContext.openChanges(node)),
-		vscode.commands.registerCommand('herdr.paneContext.openFile', (node?: ChangeNode | SinceNode) => paneContext.openFile(node)),
-		vscode.commands.registerCommand('herdr.paneContext.resetBaseline', () => paneContext.resetBaseline()),
+		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode | CommitFileNode) => paneContext.openChanges(node)),
+		vscode.commands.registerCommand('herdr.paneContext.openFile', (node?: ChangeNode | CommitFileNode) => paneContext.openFile(node)),
+		vscode.commands.registerCommand('herdr.paneContext.showPaneFiles', () => applyPaneFilesOnly(true, paneContext, context.workspaceState)),
+		vscode.commands.registerCommand('herdr.paneContext.showAllFiles', () => applyPaneFilesOnly(false, paneContext, context.workspaceState)),
 		vscode.commands.registerCommand('herdr.paneContext.openSourceControl', () => paneContext.openSourceControl()),
 		vscode.commands.registerCommand('herdr.paneContext.openTerminal', () => paneContext.openTerminal()),
 		vscode.commands.registerCommand('herdr.paneContext.newFile', (node?: PaneContextNode) => paneContext.promptNew(node, 'file')),

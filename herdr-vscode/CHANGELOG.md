@@ -4,6 +4,14 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Active Pane shows changes by commit.** **Changed in This Pane** and **Reset Baseline** are gone. **All Changes** is
+  now **Uncommitted** (expanded), followed by **Commits**: your branch's commits since the default branch
+  (`vs origin/main`), or the 20 most recent on the default branch itself. Expand a commit for its files; click one for
+  its diff in that commit, **Open File** for the file.
+- **Show Only This Pane's Files** (title bar filter): Uncommitted and Commits narrow to the files the pane's agent
+  changed while it was working, recorded by snapshotting the worktree when an agent starts and stops working, in every
+  session. Nothing is written to the repo's `.git` (the old baselines wrote unreferenced objects there); the snapshots
+  live in a temporary directory that is removed afterwards.
 - **Panes are named by their task**: the terminal title (which Claude Code keeps set to the current task) comes
   before herdr's label, the folder and the agent kind, so three Claude panes no longer all read `claude`. Agent
   pane rows and tile headers show the folder after the name (was the terminal title); the Agents view no longer

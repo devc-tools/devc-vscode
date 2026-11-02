@@ -17,7 +17,7 @@ session title); `terminal_title_stripped` was present, distinct and current on a
 (`Herdr-vscode session improvements`, `web_git_history_test.ts CI failure`, …). Tab labels were `1`, `2`, `3`.
 
 Depends on phase 26. Paths are under `herdr-vscode/` unless they start with `.plans/`.
-[herdr-commit-changes](../herdr-commit-changes.md) (phase 28) builds on the pane row added here.
+[herdr-commit-changes](herdr-commit-changes.md) (phase 28) builds on the pane row added here.
 
 ## Checklist
 

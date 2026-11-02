@@ -1,5 +1,10 @@
 # herdr-vscode: Pane Changes (changed since, git markers, remote labels, repo actions)
 
+> **Superseded in part (2026-11-02, phase 28, [herdr-commit-changes](archived/herdr-commit-changes.md)):** the
+> **Changed in This Pane** baseline section, **Reset Baseline**, the since-letters and `src/baselines.ts` were removed.
+> **All Changes** is now **Uncommitted**, followed by per-commit **Commits** and a this-pane filter recorded from agent
+> working spans, which write nothing to the repo's `.git`. Git markers, remote labels and the repo actions stay.
+
 Mockup board C (https://claude.ai/artifact/QJAeVX6smvE4aQ2YrHrrAP), the parts the built Pane Context
 view (phase 17) does not have yet:
 

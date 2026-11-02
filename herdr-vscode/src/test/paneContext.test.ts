@@ -4,14 +4,17 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { BaselineMemento, BaselineStore, memoryMemento } from '../baselines';
 import { HerdrEvent } from '../bridge';
 import { RepoDecorations } from '../decorations';
 import { Environment } from '../environments';
 import { FocusTracker } from '../focus';
 import {
+	applyPaneFilesOnly,
 	canAddToWorkspace,
 	ChangeNode,
+	CommitFileNode,
+	CommitNode,
+	commitDescription,
 	EntryNode,
 	followedPaneKey,
 	GroupNode,
@@ -28,14 +31,16 @@ import {
 	repoDescription,
 	RootNode,
 	rootContextValue,
-	SinceNode,
 	sortEntries,
+	storedPaneFilesOnly,
+	touchedChange,
 } from '../paneContext';
 import { LocalShell, RemoteShell } from '../remoteShell';
 import { SessionConnection, SessionModel, Snapshot } from '../sessions';
 import { PaneStreams } from '../streams';
 import { MirrorPanel, TilesPanels } from '../tilesPanel';
 import { makePaneKey } from '../tilesProtocol';
+import { memoryMemento, TouchedMemento, TouchedStore } from '../touched';
 import { paneClickCommand } from '../views/spacesView';
 import { snapshot } from './fixtures';
 
@@ -158,9 +163,10 @@ suite('pane context: rules', () => {
 		// A click on a change row opens its diff; the inline action opens the file.
 		assert.ok(!whens.has('herdr.paneContext.openChanges'));
 		assert.ok(applies('herdr.paneContext.openFile', 'herdr.paneContext.change'));
-		assert.ok(applies('herdr.paneContext.openFile', 'herdr.paneContext.sinceChange'));
-		assert.ok(!applies('herdr.paneContext.openFile', 'herdr.paneContext.since'));
-		assert.strictEqual(whens.get('herdr.paneContext.resetBaseline'), 'view == herdr.paneContext && viewItem == herdr.paneContext.since');
+		assert.ok(applies('herdr.paneContext.openFile', 'herdr.paneContext.commitFile'));
+		assert.ok(!applies('herdr.paneContext.openFile', 'herdr.paneContext.commit'));
+		assert.ok(!applies('herdr.paneContext.openFile', 'herdr.paneContext.changes'));
+		assert.ok(!whens.has('herdr.paneContext.resetBaseline'));
 
 		// Inline order on the Repo row, and none of these in the Command Palette.
 		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
@@ -169,9 +175,61 @@ suite('pane context: rules', () => {
 			['addToWorkspace', 'openSourceControl', 'openTerminal', 'splitPane', 'showPane'].map((c) => groups.get(`herdr.paneContext.${c}`)),
 			['inline@1', 'inline@2', 'inline@3', 'inline@4', 'inline@5'],
 		);
-		for (const c of ['resetBaseline', 'openSourceControl', 'openTerminal']) {
+		for (const c of ['showPaneFiles', 'showAllFiles', 'openSourceControl', 'openTerminal']) {
 			assert.strictEqual(menus.commandPalette.find((m) => m.command === `herdr.paneContext.${c}`)?.when, 'false', c);
 		}
+	});
+
+	test('the this-pane toggle: title bar, icons, palette; Reset Baseline is gone', async () => {
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'herdr-vscode')!;
+		const contributed = ext.packageJSON.contributes;
+		const commands = contributed.commands as { command: string; title: string; icon?: string }[];
+		const cmd = (c: string) => commands.find((x) => x.command === c);
+		assert.deepStrictEqual([cmd('herdr.paneContext.showPaneFiles')?.title, cmd('herdr.paneContext.showPaneFiles')?.icon], ["Show Only This Pane's Files", '$(filter)']);
+		assert.deepStrictEqual([cmd('herdr.paneContext.showAllFiles')?.title, cmd('herdr.paneContext.showAllFiles')?.icon], ['Show All Files', '$(filter-filled)']);
+		const title = contributed.menus['view/title'] as { command: string; when: string; group: string }[];
+		const at = (c: string) => title.find((m) => m.command === c)!;
+		assert.strictEqual(at('herdr.paneContext.showPaneFiles').when, 'view == herdr.paneContext && !herdr.paneContext.paneFilesOnly');
+		assert.strictEqual(at('herdr.paneContext.showAllFiles').when, 'view == herdr.paneContext && herdr.paneContext.paneFilesOnly');
+		assert.match(at('herdr.paneContext.showPaneFiles').group, /^navigation/);
+		assert.match(at('herdr.paneContext.showAllFiles').group, /^navigation/);
+		assert.strictEqual(cmd('herdr.paneContext.resetBaseline'), undefined, 'not contributed');
+		const everywhere = JSON.stringify(contributed.menus);
+		assert.ok(!everywhere.includes('resetBaseline'));
+		await ext.activate();
+		const registered = new Set(await vscode.commands.getCommands(true));
+		assert.ok(!registered.has('herdr.paneContext.resetBaseline'), 'not registered');
+		assert.ok(registered.has('herdr.paneContext.showPaneFiles') && registered.has('herdr.paneContext.showAllFiles'));
+		// The real commands run (nothing followed in the test host); off again afterwards.
+		await vscode.commands.executeCommand('herdr.paneContext.showPaneFiles');
+		await vscode.commands.executeCommand('herdr.paneContext.showAllFiles');
+	});
+
+	test('the toggle flips the view, the workspaceState value and the context key', async () => {
+		const memento = memoryMemento();
+		const contexts: [string, boolean][] = [];
+		const modes: boolean[] = [];
+		const view = { setPaneFilesOnly: (on: boolean) => modes.push(on) };
+		assert.strictEqual(storedPaneFilesOnly(memento), false, 'default off');
+		await applyPaneFilesOnly(true, view, memento, async (k, v) => contexts.push([k, v]));
+		assert.strictEqual(memento.get('herdr.paneContext.paneFilesOnly'), true);
+		assert.strictEqual(storedPaneFilesOnly(memento), true);
+		await applyPaneFilesOnly(false, view, memento, async (k, v) => contexts.push([k, v]));
+		assert.strictEqual(memento.get('herdr.paneContext.paneFilesOnly'), false);
+		assert.deepStrictEqual(modes, [true, false]);
+		assert.deepStrictEqual(contexts, [
+			['herdr.paneContext.paneFilesOnly', true],
+			['herdr.paneContext.paneFilesOnly', false],
+		]);
+	});
+
+	test('an untracked directory row counts as touched when a touched path is under it', () => {
+		const t = new Set(['fresh/x', 'src/a.ts']);
+		assert.ok(touchedChange('src/a.ts', t));
+		assert.ok(!touchedChange('src/b.ts', t));
+		assert.ok(touchedChange('fresh/', t));
+		assert.ok(!touchedChange('fre/', t));
+		assert.ok(!touchedChange('src', t), 'a file named like a directory is not one');
 	});
 
 	test('other panes: the worktree marker before the description', () => {
@@ -288,7 +346,9 @@ suite('pane context: the view over a temp repo', function () {
 	let tiles: vscode.EventEmitter<void>;
 	let links: vscode.EventEmitter<{ paneKey: string; text: string }>;
 	let view: PaneContextView;
-	let memento: BaselineMemento;
+	let memento: TouchedMemento;
+	let touched: TouchedStore;
+	let paneFilesOnly: boolean;
 	let decorated: (RepoDecorations | undefined)[];
 	let now: number;
 	let logged: string[];
@@ -313,7 +373,8 @@ suite('pane context: the view over a temp repo', function () {
 			},
 			createHost: () => host as unknown as PaneContextHost,
 			log: (line) => logged.push(line),
-			baselines: new BaselineStore(memento),
+			touched,
+			paneFilesOnly,
 			decorations: { set: (repo) => decorated.push(repo) },
 			now: () => now,
 		});
@@ -355,6 +416,8 @@ suite('pane context: the view over a temp repo', function () {
 		tiles = new vscode.EventEmitter<void>();
 		links = new vscode.EventEmitter<{ paneKey: string; text: string }>();
 		memento = memoryMemento();
+		touched = new TouchedStore(memento);
+		paneFilesOnly = false;
 		decorated = [];
 		logged = [];
 		now = new Date(2026, 9, 31, 10, 31).getTime();
@@ -425,7 +488,7 @@ suite('pane context: the view over a temp repo', function () {
 
 		assert.deepStrictEqual((await roots()).slice(0, 2).map((n) => n.type), ['pane', 'root'], 'the pane row first, then the repo');
 		const top = (await view.getChildren()).filter((n): n is GroupNode => n.type === 'group');
-		assert.deepStrictEqual(top.map((g) => g.label), ['Changed in This Pane', 'All Changes', 'Files'], 'no Other Panes');
+		assert.deepStrictEqual(top.map((g) => g.label), ['Uncommitted', 'Commits', 'Files'], 'no Other Panes');
 		assert.strictEqual(paneContextItem((await group('files'))!).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
 	});
 
@@ -665,39 +728,45 @@ suite('pane context: the view over a temp repo', function () {
 		assert.ok(!fs.existsSync(path.join(dir, 'made-dir')));
 	});
 
-	// ── Pane changes: since a baseline, markers, repo actions ─────────────────
+	// ── Changes: Uncommitted, Commits, this pane's files ────────────────────
 
-	const sinceRows = async () => view.getChildren(await group('since'));
-	const store = () => new BaselineStore(memento);
 	const P1 = makePaneKey(S, 'w2:p1');
+	const commitRows = async () => view.getChildren(await group('commits'));
+	const rowLabels = (nodes: PaneContextNode[]) => nodes.map((n) => (n as { label: string }).label);
+	const commitAll = (message: string) => {
+		git(dir, 'add', '-A');
+		git(dir, 'commit', '-q', '-m', message);
+		return git(dir, 'rev-parse', 'HEAD').trim();
+	};
+	const activeTab = () => vscode.window.tabGroups.activeTabGroup.activeTab;
 
-	test('sections in order; a baseline on first follow; nothing changed since; All Changes collapsed', async () => {
+	test('sections in order: Uncommitted expanded, Commits, Files; no Changed in This Pane', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
 		const top = await roots();
 		assert.deepStrictEqual(
 			top.map((n) => (n.type === 'group' ? n.label : n.type)),
-			['pane', 'root', 'Changed in This Pane', 'All Changes', 'Files'],
+			['pane', 'root', 'Uncommitted', 'Commits', 'Files'],
 		);
-		const since = (await group('since'))!;
-		assert.strictEqual(since.description, 'since 10:31');
-		assert.strictEqual(paneContextItem(since).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
-		assert.strictEqual(paneContextItem(since).contextValue, 'herdr.paneContext.since');
-		const rows = await view.getChildren(since);
-		assert.deepStrictEqual(rows.map((r) => [r.type, (r as { label: string }).label]), [['note', 'No changes since 10:31']]);
-		assert.strictEqual(paneContextItem(rows[0]).iconPath, undefined);
-		assert.strictEqual(paneContextItem(rows[0]).command, undefined);
-		const all = (await group('changes'))!;
-		assert.strictEqual(all.description, '4');
-		assert.strictEqual(paneContextItem(all).description, '4');
-		assert.strictEqual(paneContextItem(all).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
-		assert.strictEqual(paneContextItem(all).contextValue, 'herdr.paneContext.changes');
-		const stored = store().get(P1, dir)!;
-		assert.strictEqual(stored.at, now);
-		assert.strictEqual(stored.head, git(dir, 'rev-parse', 'HEAD').trim());
-		assert.match(stored.tree, /^[0-9a-f]{40}$/);
+		const uncommitted = (await group('changes'))!;
+		assert.strictEqual(uncommitted.description, '4');
+		assert.strictEqual(paneContextItem(uncommitted).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+		assert.strictEqual(paneContextItem(uncommitted).contextValue, 'herdr.paneContext.changes');
+		assert.strictEqual(uncommitted.id, `${vscode.Uri.file(dir).toString()}|changes`);
+		const commits = (await group('commits'))!;
+		assert.strictEqual(commits.description, 'recent', 'on main itself');
+		assert.strictEqual(paneContextItem(commits).contextValue, 'herdr.paneContext.commits');
+		assert.ok(!top.some((n) => n.type === 'group' && n.label === 'Changed in This Pane'));
+		const last = decorated[decorated.length - 1]!;
+		assert.deepStrictEqual(Object.keys(last).sort(), ['status', 'untrackedDirs'], 'no since-markers');
 
-		// Outside a repo: no change sections.
+		// A clean tree: no Uncommitted; outside a repo: no change sections.
+		commitAll('two');
+		view.dispose();
+		view = makeView();
+		await rootIs(path.basename(dir));
+		await waitFor('the clean status', async () => (await rootRow()).description === '⎇ main');
+		assert.deepStrictEqual((await roots()).map((n) => (n.type === 'group' ? n.label : n.type)), ['pane', 'root', 'Commits', 'Files']);
 		view.dispose();
 		model.snapshots.set(S, twoPanes(other, dir));
 		view = makeView();
@@ -706,138 +775,170 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(decorated[decorated.length - 1], undefined, 'no markers outside a repo');
 	});
 
-	test('changes after following are in Changed in This Pane, earlier ones are not; commits; markers', async () => {
+	test('commit rows: subject, sha and time, tooltip, icon; files load on expand', async () => {
+		const one = git(dir, 'rev-parse', 'HEAD').trim();
+		git(dir, 'add', '-A');
+		git(dir, 'commit', '-q', '-m', 'Two things\n\nThe body,\nover two lines.');
+		const two = git(dir, 'rev-parse', 'HEAD').trim();
+		git(dir, 'commit', '-q', '--allow-empty', '--allow-empty-message', '-m', '');
 		view = makeView();
 		await rootIs(path.basename(dir));
-		fs.writeFileSync(path.join(dir, 'src', 'later.ts'), 'x');
-		fs.writeFileSync(path.join(dir, 'README.md'), 'changed\n');
-		fs.rmSync(path.join(dir, 'new.txt')); // untracked at the baseline
-		await view.poll();
-		const rows = (await sinceRows()) as SinceNode[];
+		const rows = (await commitRows()) as CommitNode[];
+		assert.deepStrictEqual(rowLabels(rows), ['(no message)', 'Two things', 'one']);
+		const c = rows[1];
+		assert.strictEqual(c.id, `${vscode.Uri.file(dir).toString()}|commit|${two}`);
+		assert.strictEqual(c.description, commitDescription(c.commit, now));
+		assert.match(c.description, new RegExp(`^${two.slice(0, 7)} · `));
+		const item = paneContextItem(c);
+		assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'git-commit');
+		assert.strictEqual(item.contextValue, 'herdr.paneContext.commit');
+		assert.match(String(item.tooltip), new RegExp(`^${two}\\nT · \\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d[+-]\\d\\d:\\d\\d\\n\\nTwo things\\n\\nThe body,\\nover two lines\\.$`));
+
+		const files = (await view.getChildren(c)) as CommitFileNode[];
 		assert.deepStrictEqual(
-			rows.map((r) => [r.label, r.description, r.status]),
+			files.map((f) => [f.label, f.description]),
 			[
-				['README.md', undefined, 'M'],
-				['new.txt', undefined, 'D'],
-				['later.ts', 'src', 'A'],
+				['x', 'fresh · A'],
+				['gone.txt', 'D'],
+				['new.txt', 'A'],
+				['a.ts', 'src · M'],
 			],
 		);
-		assert.ok(!rows.some((r) => r.label === 'a.ts'), 'changed before following: only in All Changes');
-		const later = rows[2];
-		const item = paneContextItem(later);
-		assert.strictEqual((item.resourceUri as vscode.Uri).fragment, 'herdr-since');
-		assert.strictEqual((item.resourceUri as vscode.Uri).with({ fragment: '' }).fsPath, path.join(dir, 'src', 'later.ts'));
-		assert.strictEqual(item.contextValue, 'herdr.paneContext.sinceChange');
-		assert.strictEqual(item.command?.command, 'herdr.paneContext.openChanges');
-		assert.strictEqual(item.command?.arguments?.[0], later);
-		assert.strictEqual(later.fileUri.toString(), vscode.Uri.file(path.join(dir, 'src', 'later.ts')).toString(), 'the plain URI, no fragment');
-		assert.strictEqual(item.tooltip, `${dir}/src/later.ts · Added since 10:31`);
-		assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, vscode.ThemeIcon.File.id);
-		const gone = (rows[1] as SinceNode).baseUri;
-		assert.strictEqual(gone.scheme, 'herdr-git', 'a deleted row opens the baseline version');
-		assert.strictEqual(gone.query, store().get(P1, dir)!.tree);
-		assert.strictEqual((await group('since'))!.description, 'since 10:31');
+		const a = files[3];
+		const aItem = paneContextItem(a);
+		assert.strictEqual(aItem.resourceUri, undefined, 'no working tree decoration');
+		assert.strictEqual((aItem.iconPath as vscode.ThemeIcon).id, vscode.ThemeIcon.File.id);
+		assert.strictEqual(aItem.contextValue, 'herdr.paneContext.commitFile');
+		assert.strictEqual(aItem.command?.command, 'herdr.paneContext.openChanges');
+		assert.strictEqual(aItem.command?.arguments?.[0], a);
+		assert.deepStrictEqual([a.leftUri.scheme, a.leftUri.query, a.rightUri.scheme, a.rightUri.query], ['herdr-git', one, 'herdr-git', two]);
 
-		const last = decorated[decorated.length - 1]!;
-		assert.ok(last.status.some((c) => c.uri.fsPath === path.join(dir, 'src', 'a.ts') && c.xy === ' M'));
-		assert.deepStrictEqual(last.untrackedDirs.map((u) => u.fsPath), [path.join(dir, 'fresh')]);
-		assert.deepStrictEqual(
-			last.since.map((c) => [path.basename(c.uri.path), c.status, c.uri.fragment]),
-			[
-				['README.md', 'M', 'herdr-since'],
-				['new.txt', 'D', 'herdr-since'],
-				['later.ts', 'A', 'herdr-since'],
-			],
-		);
-		assert.strictEqual(last.sinceTime, '10:31');
-
-		git(dir, 'add', 'src/later.ts');
-		git(dir, 'commit', '-q', '-m', 'two');
-		await view.poll();
-		assert.strictEqual((await group('since'))!.description, 'since 10:31 · 1 commit');
-		assert.ok(((await sinceRows()) as SinceNode[]).some((r) => r.label === 'later.ts'), 'committed changes are still changes since');
-		git(dir, 'commit', '-q', '--allow-empty', '-m', 'three');
-		await view.poll();
-		assert.strictEqual((await group('since'))!.description, 'since 10:31 · 2 commits');
+		// The root commit: everything added, against the empty tree.
+		const root = (await view.getChildren(rows[2])) as CommitFileNode[];
+		assert.deepStrictEqual(rowLabels(root), ['README.md', 'gone.txt', 'a.ts'], 'by path, as git sorts');
+		assert.ok(root.every((f) => f.status === 'A' && f.leftUri.query === '4b825dc642cb6eb9a060e54bf8d69288fbee4904'));
 	});
 
-	test('the baseline survives a reload (a new view on the same memento); Reset Baseline replaces it', async () => {
+	test('a commit file: click diffs parent ↔ commit, D opens the parent; Open File: working tree, else the revision', async () => {
+		const one = git(dir, 'rev-parse', 'HEAD').trim();
+		const two = commitAll('two');
 		view = makeView();
 		await rootIs(path.basename(dir));
-		fs.writeFileSync(path.join(dir, 'later.txt'), 'x');
-		view.dispose();
-		now += 60 * 60 * 1000;
-		view = makeView();
-		await rootIs(path.basename(dir));
-		assert.strictEqual((await group('since'))!.description, 'since 10:31');
-		assert.deepStrictEqual(((await sinceRows()) as SinceNode[]).map((r) => r.label), ['later.txt']);
-		const before = store().get(P1, dir)!;
-		await view.resetBaseline();
-		assert.strictEqual((await group('since'))!.description, 'since 11:31');
-		assert.deepStrictEqual((await sinceRows()).map((r) => (r as { label: string }).label), ['No changes since 11:31']);
-		const after = store().get(P1, dir)!;
-		assert.strictEqual(after.at, now);
-		assert.notStrictEqual(after.tree, before.tree);
-		assert.deepStrictEqual(store().keys(), [`${P1}\n${dir}`]);
-	});
+		const c = ((await commitRows()) as CommitNode[])[0];
+		const files = (await view.getChildren(c)) as CommitFileNode[];
+		const byName = (n: string) => files.find((f) => f.label === n)!;
 
-	test('a baseline git has pruned is replaced by a new one, and says so', async () => {
-		await store().set(P1, dir, { tree: 'f'.repeat(40), head: '', at: now - 1000 });
-		view = makeView();
-		await rootIs(path.basename(dir));
-		const stored = store().get(P1, dir)!;
-		assert.notStrictEqual(stored.tree, 'f'.repeat(40));
-		assert.strictEqual(stored.at, now);
-		assert.ok(logged.includes(`pane context: baseline for ${dir} was lost; recorded a new one`), logged.join('\n'));
-		assert.deepStrictEqual((await sinceRows()).map((r) => (r as { label: string }).label), ['No changes since 10:31']);
-	});
+		await view.openChanges(byName('a.ts'));
+		const diff = await waitFor('the diff tab', () => (activeTab()?.input instanceof vscode.TabInputTextDiff ? activeTab() : undefined));
+		assert.strictEqual(diff.label, `a.ts (${two.slice(0, 7)})`);
+		const input = diff.input as vscode.TabInputTextDiff;
+		assert.deepStrictEqual([input.original.scheme, input.original.query, input.modified.scheme, input.modified.query], ['herdr-git', one, 'herdr-git', two]);
+		assert.strictEqual(input.modified.path, path.join(dir, 'src', 'a.ts'));
 
-	test('a snapshot that fails: one warning row', async () => {
-		const local = new LocalShell();
-		const failing: RemoteShell = {
-			run: (argv, o) => (argv[0] === 'sh' ? Promise.resolve({ exitCode: 1, stdout: Buffer.from(''), stderr: Buffer.from('\nfatal: boom\nmore\n') }) : local.run(argv, o)),
-			spawn: () => local.spawn([]),
+		await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+		await view.openChanges(byName('gone.txt'));
+		const gone = await waitFor('the parent revision', () => (activeTab()?.input instanceof vscode.TabInputText ? activeTab() : undefined));
+		assert.deepStrictEqual([(gone.input as vscode.TabInputText).uri.scheme, (gone.input as vscode.TabInputText).uri.query], ['herdr-git', one]);
+
+		const openedBy = async (node: CommitFileNode) => {
+			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+			await view.openFile(node);
+			const t = await waitFor('the file tab', () => (activeTab()?.input instanceof vscode.TabInputText ? activeTab() : undefined));
+			return (t.input as vscode.TabInputText).uri;
 		};
-		(model as unknown as { env: Environment }).env = { ...model.env, shell: failing };
-		view = makeView();
-		await rootIs(path.basename(dir));
-		assert.strictEqual((await group('since'))!.description, undefined);
-		const rows = await sinceRows();
-		assert.deepStrictEqual(rows.map((r) => (r as { label: string }).label), ['Could not record a baseline: fatal: boom']);
-		assert.strictEqual((paneContextItem(rows[0]).iconPath as vscode.ThemeIcon).id, 'warning');
-		assert.deepStrictEqual(store().keys(), []);
+		assert.strictEqual((await openedBy(byName('a.ts'))).toString(), vscode.Uri.file(path.join(dir, 'src', 'a.ts')).toString(), 'the working tree file');
+		fs.rmSync(path.join(dir, 'new.txt'));
+		const added = await openedBy(byName('new.txt'));
+		assert.deepStrictEqual([added.scheme, added.query], ['herdr-git', two], 'gone from the working tree: the commit');
+		const deleted = await openedBy(byName('gone.txt'));
+		assert.deepStrictEqual([deleted.scheme, deleted.query], ['herdr-git', one], 'deleted: the parent');
 	});
 
-	test('Open Changes on a since row: the baseline against the working tree', async () => {
-		const provider = vscode.workspace.registerTextDocumentContentProvider('herdr-ctx-since', { provideTextDocumentContent: () => 'working\n' });
+	test('poll: a new commit reaches Commits', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
-		fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'again\n');
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['one']);
+		commitAll('two');
 		await view.poll();
-		const a = ((await sinceRows()) as SinceNode[]).find((r) => r.label === 'a.ts')!;
-		assert.strictEqual(a.status, 'M');
-		assert.strictEqual(a.baseUri.query, store().get(P1, dir)!.tree);
-		await view.openChanges({ ...a, baseUri: a.baseUri.with({ scheme: 'herdr-ctx-since' }) });
-		const tab = await waitFor('the diff tab', () => vscode.window.tabGroups.activeTabGroup.activeTab);
-		assert.strictEqual(tab.label, 'a.ts (since 10:31 ↔ working tree)');
-		assert.ok(tab.input instanceof vscode.TabInputTextDiff);
-		assert.strictEqual((tab.input as vscode.TabInputTextDiff).modified.toString(), vscode.Uri.file(path.join(dir, 'src', 'a.ts')).toString());
-		provider.dispose();
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['two', 'one']);
+		assert.strictEqual(await group('changes'), undefined, 'nothing uncommitted');
 	});
 
-	test('pane.moved moves the baselines; a closed pane loses them while its session is connected', async () => {
+	test("pane mode: Uncommitted and Commits filtered to the agent's touched files", async () => {
+		commitAll('two'); // a.ts, fresh/x, gone.txt, new.txt
+		fs.writeFileSync(path.join(dir, 'README.md'), 'readme again\n');
+		const three = commitAll('three');
+		fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'uncommitted\n');
+		fs.writeFileSync(path.join(dir, 'u.txt'), 'u\n');
+		fs.mkdirSync(path.join(dir, 'newdir'));
+		fs.writeFileSync(path.join(dir, 'newdir', 'n.txt'), 'n\n');
+		await touched.add(P1, dir, ['newdir/n.txt', 'src/a.ts', 'README.md']);
+		paneFilesOnly = true;
 		view = makeView();
 		await rootIs(path.basename(dir));
-		const baseline = store().get(P1, dir);
-		model.events.fire({ sessionKey: S, event: { event: 'pane.moved', data: { previous_pane_id: 'w2:p1', pane: { pane_id: 'w9:p1' } } } as HerdrEvent });
-		await sleep(10);
-		assert.deepStrictEqual(store().get(makePaneKey(S, 'w9:p1'), dir), baseline);
-		const without = twoPanes(dir, other);
-		without.panes.splice(0, 1);
-		model.snapshots.set(S, without);
-		model.changed.fire();
-		await sleep(10);
-		assert.deepStrictEqual(store().keys(), [], 'neither w2:p1 nor w9:p1 is in the snapshot');
+		const uncommitted = (await group('changes'))!;
+		assert.strictEqual(uncommitted.description, '2 of 3');
+		assert.deepStrictEqual(rowLabels(await view.getChildren(uncommitted)).sort(), ['a.ts', 'newdir'], 'u.txt is not touched; newdir/ holds a touched path');
+		const commits = (await group('commits'))!;
+		assert.strictEqual(commits.description, 'recent · this pane');
+		const rows = (await commitRows()) as CommitNode[];
+		assert.deepStrictEqual(rowLabels(rows), ['three', 'two', 'one'], 'every listed commit touches a.ts or README.md');
+		assert.deepStrictEqual(rowLabels(await view.getChildren(rows[1])), ['a.ts'], "two's other files are hidden");
+		assert.deepStrictEqual(rowLabels(await view.getChildren(rows[0])), ['README.md']);
+		assert.strictEqual(rows[0].commit.sha, three);
+
+		// Commits with no touched file are hidden; none left: the note.
+		await touched.prune(() => 'closed');
+		await touched.add(P1, dir, ['newdir/n.txt']);
+		await waitFor('nothing but newdir', async () => (await group('changes'))?.description === '1 of 3');
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['Nothing recorded for this pane']);
+		const note = (await commitRows())[0];
+		assert.strictEqual(paneContextItem(note).iconPath, undefined, 'a plain note');
+
+		// Off again: everything.
+		view.setPaneFilesOnly(false);
+		assert.strictEqual((await group('changes'))!.description, '3');
+		assert.strictEqual((await group('commits'))!.description, 'recent');
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['three', 'two', 'one']);
+	});
+
+	test('pane mode with nothing recorded: the note in both sections, Uncommitted shown even when clean', async () => {
+		paneFilesOnly = true;
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const uncommitted = (await group('changes'))!;
+		assert.strictEqual(uncommitted.description, '0 of 4');
+		assert.deepStrictEqual(rowLabels(await view.getChildren(uncommitted)), ['Nothing recorded for this pane']);
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['Nothing recorded for this pane']);
+		commitAll('two');
+		await view.poll();
+		assert.strictEqual((await group('changes'))?.description, '0 of 0', 'shown although clean, so the note is visible');
+
+		// A recording reaches the open view.
+		const fires: unknown[] = [];
+		const listener = view.onDidChangeTreeData((e) => fires.push(e));
+		await touched.add(P1, dir, ['new.txt']);
+		assert.ok(fires.includes(undefined), 'refreshed');
+		listener.dispose();
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['two']);
+	});
+
+	test('pane mode on a shell pane: unfiltered, with a note first', async () => {
+		model.snapshots.set(S, twoPanes(other, dir, 'w2:p2'));
+		paneFilesOnly = true;
+		view = makeView();
+		await rootIs(path.basename(dir));
+		const uncommitted = (await group('changes'))!;
+		assert.strictEqual(uncommitted.description, '4');
+		const rows = await view.getChildren(uncommitted);
+		assert.strictEqual(rows.length, 5);
+		assert.deepStrictEqual([rows[0].type, (rows[0] as { label: string }).label], ['note', 'No agent in this pane: showing all files']);
+		assert.strictEqual(paneContextItem(rows[0]).iconPath, undefined);
+		assert.strictEqual((await group('commits'))!.description, 'recent');
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['No agent in this pane: showing all files', 'one']);
+		// Files is never filtered.
+		assert.ok(labels(await view.getChildren(await group('files'))).includes('README.md'));
 	});
 
 	test('Terminal Here: a terminal editor in the root, named after it', async () => {

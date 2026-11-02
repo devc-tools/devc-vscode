@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { GitApiLike, PaneDecorations, SINCE_FRAGMENT } from '../decorations';
+import { GitApiLike, PaneDecorations } from '../decorations';
 
 class FakeGit implements GitApiLike {
 	state: 'uninitialized' | 'initialized' = 'initialized';
@@ -43,7 +43,7 @@ suite('decorations', () => {
 			[' M', 'M', 'Modified', 'gitDecoration.modifiedResourceForeground'],
 			[' T', 'M', 'Modified', 'gitDecoration.modifiedResourceForeground'],
 		];
-		deco.set({ status: rows.map(([xy], i) => ({ uri: container(`/r/f${i}`), xy })), untrackedDirs: [], since: [] });
+		deco.set({ status: rows.map(([xy], i) => ({ uri: container(`/r/f${i}`), xy })), untrackedDirs: [] });
 		rows.forEach(([xy, b, tooltip, color], i) => {
 			assert.deepStrictEqual(badge(deco.provideFileDecoration(container(`/r/f${i}`))), [b, tooltip, color, true], xy);
 		});
@@ -53,37 +53,16 @@ suite('decorations', () => {
 
 	test('an untracked directory and anything under it', () => {
 		const dir = container('/r/fresh');
-		deco.set({ status: [{ uri: dir, xy: '??' }], untrackedDirs: [dir], since: [] });
+		deco.set({ status: [{ uri: dir, xy: '??' }], untrackedDirs: [dir] });
 		assert.deepStrictEqual(badge(deco.provideFileDecoration(dir)), ['U', 'Untracked', 'gitDecoration.untrackedResourceForeground', true]);
 		assert.deepStrictEqual(badge(deco.provideFileDecoration(vscode.Uri.joinPath(dir, 'deep', 'x.ts'))), ['U', 'Untracked', 'gitDecoration.untrackedResourceForeground', true]);
 		assert.strictEqual(deco.provideFileDecoration(container('/r/freshly')), undefined, 'a sibling with the same prefix');
 		assert.strictEqual(deco.provideFileDecoration(dir.with({ query: '' }).with({ path: '/r/fresh/x' })), undefined, 'another URI shape');
 	});
 
-	test('since rows: their own letters, never propagated, never yielded', () => {
-		const a = file('/repo/scopes.ts').with({ fragment: SINCE_FRAGMENT });
-		const m = file('/repo/b.ts').with({ fragment: SINCE_FRAGMENT });
-		const d = file('/repo/c.ts').with({ fragment: SINCE_FRAGMENT });
-		git!.repos.add('/repo');
-		deco.set({
-			status: [{ uri: file('/repo/scopes.ts'), xy: '??' }],
-			untrackedDirs: [],
-			since: [
-				{ uri: a, status: 'A' },
-				{ uri: m, status: 'M' },
-				{ uri: d, status: 'D' },
-			],
-			sinceTime: '10:31',
-		});
-		assert.deepStrictEqual(badge(deco.provideFileDecoration(a)), ['A', 'Added since 10:31', 'gitDecoration.addedResourceForeground', false]);
-		assert.deepStrictEqual(badge(deco.provideFileDecoration(m)), ['M', 'Modified since 10:31', 'gitDecoration.modifiedResourceForeground', false]);
-		assert.deepStrictEqual(badge(deco.provideFileDecoration(d)), ['D', 'Deleted since 10:31', 'gitDecoration.deletedResourceForeground', false]);
-		assert.strictEqual(deco.provideFileDecoration(file('/repo/scopes.ts')), undefined, 'the plain file is Git\'s');
-	});
-
 	test("file: URIs yield to VS Code's Git when it has the repo; decorated when it has not, or is absent", () => {
 		const f = file('/repo/a.ts');
-		deco.set({ status: [{ uri: f, xy: ' M' }, { uri: container('/repo/a.ts'), xy: ' M' }], untrackedDirs: [], since: [] });
+		deco.set({ status: [{ uri: f, xy: ' M' }, { uri: container('/repo/a.ts'), xy: ' M' }], untrackedDirs: [] });
 		assert.strictEqual(badge(deco.provideFileDecoration(f))?.[0], 'M', 'getRepository is null');
 		git!.repos.add('/repo');
 		assert.strictEqual(deco.provideFileDecoration(f), undefined, 'Git has it');
@@ -104,16 +83,16 @@ suite('decorations', () => {
 		const a = container('/r/a');
 		const b = container('/r/b');
 		const c = container('/r/c');
-		deco.set({ status: [{ uri: a, xy: ' M' }, { uri: b, xy: '??' }], untrackedDirs: [], since: [] });
+		deco.set({ status: [{ uri: a, xy: ' M' }, { uri: b, xy: '??' }], untrackedDirs: [] });
 		assert.deepStrictEqual(fired.map((e) => (e as vscode.Uri[]).map(String).sort()), [[a, b].map(String).sort()]);
 		fired.length = 0;
-		deco.set({ status: [{ uri: a, xy: ' M' }, { uri: b, xy: 'A ' }, { uri: c, xy: '??' }], untrackedDirs: [], since: [] });
+		deco.set({ status: [{ uri: a, xy: ' M' }, { uri: b, xy: 'A ' }, { uri: c, xy: '??' }], untrackedDirs: [] });
 		assert.deepStrictEqual((fired[0] as vscode.Uri[]).map(String).sort(), [b, c].map(String).sort(), 'b changed letter, c is new; a is the same');
 		fired.length = 0;
-		deco.set({ status: [{ uri: c, xy: '??' }], untrackedDirs: [], since: [] });
+		deco.set({ status: [{ uri: c, xy: '??' }], untrackedDirs: [] });
 		assert.deepStrictEqual((fired[0] as vscode.Uri[]).map(String).sort(), [a, b].map(String).sort());
 		fired.length = 0;
-		deco.set({ status: [{ uri: c, xy: '??' }], untrackedDirs: [], since: [] });
+		deco.set({ status: [{ uri: c, xy: '??' }], untrackedDirs: [] });
 		assert.strictEqual(fired.length, 0, 'nothing changed');
 		deco.set(undefined);
 		assert.deepStrictEqual((fired[0] as vscode.Uri[]).map(String), [String(c)]);

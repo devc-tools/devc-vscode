@@ -144,40 +144,30 @@ export class GitHeadContentProvider implements vscode.TextDocumentContentProvide
 	}
 }
 
-// ── Baselines: what changed since ───────────────────────────────────────────
+// ── Times ───────────────────────────────────────────────────────────────────
 
-/**
- * The whole working state (tracked and untracked, not ignored) as a tree, and
- * HEAD, through a temporary copy of the index: the user's index, working tree,
- * refs and stash are never touched. Copying the real index keeps its stat
- * cache, so `add -A` hashes only files that changed. `touch -r` keeps the
- * copy's mtime: git judges a "racily clean" entry (a file written in the same
- * second as the index) against the index file's mtime, and a fresh mtime would
- * make it trust a stale stat and record the old content. The toplevel is `$1`.
- */
-export const SNAPSHOT_SCRIPT = `set -e
-top=$1
-d=$(mktemp -d "\${TMPDIR:-/tmp}/herdr-vscode.XXXXXX")
-trap 'rm -rf "$d"' EXIT
-gi=$(git -C "$top" rev-parse --git-path index)
-case $gi in /*) ;; *) gi=$top/$gi ;; esac
-if [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
-GIT_INDEX_FILE=$d/index git -C "$top" add -A
-GIT_INDEX_FILE=$d/index git -C "$top" write-tree
-git -C "$top" rev-parse -q --verify HEAD || true
-`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad = (n: number) => String(n).padStart(2, '0');
 
-export interface TreeSnapshot {
-	/** The working state's tree SHA. */
-	tree: string;
-	/** HEAD's full SHA; empty in a repo with no commits. */
-	head: string;
+/** `HH:MM` today, else `Mon D HH:MM`, local time; no locale formatting. */
+export function shortTime(at: number, now: number = Date.now()): string {
+	const then = new Date(at);
+	const today = new Date(now);
+	const time = `${pad(then.getHours())}:${pad(then.getMinutes())}`;
+	const sameDay = then.getFullYear() === today.getFullYear() && then.getMonth() === today.getMonth() && then.getDate() === today.getDate();
+	return sameDay ? time : `${MONTHS[then.getMonth()]} ${then.getDate()} ${time}`;
 }
 
-/** The snapshot script's stdout; undefined when it is anything else. */
-export function parseSnapshot(stdout: string): TreeSnapshot | undefined {
-	const match = /^([0-9a-f]{40,64})\n([0-9a-f]{40,64})?\n?$/.exec(stdout);
-	return match ? { tree: match[1], head: match[2] ?? '' } : undefined;
+/** ISO 8601 in local time with its offset: `2026-11-02T10:31:05+01:00`. */
+export function isoLocal(at: number): string {
+	const d = new Date(at);
+	const offset = -d.getTimezoneOffset();
+	const sign = offset >= 0 ? '+' : '-';
+	const abs = Math.abs(offset);
+	return (
+		`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+		`${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+	);
 }
 
 function firstLine(text: string): string | undefined {
@@ -187,51 +177,224 @@ function firstLine(text: string): string | undefined {
 		.find((l) => l !== '');
 }
 
-/** Takes a snapshot of `toplevel`'s working state; throws with git's first stderr line when it fails. */
-export async function takeSnapshot(shell: RemoteShell, toplevel: string): Promise<TreeSnapshot> {
-	const res = await shell.run(['sh', '-c', SNAPSHOT_SCRIPT, 'sh', toplevel], { timeoutMs: GIT_TIMEOUT_MS });
-	const snapshot = res.exitCode === 0 ? parseSnapshot(res.stdout.toString('utf8')) : undefined;
-	if (!snapshot) {
-		throw new Error(firstLine(res.stderr.toString('utf8')) ?? (res.exitCode === 0 ? 'unexpected output from git' : `git exited with ${res.exitCode}`));
-	}
-	return snapshot;
-}
+// ── Tree diffs ──────────────────────────────────────────────────────────────
 
-export type SinceStatus = 'A' | 'M' | 'D';
+export type TreeStatus = 'A' | 'M' | 'D';
 
-export interface SinceChange {
-	status: SinceStatus;
+export interface TreeChange {
+	status: TreeStatus;
 	path: string;
 }
 
 /** `diff-tree -r -z --no-renames --name-status`: `<status>\0<path>\0` pairs; `T` is shown as `M`. Sorted by path. */
-export function parseDiffTree(stdout: string): SinceChange[] {
+export function parseDiffTree(stdout: string): TreeChange[] {
 	const parts = stdout.split('\0');
-	const changes: SinceChange[] = [];
+	const changes: TreeChange[] = [];
 	for (let i = 0; i + 1 < parts.length; i += 2) {
 		const letter = parts[i];
 		const file = parts[i + 1];
 		if (!letter || !file) {
 			continue;
 		}
-		const status: SinceStatus = letter === 'A' ? 'A' : letter === 'D' ? 'D' : 'M';
+		const status: TreeStatus = letter === 'A' ? 'A' : letter === 'D' ? 'D' : 'M';
 		changes.push({ status, path: file });
 	}
 	return changes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-/** What changed between two trees; undefined when git refuses (the old tree was pruned). */
-export async function diffTrees(shell: RemoteShell, toplevel: string, from: string, to: string): Promise<SinceChange[] | undefined> {
-	const res = await shell.run(['git', '-C', toplevel, 'diff-tree', '-r', '-z', '--no-renames', '--name-status', from, to], { timeoutMs: GIT_TIMEOUT_MS });
-	return res.exitCode === 0 ? parseDiffTree(res.stdout.toString('utf8')) : undefined;
+// ── Span snapshots: nothing is written to the repo's .git ───────────────────
+
+/**
+ * The whole working state (tracked and untracked, not ignored) as a tree,
+ * written to the span directory `$2` (toplevel `$1`). Nothing reaches the
+ * repo's `.git`: the index is a copy in the span directory, and new blobs and
+ * trees go to `$2/objects`. The repo's own objects are not visible here at all
+ * (no alternate, so `write-tree --missing-ok`): with them as an alternate, git
+ * "freshens" (touches the mtime of) every existing object it would write
+ * again, e.g. a racily clean file's blob or a reverted file's. The index is
+ * copied from the real one only at span start, which keeps its stat cache so
+ * `add -A` hashes only files that changed; `touch -r` keeps the copy's mtime,
+ * since git judges a "racily clean" entry (a file written in the same second as
+ * the index) against the index file's mtime. The end snapshot reuses the
+ * span's index.
+ */
+export const SPAN_SNAPSHOT_SCRIPT = `set -e
+top=$1; d=$2
+mkdir -p "$d/objects"
+gi=$(git -C "$top" rev-parse --git-path index); case $gi in /*) ;; *) gi=$top/$gi ;; esac
+if [ ! -f "$d/index" ] && [ -f "$gi" ]; then cp "$gi" "$d/index"; touch -r "$gi" "$d/index"; fi
+export GIT_INDEX_FILE="$d/index" GIT_OBJECT_DIRECTORY="$d/objects"
+git -c core.fsmonitor=false -C "$top" add -A
+git -c core.fsmonitor=false -C "$top" write-tree --missing-ok
+`;
+
+/**
+ * What changed between the span's two trees (`$3`, `$4`): the span's objects,
+ * and the repo's (`rev-parse --git-path objects`, relative in a plain repo,
+ * absolute in a linked worktree) as an alternate for the subtrees the
+ * snapshots did not rewrite. Reading never writes or freshens.
+ */
+export const SPAN_DIFF_SCRIPT = `set -e
+top=$1; d=$2
+o=$(git -C "$top" rev-parse --git-path objects); case $o in /*) ;; *) o=$top/$o ;; esac
+export GIT_INDEX_FILE="$d/index" GIT_OBJECT_DIRECTORY="$d/objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$o"
+git -c core.fsmonitor=false -C "$top" diff-tree -r -z --no-renames --name-status "$3" "$4"
+`;
+
+/** Where span directories go, in the environment. */
+const SPAN_MKTEMP_SCRIPT = 'mktemp -d "${TMPDIR:-/tmp}/herdr-vscode-span.XXXXXX"';
+
+/** Span directories a closed or reloaded window left behind, a day old. */
+export const SPAN_CLEANUP_SCRIPT = `find "\${TMPDIR:-/tmp}" -maxdepth 1 -name 'herdr-vscode-span.*' -mmin +1440 -exec rm -rf {} +`;
+
+function failure(res: { exitCode: number; stderr: Buffer }, otherwise: string): Error {
+	return new Error(firstLine(res.stderr.toString('utf8')) ?? (res.exitCode === 0 ? otherwise : `git exited with ${res.exitCode}`));
 }
 
-/** Commits on HEAD since `baseHead` (all of them when it is empty); undefined when git cannot say. */
-export async function countCommits(shell: RemoteShell, toplevel: string, baseHead: string): Promise<number | undefined> {
-	const range = baseHead ? `${baseHead}..HEAD` : 'HEAD';
-	const res = await shell.run(['git', '-C', toplevel, 'rev-list', '--count', range], { timeoutMs: GIT_TIMEOUT_MS });
-	const count = Number(res.stdout.toString('utf8').trim());
-	return res.exitCode === 0 && Number.isInteger(count) ? count : undefined;
+/** Takes a snapshot of `toplevel` into the span directory; the tree SHA. Throws with git's first stderr line. */
+export async function spanSnapshot(shell: RemoteShell, toplevel: string, spanDir: string): Promise<string> {
+	const res = await shell.run(['sh', '-c', SPAN_SNAPSHOT_SCRIPT, 'sh', toplevel, spanDir], { timeoutMs: GIT_TIMEOUT_MS });
+	const tree = res.stdout.toString('utf8').trim();
+	if (res.exitCode !== 0 || !/^[0-9a-f]{40,64}$/.test(tree)) {
+		throw failure(res, 'unexpected output from git');
+	}
+	return tree;
+}
+
+/** The span's two trees diffed, with its objects. Throws with git's first stderr line. */
+export async function spanDiff(shell: RemoteShell, toplevel: string, spanDir: string, from: string, to: string): Promise<TreeChange[]> {
+	const res = await shell.run(['sh', '-c', SPAN_DIFF_SCRIPT, 'sh', toplevel, spanDir, from, to], { timeoutMs: GIT_TIMEOUT_MS });
+	if (res.exitCode !== 0) {
+		throw failure(res, 'git failed');
+	}
+	return parseDiffTree(res.stdout.toString('utf8'));
+}
+
+/** A new span directory in the environment's temp directory. */
+export async function makeSpanDir(shell: RemoteShell): Promise<string> {
+	const res = await shell.run(['sh', '-c', SPAN_MKTEMP_SCRIPT], { timeoutMs: GIT_TIMEOUT_MS });
+	const dir = res.stdout.toString('utf8').trim();
+	if (res.exitCode !== 0 || !dir.startsWith('/')) {
+		throw failure(res, 'mktemp failed');
+	}
+	return dir;
+}
+
+export async function removeSpanDir(shell: RemoteShell, spanDir: string): Promise<void> {
+	await shell.run(['rm', '-rf', spanDir], { timeoutMs: GIT_TIMEOUT_MS });
+}
+
+export async function cleanupSpanDirs(shell: RemoteShell): Promise<void> {
+	await shell.run(['sh', '-c', SPAN_CLEANUP_SCRIPT], { timeoutMs: GIT_TIMEOUT_MS });
+}
+
+// ── Commits ─────────────────────────────────────────────────────────────────
+
+/** git's empty tree: the left side of a root commit's diff. */
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+/** How many commits the Commits section lists. */
+export const MAX_COMMITS = 20;
+
+export interface Commit {
+	sha: string;
+	/** Empty for a root commit. */
+	parents: string[];
+	author: string;
+	/** ms since epoch (`%at` is seconds). */
+	at: number;
+	/** `%B`, untrimmed. */
+	body: string;
+}
+
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/** `git log -z --format=%H%x1f%P%x1f%an%x1f%at%x1f%B`; malformed records are skipped. */
+export function parseLog(stdout: string): Commit[] {
+	const commits: Commit[] = [];
+	for (const record of stdout.split('\0')) {
+		const fields = record.split('\x1f');
+		if (fields.length < 5) {
+			continue;
+		}
+		const [sha, parents, author, at] = fields;
+		if (!SHA.test(sha)) {
+			continue;
+		}
+		commits.push({ sha, parents: parents.split(' ').filter(Boolean), author, at: Number(at) * 1000, body: fields.slice(4).join('\x1f') });
+	}
+	return commits;
+}
+
+/** A commit's first line, trimmed; `(no message)` when empty. */
+export function commitSubject(commit: Pick<Commit, 'body'>): string {
+	return commit.body.trim().split('\n')[0].trim() || '(no message)';
+}
+
+export interface CommitList {
+	/** HEAD's full SHA. */
+	head: string;
+	/** `vs origin/main`, or `recent`. */
+	description: string;
+	commits: Commit[];
+}
+
+/** HEAD's full SHA; undefined when there is none. */
+export async function readHeadSha(shell: RemoteShell, toplevel: string): Promise<string | undefined> {
+	const res = await shell.run(['git', '-C', toplevel, 'rev-parse', '-q', '--verify', 'HEAD'], { timeoutMs: GIT_TIMEOUT_MS });
+	const head = res.stdout.toString('utf8').trim();
+	return res.exitCode === 0 && SHA.test(head) ? head : undefined;
+}
+
+/** The branch commits are counted against: `origin/HEAD`'s target, else `main` or `master`. */
+export async function readBase(shell: RemoteShell, toplevel: string): Promise<string | undefined> {
+	const origin = await shell.run(['git', '-C', toplevel, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { timeoutMs: GIT_TIMEOUT_MS });
+	const name = origin.stdout.toString('utf8').trim();
+	if (origin.exitCode === 0 && name && name !== 'origin/HEAD') {
+		return name;
+	}
+	for (const branch of ['main', 'master']) {
+		const res = await shell.run(['git', '-C', toplevel, 'rev-parse', '-q', '--verify', `refs/heads/${branch}`], { timeoutMs: GIT_TIMEOUT_MS });
+		if (res.exitCode === 0) {
+			return branch;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The commits on HEAD since it left the base (`vs <base>`), else the most
+ * recent ones (`recent`), at most {@link MAX_COMMITS}; undefined when there is
+ * no HEAD.
+ */
+export async function readCommits(shell: RemoteShell, toplevel: string): Promise<CommitList | undefined> {
+	const head = await readHeadSha(shell, toplevel);
+	if (!head) {
+		return undefined;
+	}
+	let range = 'HEAD';
+	let description = 'recent';
+	const base = await readBase(shell, toplevel);
+	if (base) {
+		const mbRes = await shell.run(['git', '-C', toplevel, 'merge-base', 'HEAD', base], { timeoutMs: GIT_TIMEOUT_MS });
+		const mb = mbRes.stdout.toString('utf8').trim();
+		if (mbRes.exitCode === 0 && SHA.test(mb) && mb !== head) {
+			range = `${mb}..HEAD`;
+			description = `vs ${base}`;
+		}
+	}
+	const log = await shell.run(['git', '-C', toplevel, 'log', '-z', '-n', String(MAX_COMMITS), '--format=%H%x1f%P%x1f%an%x1f%at%x1f%B', range], {
+		timeoutMs: GIT_TIMEOUT_MS,
+	});
+	return { head, description, commits: log.exitCode === 0 ? parseLog(log.stdout.toString('utf8')) : [] };
+}
+
+/** The files a commit changed against its first parent (all of them for a root commit); undefined when git refuses. */
+export async function readCommitFiles(shell: RemoteShell, toplevel: string, commit: Pick<Commit, 'sha' | 'parents'>): Promise<TreeChange[] | undefined> {
+	const parent = commit.parents[0];
+	// A single commit argument prints its SHA first unless --no-commit-id.
+	const args = parent ? [parent, commit.sha] : ['--no-commit-id', '--root', commit.sha];
+	const res = await shell.run(['git', '-C', toplevel, 'diff-tree', '-r', '-z', '--no-renames', '--name-status', ...args], { timeoutMs: GIT_TIMEOUT_MS });
+	return res.exitCode === 0 ? parseDiffTree(res.stdout.toString('utf8')) : undefined;
 }
 
 // ── Worktrees ───────────────────────────────────────────────────────────────
@@ -294,16 +457,4 @@ export function statusLetter(xy: string): StatusLetter {
 		return { badge: 'A', tooltip: 'Added', color: 'gitDecoration.addedResourceForeground' };
 	}
 	return { badge: 'M', tooltip: 'Modified', color: 'gitDecoration.modifiedResourceForeground' };
-}
-
-/** A since-letter as a badge. */
-export function sinceLetter(status: SinceStatus): StatusLetter {
-	switch (status) {
-		case 'A':
-			return { badge: 'A', tooltip: 'Added', color: 'gitDecoration.addedResourceForeground' };
-		case 'D':
-			return { badge: 'D', tooltip: 'Deleted', color: 'gitDecoration.deletedResourceForeground' };
-		default:
-			return { badge: 'M', tooltip: 'Modified', color: 'gitDecoration.modifiedResourceForeground' };
-	}
 }
