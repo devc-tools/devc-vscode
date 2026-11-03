@@ -1,6 +1,7 @@
 {
   "name": "workspace-folders-vscode",
   "displayName": "Workspace Folders",
+  "publisher": "devc-tools",
   "description": "Pin folders and Git repos with their worktrees, tick the ones you want, and apply them as the window's workspace folders.",
   "repository": {
     "type": "git",

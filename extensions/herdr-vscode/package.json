@@ -1,6 +1,7 @@
 {
   "name": "herdr-vscode",
   "displayName": "herdr",
+  "publisher": "devc-tools",
   "description": "herdr sessions, spaces, agents and panes in VS Code.",
   "repository": {
     "type": "git",
