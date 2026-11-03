@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- The **Workspace Folders** view moved to its own extension, `workspace-folders-vscode`. Its commands are now `workspaceFolders.*`, and pins made in devc-vscode are not carried over.
+
 ### Changed
 
 - A linked Git worktree added as a workspace folder by Focus Features…, Focus on Active Agents, Add Active herdr Space to Workspace or the Workspace Folders view is named `repo/folder`, such as `project/feature-a`, instead of its bare folder name.

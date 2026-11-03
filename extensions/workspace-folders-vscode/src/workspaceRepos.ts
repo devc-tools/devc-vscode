@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { Feature, compareFeatures, featureAt } from './features';
-import { Git, localWorktrees } from './workspaceSync';
+import { Git, localWorktrees } from './git';
 
 // No vscode import: the Workspace Folders view's logic, tested under plain mocha.
 

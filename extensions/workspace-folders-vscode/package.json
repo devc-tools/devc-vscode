@@ -1,0 +1,134 @@
+{
+  "name": "workspace-folders-vscode",
+  "displayName": "Workspace Folders",
+  "description": "Pin folders and Git repos with their worktrees, tick the ones you want, and apply them as the window's workspace folders.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devc-tools/devc-vscode.git"
+  },
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "workspaceFolders.pin",
+        "title": "Pin Folder…",
+        "category": "Workspace Folders",
+        "icon": "$(add)"
+      },
+      {
+        "command": "workspaceFolders.unpin",
+        "title": "Unpin",
+        "category": "Workspace Folders",
+        "icon": "$(close)"
+      },
+      {
+        "command": "workspaceFolders.apply",
+        "title": "Apply",
+        "category": "Workspace Folders",
+        "icon": "$(check)"
+      },
+      {
+        "command": "workspaceFolders.discard",
+        "title": "Discard Changes",
+        "category": "Workspace Folders",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "workspaceFolders.refresh",
+        "title": "Refresh",
+        "category": "Workspace Folders",
+        "icon": "$(refresh)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "workspaceFolders.view",
+          "name": "Workspace Folders"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "workspaceFolders.pin",
+          "when": "view == workspaceFolders.view",
+          "group": "navigation@1"
+        },
+        {
+          "command": "workspaceFolders.apply",
+          "when": "view == workspaceFolders.view && workspaceFolders.pending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "workspaceFolders.discard",
+          "when": "view == workspaceFolders.view && workspaceFolders.pending",
+          "group": "navigation@3"
+        },
+        {
+          "command": "workspaceFolders.refresh",
+          "when": "view == workspaceFolders.view",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "workspaceFolders.unpin",
+          "when": "view == workspaceFolders.view && viewItem =~ /^pinned/",
+          "group": "inline"
+        },
+        {
+          "command": "workspaceFolders.unpin",
+          "when": "view == workspaceFolders.view && viewItem =~ /^pinned/",
+          "group": "1_pin"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "workspaceFolders.unpin",
+          "when": "false"
+        },
+        {
+          "command": "workspaceFolders.apply",
+          "when": "workspaceFolders.pending"
+        },
+        {
+          "command": "workspaceFolders.discard",
+          "when": "workspaceFolders.pending"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "package:dev": "npx vsce package -o workspace-folders-vscode-dev.vsix && code --install-extension workspace-folders-vscode-dev.vsix",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}

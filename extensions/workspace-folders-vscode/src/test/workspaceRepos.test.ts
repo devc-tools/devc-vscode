@@ -12,7 +12,7 @@ import {
   sortPinned,
   togglePending,
 } from '../workspaceRepos';
-import { makeGit } from '../workspaceSync';
+import { makeGit } from '../git';
 
 // No vscode import: this suite also runs under plain mocha
 // (`npx mocha --ui tdd out/test/workspaceRepos.test.js`).
@@ -45,7 +45,7 @@ suite('workspace repos: git', function () {
   });
 
   setup(async () => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devc-repos-')));
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-folders-')));
     alpha = path.join(tmp, 'alpha');
     fs.mkdirSync(path.join(alpha, 'sub'), { recursive: true });
     await run(alpha, 'init', '-q', '-b', 'main');
