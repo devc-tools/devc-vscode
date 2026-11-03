@@ -1,0 +1,293 @@
+{
+  "name": "remote-files-vscode",
+  "displayName": "Remote Files",
+  "publisher": "devc-tools",
+  "description": "Browse and edit files in running dev containers and on SSH hosts from an Explorer view.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devc-tools/devc-vscode.git"
+  },
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onFileSystem:remotefs-container",
+    "onFileSystem:remotefs-ssh"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "remoteFiles.refresh",
+        "title": "Refresh",
+        "category": "Remote Files",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "remoteFiles.showAllFiles",
+        "title": "Show All Files",
+        "category": "Remote Files",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "remoteFiles.showWorkspacesOnly",
+        "title": "Show Only /workspaces",
+        "category": "Remote Files",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "remoteFiles.addSshHost",
+        "title": "Add SSH Host…",
+        "category": "Remote Files",
+        "icon": "$(add)"
+      },
+      {
+        "command": "remoteFiles.terminalHere",
+        "title": "Terminal Here",
+        "category": "Remote Files",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "remoteFiles.newFile",
+        "title": "New File…",
+        "category": "Remote Files"
+      },
+      {
+        "command": "remoteFiles.newFolder",
+        "title": "New Folder…",
+        "category": "Remote Files"
+      },
+      {
+        "command": "remoteFiles.rename",
+        "title": "Rename…",
+        "category": "Remote Files"
+      },
+      {
+        "command": "remoteFiles.delete",
+        "title": "Delete",
+        "category": "Remote Files"
+      },
+      {
+        "command": "remoteFiles.copyPath",
+        "title": "Copy Path",
+        "category": "Remote Files"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "remoteFiles.tree",
+          "name": "Remote Files"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "remoteFiles.tree",
+        "contents": "No running dev containers or SSH hosts.\n[Add SSH Host…](command:remoteFiles.addSshHost)",
+        "when": "true"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "remoteFiles.refresh",
+          "when": "view == remoteFiles.tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "remoteFiles.showAllFiles",
+          "when": "view == remoteFiles.tree && !remoteFiles.showAllFiles",
+          "group": "navigation@2"
+        },
+        {
+          "command": "remoteFiles.showWorkspacesOnly",
+          "when": "view == remoteFiles.tree && remoteFiles.showAllFiles",
+          "group": "navigation@2"
+        },
+        {
+          "command": "remoteFiles.addSshHost",
+          "when": "view == remoteFiles.tree",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "remoteFiles.terminalHere",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(container|sshHost)$/",
+          "group": "inline"
+        },
+        {
+          "command": "remoteFiles.newFile",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(container|sshHost|directory)$/",
+          "group": "1_new@1"
+        },
+        {
+          "command": "remoteFiles.newFolder",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(container|sshHost|directory)$/",
+          "group": "1_new@2"
+        },
+        {
+          "command": "remoteFiles.rename",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(directory|file)$/",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "remoteFiles.delete",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(directory|file)$/",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "remoteFiles.copyPath",
+          "when": "view == remoteFiles.tree && viewItem != sshError",
+          "group": "3_copy@1"
+        },
+        {
+          "command": "remoteFiles.terminalHere",
+          "when": "view == remoteFiles.tree && viewItem =~ /^(container|sshHost|directory|file)$/",
+          "group": "4_terminal@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "remoteFiles.terminalHere",
+          "when": "false"
+        },
+        {
+          "command": "remoteFiles.newFile",
+          "when": "false"
+        },
+        {
+          "command": "remoteFiles.newFolder",
+          "when": "false"
+        },
+        {
+          "command": "remoteFiles.rename",
+          "when": "false"
+        },
+        {
+          "command": "remoteFiles.delete",
+          "when": "false"
+        },
+        {
+          "command": "remoteFiles.copyPath",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "remoteFiles.rename",
+        "key": "f2",
+        "when": "focusedView == remoteFiles.tree && !inputFocus"
+      },
+      {
+        "command": "remoteFiles.delete",
+        "key": "delete",
+        "when": "focusedView == remoteFiles.tree && !inputFocus"
+      }
+    ],
+    "resourceLabelFormatters": [
+      {
+        "scheme": "remotefs-container",
+        "formatting": {
+          "label": "container: ${query.label} › ${path}",
+          "separator": "/"
+        }
+      },
+      {
+        "scheme": "remotefs-ssh",
+        "formatting": {
+          "label": "ssh: ${authority} › ${path}",
+          "separator": "/"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Remote Files",
+      "properties": {
+        "remoteFiles.sshHosts": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "host"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              "root": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          },
+          "markdownDescription": "SSH hosts shown in Remote Files. `host` is an alias from `~/.ssh/config`; `root` is the absolute remote directory the tree starts at (default: the remote home); `label` is shown instead of the host. Use **Add SSH Host…** to pick from `~/.ssh/config`."
+        },
+        "remoteFiles.sshPath": {
+          "type": "string",
+          "scope": "application",
+          "default": "ssh",
+          "description": "ssh client: a name on PATH or an absolute path. Blank means ssh."
+        },
+        "remoteFiles.dockerPath": {
+          "type": "string",
+          "scope": "application",
+          "default": "docker",
+          "description": "Docker CLI: a name on PATH or an absolute path. Blank means docker."
+        },
+        "remoteFiles.containers": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "workspace",
+            "all"
+          ],
+          "default": "workspace",
+          "enumDescriptions": [
+            "Dev containers whose project folder is an open workspace folder or under one.",
+            "Every running dev container."
+          ],
+          "description": "Which running dev containers are shown in Remote Files."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "package:dev": "npx vsce package -o remote-files-vscode-dev.vsix && code --install-extension remote-files-vscode-dev.vsix",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6",
+    "glob": "^14.0.3",
+    "minimatch": "^11.0.3"
+  }
+}

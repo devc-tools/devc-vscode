@@ -95,4 +95,4 @@
 | 29 | [herdr-sidebar-clarity.md](herdr-sidebar-clarity.md) | Active Pane header identity, tab switch follows pane, one git format, Sessions on demand (depends on phases 27 and 28) | implemented, manual checks pending |
 | 30 | [herdr-session-picker.md](herdr-session-picker.md) | Sessions view removed: picker select / start / stop / delete / new; Select Session welcome; Active Pane Changes always shown (depends on phase 29) | implemented, manual checks pending |
 | 31 | [herdr-window-title.md](herdr-window-title.md) | `herdr.windowTitle`: window title from the active tab's repo — space tab's active pane or the file's nearest repo (depends on phase 26) | implemented, manual checks pending |
-| 32 | [remote-files-extension.md](remote-files-extension.md) | New remote-files-vscode extension: dev container and SSH file browsing, file ops, Add SSH Host…, Terminal Here | |
+| 32 | [remote-files-extension.md](remote-files-extension.md) | New remote-files-vscode extension: dev container and SSH file browsing, file ops, Add SSH Host…, Terminal Here | implemented, manual checks pending |

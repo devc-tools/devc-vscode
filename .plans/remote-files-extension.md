@@ -39,17 +39,17 @@ Sources:
 
 ## Checklist
 
-- [ ] 1. Scaffold `extensions/remote-files-vscode/` from `workspace-folders-vscode` (tsc build, not esbuild): `package.json`, `package-lock.json`, `tsconfig.json`, `eslint.config.mjs`, `.vscode-test.mjs`, `.vscode/`, `.vscodeignore`, `.npmrc`, `.nvmrc`, `LICENSE`, `README.md`, `CHANGELOG.md`
-- [ ] 2. Port `remoteShell.ts`, `docker.ts`, `sshHosts.ts`, `sshConfig.ts` with their tests
-- [ ] 3. Port `remoteFs.ts` (providers + `ChangePoller`) with the new schemes and messages; port its tests
-- [ ] 4. `containers.ts`: discovery with the `remoteFiles.containers` scope, remote user lookup
-- [ ] 5. `tree.ts`: roots, children, Show All Files, `getParent`, drag-and-drop; port the tree tests
-- [ ] 6. Commands: Refresh, Show All Files / Show Only /workspaces, New File, New Folder, Rename, Delete, Copy Path, Add SSH Host…, Terminal Here; menus and keybindings
-- [ ] 7. `terminals.ts` + Terminal Here, with tests for the argv builders
-- [ ] 8. Live refresh: docker events, workspace folder changes, settings changes
-- [ ] 9. Workspace-folder guard for both schemes
-- [ ] 10. Docs: extension `README.md`, `CHANGELOG.md`, root `README.md` bullet
-- [ ] 11. Validation (below)
+- [x] 1. Scaffold `extensions/remote-files-vscode/` from `workspace-folders-vscode` (tsc build, not esbuild): `package.json`, `package-lock.json`, `tsconfig.json`, `eslint.config.mjs`, `.vscode-test.mjs`, `.vscode/`, `.vscodeignore`, `.npmrc`, `.nvmrc`, `LICENSE`, `README.md`, `CHANGELOG.md`
+- [x] 2. Port `remoteShell.ts`, `docker.ts`, `sshHosts.ts`, `sshConfig.ts` with their tests
+- [x] 3. Port `remoteFs.ts` (providers + `ChangePoller`) with the new schemes and messages; port its tests
+- [x] 4. `containers.ts`: discovery with the `remoteFiles.containers` scope, remote user lookup
+- [x] 5. `tree.ts`: roots, children, Show All Files, `getParent`, drag-and-drop; port the tree tests
+- [x] 6. Commands: Refresh, Show All Files / Show Only /workspaces, New File, New Folder, Rename, Delete, Copy Path, Add SSH Host…, Terminal Here; menus and keybindings
+- [x] 7. `terminals.ts` + Terminal Here, with tests for the argv builders
+- [x] 8. Live refresh: docker events, workspace folder changes, settings changes
+- [x] 9. Workspace-folder guard for both schemes
+- [x] 10. Docs: extension `README.md`, `CHANGELOG.md`, root `README.md` bullet
+- [x] 11. Validation (below)
 
 ## Contracts
 
@@ -304,20 +304,20 @@ Run it on activation and on every `onDidChangeWorkspaceFolders`.
 
 Run from `extensions/remote-files-vscode/`.
 
-- [ ] `npm ci && npm run compile && npm run lint` pass with no errors.
-- [ ] `npx mocha --ui tdd out/test/sshHosts.test.js out/test/sshConfig.test.js out/test/terminals.test.js out/test/remoteShell.test.js` passes. These modules import no `vscode`. The tests cover:
+- [x] `npm ci && npm run compile && npm run lint` pass with no errors.
+- [x] `npx mocha --ui tdd out/test/sshHosts.test.js out/test/sshConfig.test.js out/test/terminals.test.js out/test/remoteShell.test.js` passes. These modules import no `vscode`. The tests cover:
   - `parseSshHosts`: valid entries, bad host, relative root, duplicate (case-insensitive), label trimming.
   - `sshConfigAliases`: `Include`, wildcards skipped.
   - The container terminal args with and without a user.
   - The SSH terminal args: safety options, control options present or absent, `shQuote` of a dir with a `'` in it.
   - `sshFailure` on exit 255.
-- [ ] `npm test` (vscode-test) passes. It includes the ported tests:
+- [x] `npm test` (vscode-test) passes. In this dev container the default user-data dir under `.vscode-test/` makes VS Code's IPC socket path too long (`listen EINVAL … 1.14-main.sock`); it was run as `xvfb-run -a npx vscode-test` with a throwaway config adding `launchArgs: ['--user-data-dir', '/tmp/rfs-ud/u']` (72 passing). It includes the ported tests:
   - Tree tests: roots, `/workspaces` narrowing, `getParent` for both schemes, drop move vs copy, overwrite prompt, subtree refusal.
   - `remoteFs` tests: unknown authority refused without spawning, `whenKnown`, `ChangePoller`.
   - Discovery tests on fake `docker ps` output for both `remoteFiles.containers` values.
-- [ ] `grep -rn "devc-vscode\.\|herdr\.\|devc-ssh\|herdr-ssh\|herdr-container" src package.json` prints only the `// Ported from` header lines. No command, setting, scheme or context key from another extension is used.
-- [ ] `node -e 'const c=require("./package.json").contributes; const ids=new Set(c.commands.map(x=>x.command)); for (const m of Object.values(c.menus).flat()) if(!ids.has(m.command)) throw m.command; console.log("ok")'` prints `ok`.
-- [ ] `git diff --stat -- ../devc-vscode ../herdr-vscode` is empty.
+- [x] `grep -rn "devc-vscode\.\|herdr\.\|devc-ssh\|herdr-ssh\|herdr-container" src package.json` prints only the `// Ported from` header lines. No command, setting, scheme or context key from another extension is used.
+- [x] `node -e 'const c=require("./package.json").contributes; const ids=new Set(c.commands.map(x=>x.command)); for (const m of Object.values(c.menus).flat()) if(!ids.has(m.command)) throw m.command; console.log("ok")'` prints `ok`.
+- [x] `git diff --stat -- ../devc-vscode ../herdr-vscode` is empty.
 - [ ] In VS Code (left to the user): with a running dev container and one reachable SSH host
   configured, both roots show, alongside devc-vscode's Sandboxes view if it is installed.
   - Opening, editing and saving a file works over both schemes.
