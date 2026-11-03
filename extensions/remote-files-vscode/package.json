@@ -75,6 +75,12 @@
         "command": "remoteFiles.copyPath",
         "title": "Copy Path",
         "category": "Remote Files"
+      },
+      {
+        "command": "remoteFiles.reloadEditor",
+        "title": "Reload Remote File",
+        "category": "Remote Files",
+        "icon": "$(refresh)"
       }
     ],
     "views": {
@@ -176,6 +182,24 @@
         {
           "command": "remoteFiles.copyPath",
           "when": "false"
+        },
+        {
+          "command": "remoteFiles.reloadEditor",
+          "when": "resourceScheme =~ /^remotefs-(container|ssh)$/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "remoteFiles.reloadEditor",
+          "when": "resourceScheme =~ /^remotefs-(container|ssh)$/",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "remoteFiles.reloadEditor",
+          "when": "resourceScheme =~ /^remotefs-(container|ssh)$/",
+          "group": "1_close@99"
         }
       ]
     },

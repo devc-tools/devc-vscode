@@ -9,6 +9,8 @@ The **Remote Files** view lists running dev containers first, then the SSH hosts
 
 Click a file to open it. Editors on remote files reload when the file changes on the other side (checked every 5 s), and save back in place.
 
+To fetch the latest right away, click **Reload Remote File** (the refresh icon in a remote editor's title bar, also on its tab's right-click menu and in the Command Palette). Polling compares `stat`'s modification time (one-second resolution) and size, so a same-size change within the same second can slip past it; the reload always re-reads the file. If the editor has unsaved changes, you're asked before they're discarded.
+
 Right-click a row for:
 
 - **New File…** and **New Folder…** (on roots and folders)
@@ -52,7 +54,7 @@ Self-contained like the other extensions in `extensions/`: its own `package.json
 ```sh
 npm install
 npm run compile
-npx mocha --ui tdd out/test/sshHosts.test.js out/test/sshConfig.test.js out/test/terminals.test.js out/test/remoteShell.test.js out/test/containers.test.js   # no VS Code needed
+npx mocha --ui tdd out/test/reload.test.js out/test/sshHosts.test.js out/test/sshConfig.test.js out/test/terminals.test.js out/test/remoteShell.test.js out/test/containers.test.js   # no VS Code needed
 npm test                    # every suite, in a VS Code test host
 npm run package:dev         # builds remote-files-vscode-dev.vsix and installs it with `code`
 ```

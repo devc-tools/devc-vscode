@@ -21,6 +21,7 @@ import {
   SshShell,
   ensureControlDir,
 } from './remoteShell';
+import { reloadEditor } from './reload';
 import { sshConfigAliases } from './sshConfig';
 import { SshHostInfo, findSshHost, parseSshHosts } from './sshHosts';
 import {
@@ -135,6 +136,9 @@ export function activate(context: vscode.ExtensionContext): void {
   register('remoteFiles.rename', (node?: RemoteNode) => renameEntry(node));
   register('remoteFiles.delete', (node?: RemoteNode) => deleteEntries(node));
   register('remoteFiles.copyPath', (node?: RemoteNode) => copyPath(node));
+  register('remoteFiles.reloadEditor', (uri?: vscode.Uri) =>
+    reloadRemoteEditor(uri)
+  );
 
   guardWorkspaceFolders();
   containers.refresh();
@@ -562,6 +566,63 @@ function setShowAllFiles(showAll: boolean): void {
     SHOW_ALL_FILES_CONTEXT,
     showAll
   );
+}
+
+// ── Reload Remote File ──────────────────────────────────────────────────────
+
+/**
+ * Re-read a remote editor's file: the tab the editor title or tab menu was
+ * used on, else the active editor.
+ */
+async function reloadRemoteEditor(arg?: vscode.Uri): Promise<void> {
+  const uri =
+    arg instanceof vscode.Uri
+      ? arg
+      : vscode.window.activeTextEditor?.document.uri;
+  if (!uri || !isRemoteScheme(uri.scheme)) {
+    return;
+  }
+  const key = uri.toString();
+  const doc = vscode.workspace.textDocuments.find(
+    d => d.uri.toString() === key
+  );
+  if (!doc) {
+    return;
+  }
+  const name = posix.basename(uri.path);
+  // The group the tab is in, so showing it doesn't open a second copy in
+  // whichever group happens to be active.
+  const group = vscode.window.tabGroups.all.find(g =>
+    g.tabs.some(
+      t =>
+        t.input instanceof vscode.TabInputText &&
+        t.input.uri.toString() === key
+    )
+  );
+  try {
+    await reloadEditor({
+      isDirty: () => doc.isDirty,
+      confirmDiscard: async () =>
+        (await vscode.window.showWarningMessage(
+          `Discard unsaved changes and reload ${name}?`,
+          { modal: true },
+          'Reload'
+        )) === 'Reload',
+      show: async () => {
+        await vscode.window.showTextDocument(doc, {
+          viewColumn: group?.viewColumn,
+          preserveFocus: false,
+        });
+      },
+      revert: async () => {
+        await vscode.commands.executeCommand('workbench.action.files.revert');
+      },
+    });
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Could not reload ${name}: ${(err as Error).message}`
+    );
+  }
 }
 
 // ── Terminal Here ───────────────────────────────────────────────────────────

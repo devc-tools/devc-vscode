@@ -473,3 +473,43 @@ suite('change polling', () => {
 		}
 	});
 });
+
+suite('Reload Remote File in VS Code', () => {
+  test('revert re-reads a clean editor even when stat shows no change', async function () {
+    this.timeout(20000);
+    let content = 'one';
+    let reads = 0;
+    const emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+    const provider: vscode.FileSystemProvider = {
+      onDidChangeFile: emitter.event,
+      watch: () => new vscode.Disposable(() => undefined),
+      // The same mtime and size every time: what polling can't tell apart.
+      stat: () => ({ type: vscode.FileType.File, ctime: 1000, mtime: 1000, size: 3 }),
+      readDirectory: () => [],
+      createDirectory: () => undefined,
+      readFile: () => {
+        reads++;
+        return Buffer.from(content);
+      },
+      writeFile: () => undefined,
+      delete: () => undefined,
+      rename: () => undefined,
+    };
+    const scheme = 'remotefs-reloadtest';
+    const registration = vscode.workspace.registerFileSystemProvider(scheme, provider);
+    try {
+      const uri = vscode.Uri.from({ scheme, path: '/notes.txt' });
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc);
+      assert.strictEqual(doc.getText(), 'one');
+      const before = reads;
+      content = 'two';
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      assert.ok(reads > before, 'read again');
+      assert.strictEqual(doc.getText(), 'two');
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      registration.dispose();
+    }
+  });
+});
