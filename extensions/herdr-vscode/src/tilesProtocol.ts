@@ -64,6 +64,8 @@ export type TileStreamState =
 export type HostMessage =
 	| { type: 'init'; state: PanelState }
 	| { type: 'font'; fontFamily: string; fontSize: number }
+	/** `terminal.integrated.copyOnSelection`. */
+	| { type: 'copyOnSelection'; enabled: boolean }
 	| { type: 'layout'; config: StoredLayoutConfig }
 	/** No layout: every tile goes away and `text` is shown instead. */
 	| { type: 'empty'; text: string }

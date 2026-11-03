@@ -52,6 +52,7 @@ let pendingFocus: string | undefined;
 let pendingAnnounce = false;
 let nextSerial = 0;
 let font: { fontFamily: string; fontSize: number } | undefined;
+let copyOnSelection = false;
 
 const messageEl = document.getElementById('message') as HTMLElement;
 const stripEl = document.getElementById('strip') as HTMLElement;
@@ -192,6 +193,13 @@ function createTile(paneKey: string): Tile {
 		},
 		true,
 	);
+
+	// `terminal.integrated.copyOnSelection`: a finished drag copies, as in VS Code's terminal.
+	term.onSelectionChange(() => {
+		if (copyOnSelection && term.hasSelection()) {
+			post({ type: 'clipboardCopy', text: term.getSelection() });
+		}
+	});
 
 	// Ctrl+Shift+C/V off the Mac, where plain Ctrl+C/V belong to the app. VS Code keeps the browser
 	// from pasting by itself, and has other uses for the keys, so they end here.
@@ -1075,6 +1083,9 @@ window.addEventListener('message', (ev: MessageEvent<HostMessage>) => {
 				tile.term.options.fontSize = msg.fontSize;
 				fitTile(tile);
 			}
+			break;
+		case 'copyOnSelection':
+			copyOnSelection = msg.enabled;
 			break;
 		case 'layout':
 			// A new tree is never maximised, and saying so to herdr would unzoom it: `zoom` follows.

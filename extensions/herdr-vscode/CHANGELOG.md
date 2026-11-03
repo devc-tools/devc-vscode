@@ -4,6 +4,8 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Copy on select in tiles**: with `terminal.integrated.copyOnSelection` on, a drag in a tile copies the selected
+  text, as in VS Code's terminal.
 - **Space tab icon is visible in dark themes**: it was drawn black on any theme.
 - **Window title from the active tab's repo** (`herdr.windowTitle`, off by default): in a saved `.code-workspace`, the
   window title can name the branch of the active herdr space tab's pane, or of the repo holding the active editor's

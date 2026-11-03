@@ -246,6 +246,10 @@ abstract class TilesPanel implements PaneViewer {
 
 	sendFont(): void {
 		this.post({ type: 'font', ...terminalFont() });
+		this.post({
+			type: 'copyOnSelection',
+			enabled: vscode.workspace.getConfiguration('terminal.integrated').get<boolean>('copyOnSelection') ?? false,
+		});
 	}
 
 	/** Test support: what the webview shows, optionally after a key press or click in a tile. */

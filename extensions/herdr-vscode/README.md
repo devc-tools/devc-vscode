@@ -73,7 +73,7 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
 
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
-  Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
+  Mac, `Cmd+C/V` on it; or on selection with `terminal.integrated.copyOnSelection`). A multi-line paste goes as one bracketed paste.
 - **New Space** (Spaces title bar) creates a space in herdr and opens it. It first asks for the
   directory: the session's spaces' folders, VS Code's workspace folders and home are listed, or type a path
   (`/…`, `~/…`) or **Browse…** (in a dev container or over SSH, the environment's own files).

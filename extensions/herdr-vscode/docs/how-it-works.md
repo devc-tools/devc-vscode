@@ -360,7 +360,9 @@ raw. Handling matches devc web's (`devc/web/static/renderer.js`, `tiles.js`):
   as pixels, so a notch is 3 cell heights of accumulated `deltaY`; the remainder carries until the
   direction reverses. xterm has no scrollback of its own (`scrollback: 0`): herdr owns it, and
   scrolling repaints through frames.
-- Mouse clicks are not forwarded. A drag makes xterm's local selection.
+- Mouse clicks are not forwarded. A drag makes xterm's local selection. With
+  `terminal.integrated.copyOnSelection` on, each selection change posts `clipboardCopy`, as VS Code's
+  terminal does; the host sends the setting with the font.
 
 VS Code specifics: xterm stops the propagation of every key it turns into input, so those never
 reach VS Code's keybindings (`Ctrl+P` goes to the app, as in a terminal). Keys it does not handle,
