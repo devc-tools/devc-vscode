@@ -68,6 +68,7 @@ export class SpaceGit implements vscode.Disposable {
 	private session: string | undefined;
 	private dirs = new Map<string, string>();
 	private visible = false;
+	private readonly viewsVisible = new Map<string, boolean>();
 	private debounce: NodeJS.Timeout | undefined;
 	private interval: NodeJS.Timeout | undefined;
 	private disposed = false;
@@ -78,8 +79,13 @@ export class SpaceGit implements vscode.Disposable {
 		private readonly timing = { passMs: PASS_MS, debounceMs: DEBOUNCE_MS },
 	) {}
 
-	/** The view's state: the selected session, its snapshot, and whether Spaces is visible. */
-	update(sessionKey: string | undefined, snapshot: Snapshot | undefined, visible: boolean): void {
+	/**
+	 * A view's state: the selected session, its snapshot, and whether that view
+	 * (`source`: Spaces or Sessions) is visible. Git runs while any view is.
+	 */
+	update(sessionKey: string | undefined, snapshot: Snapshot | undefined, viewVisible: boolean, source: 'spaces' | 'sessions' = 'spaces'): void {
+		this.viewsVisible.set(source, viewVisible);
+		const visible = [...this.viewsVisible.values()].some((v) => v);
 		const dirs = new Map<string, string>();
 		if (sessionKey && snapshot) {
 			for (const w of snapshot.workspaces) {

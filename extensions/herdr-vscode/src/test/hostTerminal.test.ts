@@ -65,7 +65,10 @@ suite('host terminal', () => {
 		const palette = manifest.contributes.menus.commandPalette.find((m) => m.command === 'herdr.openHostTerminal');
 		assert.strictEqual(palette?.when, HOST_FOLDER_CONTEXT_KEY);
 		const row = manifest.contributes.menus['view/item/context'].filter((m) => m.command === 'herdr.openHostTerminal');
-		assert.deepStrictEqual(row, [{ command: 'herdr.openHostTerminal', when: 'view == herdr.spaces && viewItem == herdr.space.container', group: 'inline@0' }]);
+		assert.deepStrictEqual(row, [
+			{ command: 'herdr.openHostTerminal', when: 'view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running container/', group: 'inline@0' },
+			{ command: 'herdr.openHostTerminal', when: 'view =~ /^herdr\\.(spaces|sessions)$/ && viewItem == herdr.space.container', group: 'inline@0' },
+		]);
 		const close = manifest.contributes.menus['view/item/context'].find((m) => m.command === 'herdr.closeSpace')!;
 		const closes = (value: string) => new RegExp(/viewItem =~ \/(.*)\//.exec(close.when!)![1]).test(value);
 		assert.ok(closes('herdr.space') && closes('herdr.space.container') && !closes('herdr.tab'));

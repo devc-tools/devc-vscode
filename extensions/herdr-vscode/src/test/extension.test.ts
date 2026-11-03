@@ -14,12 +14,12 @@ suite('herdr-vscode', () => {
 		assert.strictEqual(ext.isActive, true);
 	});
 
-	test('contributes and registers the Spaces, Agents and Active Pane views', async () => {
+	test('contributes and registers the Sessions, Spaces, Agents and Active Pane views', async () => {
 		const ext = extension();
 		const views = ext.packageJSON.contributes.views.herdr as { id: string }[];
 		assert.deepStrictEqual(
 			views.map((v) => v.id),
-			['herdr.spaces', 'herdr.agents', 'herdr.paneContext'],
+			['herdr.sessions', 'herdr.spaces', 'herdr.agents', 'herdr.paneContext'],
 		);
 		await ext.activate();
 		// Opening a view resolves its registered provider; an unregistered view would fail to focus.
@@ -120,7 +120,19 @@ suite('herdr-vscode', () => {
 			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
 				.filter((c) => !c.startsWith('herdr.paneContext.')),
-			['herdr.openHostTerminal', 'herdr.closeSpace', 'herdr.closeTab', 'herdr.closePane', 'herdr.openPaneTab', 'herdr.focusPane'],
+			[
+				'herdr.openHostTerminal',
+				'herdr.newSpace',
+				'herdr.sessions.start',
+				'herdr.sessions.stop',
+				'herdr.sessions.delete',
+				'herdr.openHostTerminal',
+				'herdr.closeSpace',
+				'herdr.closeTab',
+				'herdr.closePane',
+				'herdr.openPaneTab',
+				'herdr.focusPane',
+			],
 		);
 		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
 		assert.strictEqual(focus?.title, 'Focus in herdr TUI');

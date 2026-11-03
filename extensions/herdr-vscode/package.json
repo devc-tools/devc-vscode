@@ -15,6 +15,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onView:herdr.sessions",
     "onView:herdr.spaces",
     "onView:herdr.agents",
     "onView:herdr.paneContext",
@@ -38,6 +39,10 @@
     "views": {
       "herdr": [
         {
+          "id": "herdr.sessions",
+          "name": "Sessions"
+        },
+        {
           "id": "herdr.spaces",
           "name": "Spaces"
         },
@@ -52,6 +57,10 @@
       ]
     },
     "viewsWelcome": [
+      {
+        "view": "herdr.sessions",
+        "contents": "No herdr sessions.\n[New Session](command:herdr.sessions.new)"
+      },
       {
         "view": "herdr.spaces",
         "contents": "No session selected.\n[Select Session](command:herdr.sessions.switch)",
@@ -304,6 +313,35 @@
         "title": "Switch Session",
         "category": "herdr",
         "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "herdr.sessions.select",
+        "title": "Select Session",
+        "category": "herdr"
+      },
+      {
+        "command": "herdr.sessions.start",
+        "title": "Start Session",
+        "category": "herdr",
+        "icon": "$(play)"
+      },
+      {
+        "command": "herdr.sessions.stop",
+        "title": "Stop Session",
+        "category": "herdr",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "herdr.sessions.delete",
+        "title": "Delete Session",
+        "category": "herdr",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "herdr.sessions.new",
+        "title": "New Session…",
+        "category": "herdr",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -362,37 +400,77 @@
           "command": "herdr.paneContext.refresh",
           "when": "view == herdr.paneContext",
           "group": "navigation@3"
+        },
+        {
+          "command": "herdr.sessions.new",
+          "when": "view == herdr.sessions",
+          "group": "navigation@0"
+        },
+        {
+          "command": "herdr.newSpace",
+          "when": "view == herdr.sessions && herdr.sessionSelected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "herdr.refresh",
+          "when": "view == herdr.sessions",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "herdr.openHostTerminal",
-          "when": "view == herdr.spaces && viewItem == herdr.space.container",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running container/",
+          "group": "inline@0"
+        },
+        {
+          "command": "herdr.newSpace",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running /",
+          "group": "inline@1"
+        },
+        {
+          "command": "herdr.sessions.start",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.stopped (host|container)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "herdr.sessions.stop",
+          "when": "view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running host/",
+          "group": "inline@2"
+        },
+        {
+          "command": "herdr.sessions.delete",
+          "when": "view == herdr.sessions && viewItem =~ /deletable/",
+          "group": "inline@3"
+        },
+        {
+          "command": "herdr.openHostTerminal",
+          "when": "view =~ /^herdr\\.(spaces|sessions)$/ && viewItem == herdr.space.container",
           "group": "inline@0"
         },
         {
           "command": "herdr.closeSpace",
-          "when": "view == herdr.spaces && viewItem =~ /^herdr\\.space(\\.container)?$/",
+          "when": "view =~ /^herdr\\.(spaces|sessions)$/ && viewItem =~ /^herdr\\.space(\\.container)?$/",
           "group": "inline@1"
         },
         {
           "command": "herdr.closeTab",
-          "when": "view == herdr.spaces && viewItem == herdr.tab",
+          "when": "view =~ /^herdr\\.(spaces|sessions)$/ && viewItem == herdr.tab",
           "group": "inline@1"
         },
         {
           "command": "herdr.closePane",
-          "when": "view =~ /^herdr\\.(spaces|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|sessions|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "inline@1"
         },
         {
           "command": "herdr.openPaneTab",
-          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|sessions|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "navigation@2"
         },
         {
           "command": "herdr.focusPane",
-          "when": "view =~ /^herdr\\.(spaces|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "when": "view =~ /^herdr\\.(spaces|sessions|agents|paneContext)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
           "group": "navigation@3"
         },
         {
@@ -592,6 +670,22 @@
         },
         {
           "command": "herdr.closePane",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.select",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.start",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.stop",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.delete",
           "when": "false"
         }
       ],

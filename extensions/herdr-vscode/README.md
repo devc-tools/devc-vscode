@@ -1,8 +1,8 @@
 # herdr-vscode
 
 herdr sessions, spaces, agents and panes in VS Code, for people who already use
-[herdr](https://herdr.dev). The **herdr** activity-bar container has three views (Spaces, Agents, Active Pane),
-and sessions are picked from **Switch Session**:
+[herdr](https://herdr.dev). The **herdr** activity-bar container has four views (Sessions, Spaces, Agents, Active Pane),
+and sessions are picked from **Sessions** or **Switch Session**:
 
 - **Switch Session** (`$(arrow-swap)` in the Spaces title bar, the session in the status bar, **Select Session**
   in Spaces while none is selected, or the command palette): every herdr session on this machine, on the SSH
@@ -26,6 +26,16 @@ and sessions are picked from **Switch Session**:
   Active Pane, tile headers and the focused-pane status bar item) Claude Code, GitHub Copilot, pi and
   OpenCode panes show their agent's mark, coloured like the status dot, instead of the dot; other agents
   keep the dot. Agent pane rows and tile headers show the pane's folder after the name.
+- **Sessions**: every session, running ones under **Running** and stopped ones (and places that can't be used:
+  `unreachable`, `herdr not installed`, `herdr not running`) under **Stopped**. The description says where a session
+  runs and how its agents are doing: nothing for this machine, `ssh devbox · 1 done`, `dev container · idle`,
+  `dev container · herdr not running`. A running session expands to the same space, tab and pane rows as Spaces.
+  - Click a running session to select it; the selected one is highlighted and expanded, and only its spaces show
+    branch and git status.
+  - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's
+    running ones, **Delete** on any but herdr's default session (both ask first), **New Space** in a running session,
+    and **Open Host Terminal** on a dev container's. The title bar has **New Session…**, **New Space**, **Refresh** and
+    **Collapse All**.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
   their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or

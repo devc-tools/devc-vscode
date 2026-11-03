@@ -30,6 +30,13 @@ export interface SessionRowNode {
 	groupId: string;
 	/** A listed session other than herdr's default one: it can be deleted. */
 	deletable?: boolean;
+	/** The environment's kind and, on SSH, its alias. */
+	envKind: Environment['kind'];
+	alias?: string;
+	/** The status alone, without the container session name: agent counts, `stopped`, `connecting…`, `herdr not running`, … */
+	statusText: string;
+	/** An environment-level row (no listed session): why, as {@link EnvState.status}; `ok` is herdr not running. */
+	envStatus?: EnvState['status'];
 }
 
 export type SessionsNode = GroupNode | SessionRowNode;
@@ -85,6 +92,10 @@ export function sessionRows(
 		contextValue: 'herdr.session.absent',
 		tooltip: tooltip ?? env.key,
 		groupId,
+		envKind: env.kind,
+		alias: env.alias,
+		statusText: description,
+		envStatus: state.status,
 	});
 	if (state.status !== 'ok') {
 		return [absent(ENV_DESCRIPTION[state.status], state.message ? `${env.key}\n${state.message}` : undefined)];
@@ -97,21 +108,19 @@ export function sessionRows(
 		}
 		const key = sessionKey(env.key, s.name);
 		const conn = s.running ? connection(key) : undefined;
-		let description: string;
+		let statusText: string;
 		if (!s.running) {
-			description = 'stopped';
+			statusText = 'stopped';
 		} else if (conn?.state === 'connected' && conn.snapshot) {
-			description = snapshotDescription(conn.snapshot);
+			statusText = snapshotDescription(conn.snapshot);
 		} else if (conn?.state === 'unsupported') {
-			description = 'needs herdr 0.9.5 or later';
+			statusText = 'needs herdr 0.9.5 or later';
 		} else if (conn?.state === 'disconnected') {
-			description = 'disconnected';
+			statusText = 'disconnected';
 		} else {
-			description = 'connecting…';
+			statusText = 'connecting…';
 		}
-		if (env.kind === 'container' && s.name !== DEVC_SESSION) {
-			description = `${s.name} · ${description}`;
-		}
+		const description = env.kind === 'container' && s.name !== DEVC_SESSION ? `${s.name} · ${statusText}` : statusText;
 		const version = conn?.snapshot?.version;
 		rows.push({
 			type: 'session',
@@ -125,6 +134,9 @@ export function sessionRows(
 			snapshot: conn?.state === 'connected' ? conn.snapshot : undefined,
 			groupId,
 			deletable: !s.default,
+			envKind: env.kind,
+			alias: env.alias,
+			statusText,
 		});
 	}
 	if (rows.length > 0) {
@@ -134,6 +146,40 @@ export function sessionRows(
 	return env.kind === 'container'
 		? [{ ...absent('herdr not running'), session: DEVC_SESSION, contextValue: 'herdr.session.stopped' }]
 		: [absent('herdr not running')];
+}
+
+/** The Sessions tree section a row goes under. */
+export function sessionTreeSection(row: Pick<SessionRowNode, 'contextValue'>): 'running' | 'stopped' {
+	return row.contextValue === 'herdr.session.running' ? 'running' : 'stopped';
+}
+
+/**
+ * A Sessions tree row's description: where it runs (nothing for this machine,
+ * `ssh <alias>`, `dev container`), a container's session name unless `devc`,
+ * then its status; the parts that are non-empty, joined with ` · `.
+ */
+export function sessionTreeDescription(
+	row: Pick<SessionRowNode, 'key' | 'envKey' | 'session' | 'contextValue' | 'envKind' | 'alias' | 'statusText'>,
+): string {
+	const envLevel = row.key === `${row.envKey}/`;
+	let where: string | undefined;
+	if (row.envKind === 'ssh') {
+		where = envLevel ? 'ssh' : `ssh ${row.alias ?? ''}`.trim();
+	} else if (row.envKind === 'container') {
+		where = 'dev container';
+	}
+	const name = !envLevel && row.envKind === 'container' && row.session !== DEVC_SESSION ? row.session : undefined;
+	let status: string | undefined = row.statusText;
+	if (!envLevel && row.contextValue === 'herdr.session.stopped') {
+		status = row.envKind === 'ssh' ? 'start not supported' : undefined;
+	}
+	return [where, name, status].filter((x): x is string => !!x).join(' · ');
+}
+
+/** A Sessions tree row's context value: `herdr.session.<state> <kind>[ deletable]`. */
+export function sessionTreeContextValue(row: Pick<SessionRowNode, 'contextValue' | 'envKind' | 'deletable'>): string {
+	const deletable = row.deletable && row.contextValue !== 'herdr.session.absent' ? ' deletable' : '';
+	return `${row.contextValue} ${row.envKind}${deletable}`;
 }
 
 /**
@@ -331,6 +377,11 @@ export class SessionList implements vscode.Disposable {
 			}
 		}
 		return undefined;
+	}
+
+	/** Every row, in environment order. */
+	allRows(): SessionRowNode[] {
+		return this.groups.flatMap((g) => this.rows.get(g.id) ?? []);
 	}
 
 	/** Switch Session's entries now. */

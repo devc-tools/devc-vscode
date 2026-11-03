@@ -109,6 +109,26 @@ when its session stops and when its environment goes away.
   An environment that has no session row to show (none running, herdr not installed,
   unreachable, error) gets one row with that status: labelled `this machine`, the ssh alias or
   the container's folder name.
+- **Sessions** view (`herdr.sessions`, `src/views/sessionsTree.ts`): the same rows as Switch Session
+  (`SessionList.allRows`, so `herdr.showStoppedSessions` applies), split by `sessionTreeSection` into a `Running` root
+  (`herdr.session.running`) and a `Stopped` root (everything else, environment-level rows included); a root with no
+  rows is left out, and its description is its row count.
+  - Description (`sessionTreeDescription`): `[where, container session, status]` joined with ` · `, empty parts
+    dropped. `where` is nothing on this machine, `ssh <alias>` (`ssh` on an environment-level SSH row, whose label is
+    the alias) or `dev container`; the container session name is left out for `devc`; status is the agent counts,
+    the connection state, nothing for a stopped session (`start not supported` on SSH), or the environment row's text.
+  - `contextValue` (`sessionTreeContextValue`): `herdr.session.<running|stopped|absent> <host|ssh|container>`, plus
+    ` deletable`; the inline menus match it by regex. The container `herdr not running` row is
+    `herdr.session.stopped container`, so Start starts devc's session.
+  - Icons (`sessionTreeIcon`): the worst status of a connected running session; `warning` for `unreachable`,
+    `notInstalled`, `error`; `loading~spin` for `pending`; else `circle-outline`.
+  - Children: `buildSpaces` / `spacesTreeItem` for running, connected sessions, so space, tab and pane rows and their
+    menus are Spaces' (the `when`s match `view =~ /^herdr\.(spaces|sessions)$/`). Only the selected session gets a
+    git lookup: `SpaceGit` follows one session, and runs while Spaces or Sessions is visible (`update`'s `source`).
+  - The selected session's label is a `TreeItemLabel` highlighted end to end, and starts `Expanded`; other sessions
+    with spaces start `Collapsed`. VS Code keeps a user's expansion per item id, so on a selection change the view
+    `reveal`s the selected row with `expand: true` (only while visible: reveal would open a hidden view); `getParent`
+    comes from a parent map built with the rows. Clicking a running row runs `herdr.sessions.select`.
 - The selected session is stored in workspace state `herdr.selectedSession`. If it is not
   running, the selection falls back to this machine's default session, else the first running
   session, without overwriting the stored choice, so it comes back when the session does.

@@ -46,6 +46,8 @@
 
 - [Remote Files Extension](remote-files-extension.md) — a new self-contained `remote-files-vscode` extension: an Explorer tree of running dev containers and `remoteFiles.sshHosts` hosts with file operations, drag-and-drop, Add SSH Host… and Terminal Here, on providers ported from herdr-vscode; devc-vscode and herdr-vscode unchanged.
 
+- [herdr Sessions Tree](herdr-sessions-tree.md) — a Sessions view first in the sidebar: Running sessions (expandable to spaces, tabs and panes) above Stopped ones, environment in the description (`ssh devbox · 1 done`, `dev container · idle`, nothing for this machine), selected session expanded and highlighted, row buttons to start / stop / delete / add a space.
+
 ### Completed
 
 - [herdr Commit Changes](archived/herdr-commit-changes.md) — Active Pane's baseline section replaced by Uncommitted plus expandable Commits (vs the default branch, else recent), with a toggle to show only files this pane's agent changed while working. ✅ Done (manual checks pending; snapshots run without the repo as an alternate so git cannot freshen its objects)
@@ -96,3 +98,4 @@
 | 30 | [herdr-session-picker.md](herdr-session-picker.md) | Sessions view removed: picker select / start / stop / delete / new; Select Session welcome; Active Pane Changes always shown (depends on phase 29) | implemented, manual checks pending |
 | 31 | [herdr-window-title.md](herdr-window-title.md) | `herdr.windowTitle`: window title from the active tab's repo — space tab's active pane or the file's nearest repo (depends on phase 26) | implemented, manual checks pending |
 | 32 | [remote-files-extension.md](remote-files-extension.md) | New remote-files-vscode extension: dev container and SSH file browsing, file ops, Add SSH Host…, Terminal Here | implemented, manual checks pending |
+| 33 | [herdr-sessions-tree.md](herdr-sessions-tree.md) | Sessions view: Running / Stopped roots, sessions with env in description, spaces / tabs / panes under running ones (depends on phase 30) | implemented, manual checks pending |

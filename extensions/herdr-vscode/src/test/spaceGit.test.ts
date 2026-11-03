@@ -122,6 +122,25 @@ suite('space git', () => {
 			poller.dispose();
 		});
 
+		test('runs while Spaces or Sessions is visible', async () => {
+			const runs: string[] = [];
+			const poller = new SpaceGit(() => shell, async (_s, dir) => {
+				runs.push(dir);
+				return '⎇ x';
+			}, timing);
+			const s = snapshot();
+			poller.update('host/s', s, false, 'spaces');
+			poller.update('host/s', s, true, 'sessions');
+			assert.strictEqual(poller.polling, true, 'Sessions alone keeps it running');
+			await sleep(30);
+			assert.deepStrictEqual(runs.sort(), ['/src/api', '/src/web']);
+			poller.update('host/s', s, false, 'spaces');
+			assert.strictEqual(poller.polling, true, 'Spaces hidden: Sessions still visible');
+			poller.update('host/s', s, false, 'sessions');
+			assert.strictEqual(poller.polling, false);
+			poller.dispose();
+		});
+
 		test('at most 4 at a time; a space still running is skipped', async () => {
 			let active = 0;
 			let peak = 0;

@@ -31,6 +31,7 @@ import {
 	SWITCH_SESSION_COMMAND,
 	validateSessionName,
 } from './views/sessionsView';
+import { SELECT_SESSION_COMMAND, SessionsTreeView } from './views/sessionsTree';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 import { LocalShell } from './remoteShell';
 import { WindowTitleController } from './windowTitle';
@@ -105,6 +106,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 	);
 	const spaceGit = new SpaceGit((key) => m.connection(key)?.env.shell);
+	const sessionsTree = new SessionsTreeView(sessions, (key) => m.connection(key)?.snapshot, spaceGit, sidebarConfig);
 	const spaces = new SpacesView(
 		sessions,
 		(key) => m.connection(key)?.snapshot,
@@ -157,6 +159,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	updateSessionBar();
 	context.subscriptions.push(
 		spaceGit,
+		sessionsTree,
 		spaces,
 		agents,
 		statusBar,
@@ -393,8 +396,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
 		vscode.commands.registerCommand(SWITCH_SESSION_COMMAND, () => pickSession(sessionActions)),
-		vscode.commands.registerCommand('herdr.newSpace', async () => {
-			const key = sessions.selected;
+		vscode.commands.registerCommand(SELECT_SESSION_COMMAND, (key?: string) => key && sessions.select(key)),
+		vscode.commands.registerCommand('herdr.sessions.start', (row?: SessionRowNode) => row && sessionActions.start(row)),
+		vscode.commands.registerCommand('herdr.sessions.stop', (row?: SessionRowNode) => row && sessionActions.stop(row)),
+		vscode.commands.registerCommand('herdr.sessions.delete', (row?: SessionRowNode) => row && sessionActions.remove(row)),
+		vscode.commands.registerCommand('herdr.sessions.new', () => sessionActions.create()),
+		// From a Sessions row, in that session; else in the selected one.
+		vscode.commands.registerCommand('herdr.newSpace', async (row?: SessionRowNode) => {
+			const key = row?.type === 'session' ? row.key : sessions.selected;
 			if (!key) {
 				return;
 			}
@@ -413,8 +422,9 @@ export function activate(context: vscode.ExtensionContext): void {
 				warn(err);
 			}
 		}),
-		vscode.commands.registerCommand('herdr.openHostTerminal', async (node?: SpaceNode) => {
-			const key = node?.sessionKey ?? sessions.selected;
+		vscode.commands.registerCommand('herdr.openHostTerminal', async (arg?: SpaceNode | SessionRowNode) => {
+			const node = arg?.type === 'space' ? arg : undefined;
+			const key = arg?.type === 'session' ? arg.key : (node?.sessionKey ?? sessions.selected);
 			const env = key ? m.connection(key)?.env : undefined;
 			if (!env) {
 				return;
