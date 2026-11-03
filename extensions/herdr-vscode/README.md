@@ -267,7 +267,7 @@ id; an agents section with only `rows_by_agent` leaves other agents' rows as the
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).
 
-herdr-vscode lives in the devc-vscode repo, in its own folder beside `devc-vscode/`, and is a
+herdr-vscode lives in the devc-vscode repo, in its own folder, `extensions/herdr-vscode/`, beside `extensions/devc-vscode/`, and is a
 self-contained extension: its own `package.json`, lockfile, `node_modules`, build and tests.
 Nothing is shared with devc-vscode at build time (a few helpers are copied, see
 `src/remoteShell.ts`), and both extensions can be installed side by side.
@@ -306,5 +306,5 @@ over a made-up model, so they need the build, and reach no herdr. `src/test/pane
   this machine's `/tmp/herdr-vscode/review`, and are removed afterwards. Keep `<dir>` short: herdr's socket path must fit in `sun_path` (about 100
   bytes).
 
-Open `herdr-vscode/` as the folder in VS Code and press <kbd>F5</kbd> (**Run Extension**) to build
+Open `extensions/herdr-vscode/` as the folder in VS Code and press <kbd>F5</kbd> (**Run Extension**) to build
 it and open an Extension Development Host with it loaded.
