@@ -203,7 +203,11 @@ abstract class TilesPanel implements PaneViewer {
 		protected readonly deps: TilesDeps,
 		icon: string,
 	) {
-		panel.iconPath = vscode.Uri.joinPath(deps.extensionUri, 'resources', icon);
+		// Tab icons render as <img>, so currentColor would resolve to black; ship fixed-color variants.
+		panel.iconPath = {
+			light: vscode.Uri.joinPath(deps.extensionUri, 'resources', `${icon}-light.svg`),
+			dark: vscode.Uri.joinPath(deps.extensionUri, 'resources', `${icon}-dark.svg`),
+		};
 		panel.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [vscode.Uri.joinPath(deps.extensionUri, 'dist', 'webview')],
@@ -408,7 +412,7 @@ export class MirrorPanel extends TilesPanel {
 		deps: TilesDeps,
 		private readonly legacyTabId?: string,
 	) {
-		super(panel, deps, 'herdr.svg');
+		super(panel, deps, 'herdr');
 		this.disposables.push(
 			this.resolveEmitter,
 			deps.model.onDidChange(() => this.sync()),
