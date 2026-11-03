@@ -17,6 +17,8 @@ export interface Environment {
 	containerId?: string;
 	/** The container's remote user, when it has one. */
 	user?: string;
+	/** A dev container's `devcontainer.local_folder`: its project folder on this machine. */
+	localFolder?: string;
 }
 
 export const HOST_KEY = 'host';
@@ -237,6 +239,7 @@ export class Environments implements vscode.Disposable {
 				label: containerDisplayName(c.localFolder),
 				containerId: c.id,
 				user,
+				localFolder: c.localFolder,
 				shell: new DockerShell(c.id, user, dockerPath),
 			});
 		}

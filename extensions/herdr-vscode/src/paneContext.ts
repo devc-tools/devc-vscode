@@ -331,6 +331,8 @@ export interface PaneContextDeps {
 	touched?: TouchedStore;
 	/** Whether the change sections start out showing only the pane's files. */
 	paneFilesOnly?: boolean;
+	/** Records what a working pane's agent changed so far (`TouchedRecorder.checkpoint`). */
+	checkpoint?: (paneKey: string) => Promise<void>;
 	/** The git markers of the followed repo. */
 	decorations?: Pick<PaneDecorations, 'set'>;
 	/** The clock, for tests. */
@@ -443,6 +445,9 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		if (on !== this.paneFilesOnlyNow) {
 			this.paneFilesOnlyNow = on;
 			this.emitter.fire();
+			if (on && this.loaded) {
+				void this.deps.checkpoint?.(this.loaded.paneKey);
+			}
 		}
 	}
 
@@ -549,6 +554,9 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.filesGroup = undefined;
 		}
 		this.loaded = { paneKey, env, dir, rootPath, rootUri, toplevel, git, commits, mounts };
+		if (this.paneFilesOnlyNow) {
+			void this.deps.checkpoint?.(paneKey);
+		}
 		this.setWatchedRoot(rootUri);
 		this.pushDecorations();
 		this.emitter.fire();
@@ -634,6 +642,10 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		}
 		this.polling = true;
 		try {
+			if (this.paneFilesOnlyNow) {
+				// While the agent works, its files so far: a span is recorded only when it ends.
+				await this.deps.checkpoint?.(loaded.paneKey);
+			}
 			await this.checkDirectory(loaded);
 			if (this.loaded === loaded && loaded.toplevel) {
 				const git = await readStatus(loaded.env.shell, loaded.toplevel);

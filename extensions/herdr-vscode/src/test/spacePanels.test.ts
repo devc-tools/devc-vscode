@@ -277,13 +277,25 @@ suite('space panels', function () {
 		]);
 	});
 
-	test('a closed space says so', async () => {
+	test('a closed space closes its editor tab', async () => {
 		const web = panels.openSpace(S, 'w1');
 		await showing(web, 'w1:p1');
+		let disposed = false;
+		web.panel.onDidDispose(() => (disposed = true));
 		herdr.snap = { ...herdr.snap, workspaces: herdr.snap.workspaces.filter((w) => w.workspace_id !== 'w1'), tabs: herdr.snap.tabs.filter((t) => t.workspace_id !== 'w1') };
 		herdr.events.fire({ sessionKey: S, event: { event: 'workspace.closed', data: { workspace_id: 'w1' } } });
-		await waitFor('closed text', async () => (await web.probe()).message === 'This herdr space was closed.');
-		assert.strictEqual(web.showsPane(S, 'w1:p1'), false);
+		await waitFor('editor tab closed', () => disposed);
+		assert.strictEqual(panels.showsPane(S, 'w1:p1'), false);
+	});
+
+	test('a space gone from the snapshot, with no event, closes its editor tab', async () => {
+		const web = panels.openSpace(S, 'w1');
+		await showing(web, 'w1:p1');
+		let disposed = false;
+		web.panel.onDidDispose(() => (disposed = true));
+		herdr.snap = { ...herdr.snap, workspaces: herdr.snap.workspaces.filter((w) => w.workspace_id !== 'w1'), tabs: herdr.snap.tabs.filter((t) => t.workspace_id !== 'w1') };
+		herdr.changed.fire();
+		await waitFor('editor tab closed', () => disposed);
 	});
 
 	test('an older build\'s tab state restores as that tab\'s space, without focusing the tab', async () => {

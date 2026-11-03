@@ -4,6 +4,7 @@ import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
 import { PaneDecorations } from './decorations';
 import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
+import { HOST_FOLDER_CONTEXT_KEY, openHostTerminal } from './hostTerminal';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { applyPaneFilesOnly, ChangeNode, CommitFileNode, PANE_CONTEXT_VIEW, PANE_FILES_ONLY_KEY, PaneContextNode, PaneContextView, storedPaneFilesOnly } from './paneContext';
@@ -129,9 +130,15 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 	const statusBar = new BlockedStatusBar();
 	const sessionBar = new SessionStatusBar();
+	let hostFolderContext: boolean | undefined;
 	const updateSessionBar = () => {
 		const key = sessions.selected;
 		const conn = key ? m.connection(key) : undefined;
+		const hostFolder = !!conn?.env.localFolder;
+		if (hostFolder !== hostFolderContext) {
+			hostFolderContext = hostFolder;
+			void vscode.commands.executeCommand('setContext', HOST_FOLDER_CONTEXT_KEY, hostFolder);
+		}
 		sessionBar.update(
 			key && conn
 				? {
@@ -182,6 +189,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		log,
 		touched,
 		paneFilesOnly,
+		checkpoint: (paneKey) => recorder.checkpoint(paneKey),
 		decorations,
 	});
 	context.subscriptions.push(
@@ -388,6 +396,13 @@ export function activate(context: vscode.ExtensionContext): void {
 				await openCreatedTab(key, await m.request(key, 'workspace.create', { cwd, focus: false }));
 			} catch (err) {
 				warn(err);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.openHostTerminal', () => {
+			const key = sessions.selected;
+			const env = key ? m.connection(key)?.env : undefined;
+			if (env) {
+				openHostTerminal(env);
 			}
 		}),
 		vscode.commands.registerCommand('herdr.closeSpace', (node?: SpaceNode) =>

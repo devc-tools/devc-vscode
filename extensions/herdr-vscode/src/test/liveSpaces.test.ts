@@ -164,23 +164,24 @@ function controlledPanes(): string[] {
 		await waitFor('closed in strip', 3000, async () => (await panel.probe()).strip.length === 1);
 	});
 
-	test('closing the shown tab, then the last tab: measured; a closed space says so', async () => {
+	test('closing the shown tab, then the last tab: measured; a closed space closes its editor tab', async () => {
 		await req('tab.focus', { tab_id: two.tab });
 		await waitFor('two shown', 2000, async () => JSON.stringify(await tilesOf()) === JSON.stringify([pk(two.pane)]));
 		await panel.closeTab(two.tab, false);
 		await waitFor('one shown again', 3000, async () => JSON.stringify(await tilesOf()) === JSON.stringify([pk(one.pane)]));
+		let disposed = false;
+		panel.panel.onDidDispose(() => (disposed = true));
 		const lastClose = await req('tab.close', { tab_id: one.tab }).then(
 			(r) => `ok ${JSON.stringify(r).slice(0, 200)}`,
 			(e: Error) => `error ${e.message}`,
 		);
 		await sleep(500);
 		const spaceLeft = snap().workspaces.some((w) => w.workspace_id === workspaceId);
-		const message = (await panel.probe()).message;
-		console.log(`[live-spaces] closing a space's last tab: ${lastClose}; space still there: ${spaceLeft}; panel: "${message}"`);
+		console.log(`[live-spaces] closing a space's last tab: ${lastClose}; space still there: ${spaceLeft}; editor tab closed: ${disposed}`);
 		if (spaceLeft) {
 			await req('workspace.close', { workspace_id: workspaceId });
 		}
-		await waitFor('closed message', 3000, async () => (await panel.probe()).message === 'This herdr space was closed.');
+		await waitFor('editor tab closed', 3000, () => disposed);
 		await waitFor('no controllers', 5000, () => !controlledPanes().some((p) => p === one.pane || p === two.pane));
 	});
 });

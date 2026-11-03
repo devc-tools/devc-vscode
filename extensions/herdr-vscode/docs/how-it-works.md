@@ -270,9 +270,10 @@ tree as JSON with every `ratio` and `cwd` removed), the ratios by path key, and 
 an element that is moved into the new component, and restores the keyboard focus afterwards. A
 pane no longer in the layout has its terminal disposed and its stream closed.
 
-A session that is not connected shows *Connecting to …*; after 10 s, or when the session has no
-such space (`workspace.closed`, a snapshot without it), the panel shows *This herdr space was
-closed.* with every terminal gone and its streams released. If the session or space comes back, so
+A session that is not connected shows *Connecting to …*; after 10 s, or when a restored panel's
+space is not in the session, the panel shows *This herdr space was closed.* with every terminal
+gone and its streams released. A space the panel has seen in a connected snapshot that then goes
+(`workspace.closed`, or a connected snapshot without it) disposes the panel: the editor tab closes. If the session or space comes back, so
 does the layout. This one path also serves restoring after a reload: the webview keeps
 `{"kind":"space","sessionKey","workspaceId"}` with `setState`, and the serializer hands that to a
 new panel. A second restored panel of a space already open is disposed. State saved by builds where
@@ -562,6 +563,13 @@ agent, or leaves the snapshot. Its toplevel comes from `foreground_cwd ?? cwd` (
 `<env key>\n<dir>`); outside a repo nothing is recorded. Snapshots of one `<env key>\n<toplevel>` run one at a time, in a
 queue, and an end waits for its start. Spans are not persisted.
 
+**Checkpoints.** A span records only at its end, so while the filter is on Active Pane asks the recorder for a checkpoint
+of the followed pane (`TouchedRecorder.checkpoint`): when a pane loads, when the filter is turned on, and on each 5 s poll.
+A checkpoint with an open span snapshots the worktree into the span's directory (in the same queue), and when the tree
+differs from the last checkpoint's (or the start's) diffs start → now and adds those paths to the store; the span stays
+open, and its end still diffs against the start. One checkpoint per span runs at a time; a span whose end has begun takes
+none, so no snapshot runs after its directory is removed. A path changed and then reverted mid-span stays recorded.
+
 **Nothing is written to the repo's `.git`.** Each span has a directory, `mktemp -d "${TMPDIR:-/tmp}/herdr-vscode-span.XXXXXX"`
 in the pane's environment, removed after the end's diff whether it worked or not. The snapshot (`sh -c <script> sh <toplevel>
 <span dir>`, start and end):
@@ -615,6 +623,14 @@ Changes keeps rows in `T` (an untracked `dir/` row when a path in `T` is under i
 `T`, its description gaining ` · this pane`. An empty section shows `Nothing recorded for this pane`. A shell pane's sections
 are unfiltered, each with the note `No agent in this pane: showing all changes` first. Files is never filtered. A recording
 refreshes the view while the filter is on.
+
+### Host terminal
+
+**Open Host Terminal** (`herdr.openHostTerminal`, `src/hostTerminal.ts`) uses the selected session's environment: a dev
+container's carries its `devcontainer.local_folder` (`localFolder`, from `docker ps`). The context key
+`herdr.sessionHasHostFolder` is true while the selected session has one; it gates the Spaces title button and the palette
+entry. The command opens `vscode.window.createTerminal({ name: "<folder name> (host)", cwd: <localFolder>, location:
+Panel })` and shows it. A folder that is not a directory on this machine (Docker on another host) warns instead.
 
 ### Git markers
 

@@ -32,6 +32,9 @@ and sessions are picked from **Switch Session**:
   a tab to open its space on that tab; click a pane to open its space on the pane's tab and focus its tile.
   Clicking a space or tab makes Active Pane and the status bar follow that tab's pane (herdr's focused pane
   there, else its first). Space rows expand with their arrow.
+- **Open Host Terminal** (`$(terminal)` in the Spaces title bar, or the command palette) while a dev container
+  session is selected: a terminal on this machine in the container's project folder (its
+  `devcontainer.local_folder`), in the panel at the bottom.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
   tooltip); click it to switch session.
 
@@ -61,7 +64,8 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
   moves the TUI to that space.
 - **+** on the strip creates a tab in the space, in the focused tile's directory, and shows it. **×** on an
   entry closes that tab in herdr, after asking, because its processes end. Double-click an entry to rename it.
-  Closing a space's last tab closes the space; the editor tab then says *This herdr space was closed.*
+  Closing a space's last tab closes the space, and its editor tab closes with it. So does closing the space
+  from **Spaces**, the herdr TUI or anywhere else.
 - Clicking a tab in **Spaces** opens its space on that tab. Clicking a pane or agent row (or **Open in herdr
   Space** in its context menu) does the same for the pane's tab and focuses its tile.
 
@@ -138,6 +142,7 @@ changes nothing.
   and Commits to the files this pane's agent changed while it was **working**: herdr-vscode snapshots the worktree
   when an agent starts and stops working, in every connected session, whether or not this view is open. Git cannot
   say which process changed a file, so two agents working in one worktree at the same time see each other's files.
+  While the filter is on and the agent is still working, its files so far show too, checked on each 5 s refresh.
   A reload mid-span loses what changed before it. Kept per pane and repo until the pane closes or a week passes. A
   shell pane shows everything, with a note. The snapshots go to a temporary directory: **nothing is written to the
   repo's `.git`**.

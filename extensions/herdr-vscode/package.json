@@ -224,6 +224,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "herdr.openHostTerminal",
+        "title": "Open Host Terminal",
+        "category": "herdr",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "herdr.closeSpace",
         "title": "Close Space",
         "category": "herdr",
@@ -316,6 +322,11 @@
           "command": "herdr.newSpace",
           "when": "view == herdr.spaces && herdr.sessionSelected",
           "group": "navigation@1"
+        },
+        {
+          "command": "herdr.openHostTerminal",
+          "when": "view == herdr.spaces && herdr.sessionHasHostFolder",
+          "group": "navigation@2"
         },
         {
           "command": "herdr.agents.scopeSession",
@@ -521,6 +532,10 @@
         {
           "command": "herdr.newSpace",
           "when": "herdr.sessionSelected"
+        },
+        {
+          "command": "herdr.openHostTerminal",
+          "when": "herdr.sessionHasHostFolder"
         },
         {
           "command": "herdr.askAgent",

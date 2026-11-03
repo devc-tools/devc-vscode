@@ -343,6 +343,7 @@ suite('pane context: the view over a temp repo', function () {
 	let decorated: (RepoDecorations | undefined)[];
 	let now: number;
 	let logged: string[];
+	let checkpoints: string[];
 
 	const git = (cwd: string, ...args: string[]) => cp.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
 
@@ -366,6 +367,10 @@ suite('pane context: the view over a temp repo', function () {
 			log: (line) => logged.push(line),
 			touched,
 			paneFilesOnly,
+			checkpoint: (paneKey) => {
+				checkpoints.push(paneKey);
+				return Promise.resolve();
+			},
 			decorations: { set: (repo) => decorated.push(repo) },
 			now: () => now,
 		});
@@ -410,6 +415,7 @@ suite('pane context: the view over a temp repo', function () {
 		paneFilesOnly = false;
 		decorated = [];
 		logged = [];
+		checkpoints = [];
 		now = new Date(2026, 9, 31, 10, 31).getTime();
 	});
 
@@ -859,6 +865,26 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual((await group('changes'))!.description, '3');
 		assert.strictEqual((await group('commits'))!.description, 'recent');
 		assert.deepStrictEqual(rowLabels(await commitRows()), ['three', 'two', 'one']);
+	});
+
+	test("pane mode checkpoints the followed pane's open span: on load, on turning it on, and each poll; off, never", async () => {
+		view = makeView();
+		await rootIs(path.basename(dir));
+		await view.poll();
+		assert.deepStrictEqual(checkpoints, [], 'off: no checkpoints');
+		view.setPaneFilesOnly(true);
+		assert.deepStrictEqual(checkpoints, [P1], 'turning it on');
+		await view.poll();
+		assert.deepStrictEqual(checkpoints, [P1, P1], 'a poll');
+		// What a checkpoint records shows without another poll.
+		fs.writeFileSync(path.join(dir, 'README.md'), 'agent edit\n');
+		await view.poll();
+		await touched.add(P1, dir, ['README.md']);
+		await waitFor('README.md shown', async () => rowLabels(await view.getChildren((await group('changes'))!)).includes('README.md'));
+		view.setPaneFilesOnly(false);
+		const before = checkpoints.length;
+		await view.poll();
+		assert.strictEqual(checkpoints.length, before, 'off again: none');
 	});
 
 	test('pane mode with nothing recorded: the note in both sections, Changes shown even when clean', async () => {

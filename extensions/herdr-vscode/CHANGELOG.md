@@ -4,6 +4,13 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Closing a space closes its editor tab**, whether it was closed from Spaces, the herdr TUI or by closing its last tab
+  (the tab used to stay open saying *This herdr space was closed.*).
+- **Open Host Terminal** (Spaces title bar and command palette, for a dev container session): a terminal on this machine
+  in the container's project folder, in the bottom panel.
+- **Show Only This Pane's Changes shows a working agent's files**: while the filter is on, Active Pane checks what the
+  followed agent has changed so far on each refresh; before, nothing showed until the agent stopped working.
+
 - **Fewer row actions, and Close on every row**: a trash button on space, tab and pane rows in Spaces and on agent
   rows in Agents closes it in herdr, after asking. **New Tab** (space rows), **Split Right** / **Split Down** (tab and
   pane rows), **Split Pane Here**, **Terminal Here** and **Pin** / **Unpin** (Active Pane) are gone; the space strip's **+**

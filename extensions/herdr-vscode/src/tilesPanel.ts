@@ -389,6 +389,8 @@ export class MirrorPanel extends TilesPanel {
 	private afterMove = false;
 	private connectTimer: NodeJS.Timeout | undefined;
 	private spaceClosed = false;
+	/** Whether a connected snapshot has had this panel's space: its going later closes the editor tab. */
+	private spaceSeen = false;
 	/** A pane to focus once its tile is on screen. */
 	private focusWhenShown: string | undefined;
 	private readonly resolveEmitter = new vscode.EventEmitter<void>();
@@ -473,6 +475,13 @@ export class MirrorPanel extends TilesPanel {
 		this.showEmpty('This herdr space was closed.');
 	}
 
+	/** The space was closed in herdr (here or anywhere else): its editor tab goes too. */
+	private closeForGoneSpace(): void {
+		if (!this.disposedFlag) {
+			this.panel.dispose();
+		}
+	}
+
 	/** Brings the panel in line with the session model. */
 	private sync(): void {
 		if (this.disposedFlag) {
@@ -509,9 +518,14 @@ export class MirrorPanel extends TilesPanel {
 		const workspaceId = this.workspaceId;
 		const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
 		if (!space) {
-			this.showClosed();
+			if (this.spaceSeen) {
+				this.closeForGoneSpace();
+			} else {
+				this.showClosed(); // A restored tab whose space is not there (any more).
+			}
 			return;
 		}
+		this.spaceSeen = true;
 		this.spaceClosed = false;
 		const title = spaceTitle(this.sessionName, space.label);
 		if (this.panel.title !== title) {
@@ -609,7 +623,7 @@ export class MirrorPanel extends TilesPanel {
 
 	private onEvent(ev: HerdrEvent): void {
 		if (ev.event === 'workspace.closed' && this.workspaceId !== undefined && ev.data.workspace_id === this.workspaceId) {
-			this.showClosed();
+			this.closeForGoneSpace();
 			return;
 		}
 		const tabId = this.tabId;

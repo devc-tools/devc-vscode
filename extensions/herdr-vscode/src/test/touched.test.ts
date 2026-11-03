@@ -184,6 +184,44 @@ suite('touched files: the recorder over a temp repo', function () {
 		assert.deepStrictEqual(logged, []);
 	});
 
+	test('a checkpoint records the files so far while the span stays open; an unchanged worktree saves nothing; the end adds the rest', async () => {
+		const r = make();
+		let fired = 0;
+		store.onDidChange(() => fired++);
+		model.set('w2:p1', 'working');
+		await r.settled();
+		await r.checkpoint(P1);
+		assert.strictEqual(store.get(P1, dir), undefined, 'nothing changed yet');
+		fs.writeFileSync(path.join(dir, 'a.txt'), 'changed while working\n');
+		await r.checkpoint(P1);
+		assert.deepStrictEqual(store.get(P1, dir)?.paths, ['a.txt']);
+		assert.deepStrictEqual(r.openSpans(), [P1], 'the span is still open');
+		const saves = fired;
+		await r.checkpoint(P1);
+		assert.strictEqual(fired, saves, 'no save for an unchanged worktree');
+		fs.writeFileSync(path.join(dir, 'later.txt'), 'l\n');
+		model.set('w2:p1', 'idle');
+		await r.settled();
+		assert.deepStrictEqual(store.get(P1, dir)?.paths, ['a.txt', 'later.txt']);
+		await r.checkpoint(P1);
+		assert.deepStrictEqual(spanDirs(), [], 'a checkpoint after the end makes no directory');
+		assert.deepStrictEqual(logged, []);
+	});
+
+	test('a checkpoint racing the end runs no snapshot after it', async () => {
+		const r = make();
+		model.set('w2:p1', 'working');
+		await r.settled();
+		fs.writeFileSync(path.join(dir, 'x.txt'), 'x\n');
+		const pending = r.checkpoint(P1);
+		model.set('w2:p1', 'idle');
+		await pending;
+		await r.settled();
+		assert.deepStrictEqual(store.get(P1, dir)?.paths, ['x.txt']);
+		assert.deepStrictEqual(spanDirs(), []);
+		assert.deepStrictEqual(logged, []);
+	});
+
 	test('first sight while working starts a span (as after a reload); a blocked pane ends it', async () => {
 		model.snap.panes.find((p) => p.pane_id === 'w2:p1')!.raw_status = 'working';
 		const r = make();

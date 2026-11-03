@@ -181,6 +181,12 @@ interface Span {
 	paneKey: string;
 	/** undefined: not a repo, or the start failed (then nothing is recorded). */
 	started: Promise<Started | undefined>;
+	/** Set when the span's end is under way: no checkpoint snapshots after that. */
+	ended?: boolean;
+	/** The tree of the last checkpoint (or the start), so an unchanged worktree records nothing again. */
+	lastTree?: string;
+	/** The checkpoint under way, if any. */
+	checkpointing?: Promise<void>;
 }
 
 export interface TouchedRecorderDeps {
@@ -281,6 +287,7 @@ export class TouchedRecorder implements vscode.Disposable {
 		for (const [key, span] of [...this.spans]) {
 			if (!working.has(key)) {
 				this.spans.delete(key);
+				span.ended = true;
 				void this.track(this.end(span));
 			}
 		}
@@ -344,6 +351,48 @@ export class TouchedRecorder implements vscode.Disposable {
 				return undefined;
 			}
 		});
+	}
+
+	/**
+	 * Records what a working pane's agent has changed so far, without ending its
+	 * span: the worktree now against the span's start. Nothing to do for a pane
+	 * with no open span; a checkpoint already under way is shared.
+	 */
+	checkpoint(paneKey: string): Promise<void> {
+		const span = this.spans.get(paneKey);
+		if (!span || span.ended || this.disposed) {
+			return Promise.resolve();
+		}
+		span.checkpointing ??= this.track(this.runCheckpoint(span)).finally(() => (span.checkpointing = undefined));
+		return span.checkpointing;
+	}
+
+	private async runCheckpoint(span: Span): Promise<void> {
+		const started = await span.started;
+		if (!started || span.ended) {
+			return;
+		}
+		const { envKey, shell, toplevel, spanDir, tree } = started;
+		let changes: TreeChange[] | undefined;
+		try {
+			changes = await this.queued(envKey, toplevel, async () => {
+				if (span.ended) {
+					return undefined; // The end ran first and removed the span directory.
+				}
+				const now = await this.git.snapshot(shell, toplevel, spanDir);
+				if (now === (span.lastTree ?? tree)) {
+					return undefined;
+				}
+				span.lastTree = now;
+				return now === tree ? [] : await this.git.diff(shell, toplevel, spanDir, tree, now);
+			});
+		} catch (err) {
+			this.deps.log(`touched files: checkpoint in ${toplevel}: ${errorText(err)}`);
+			return;
+		}
+		if (changes && changes.length > 0 && !this.disposed) {
+			await this.deps.store.add(span.paneKey, toplevel, changes.map((c) => c.path), this.now());
+		}
 	}
 
 	private async end(span: Span): Promise<void> {
