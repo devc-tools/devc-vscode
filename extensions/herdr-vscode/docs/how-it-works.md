@@ -629,13 +629,12 @@ refreshes the view while the filter is on.
 **Open Host Terminal** (`herdr.openHostTerminal`, `src/hostTerminal.ts`) uses the selected session's environment: a dev
 container's carries its `devcontainer.local_folder` (`localFolder`, from `docker ps`). The context key
 `herdr.sessionHasHostFolder` is true while the selected session has one; it gates the Spaces title button and the palette
-entry. The command opens `vscode.window.createTerminal({ name: "<folder name>", cwd: <localFolder>, location:
-Panel })` and shows it. A folder that is not a directory on this machine (Docker on another host) warns instead.
+entry (left of New Space). The command opens `vscode.window.createTerminal({ cwd: <localFolder>, location: Panel })`
+with no `name`, so VS Code names it as any terminal (shell and folder, per `terminal.integrated.tabs.*`), and shows it. A folder that is not a directory on this machine (Docker on another host) warns instead.
 
 Space rows of a dev container session (session key `container:…`) have contextValue `herdr.space.container` (others
 `herdr.space`) and the command inline before Close Space. From a row it starts at `hostPathOf(<space directory>,
-<bind mounts>)` when the space's directory is under a bind mount, else at `localFolder`, and is named
-`<folder name> · <space>`.
+<bind mounts>)` when the space's directory is under a bind mount, else at `localFolder`.
 
 ### Git markers
 

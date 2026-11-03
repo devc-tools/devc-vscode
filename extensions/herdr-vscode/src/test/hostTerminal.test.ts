@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { HOST_FOLDER_CONTEXT_KEY, hostTerminalFolder, hostTerminalName, openHostTerminal } from '../hostTerminal';
+import { HOST_FOLDER_CONTEXT_KEY, hostTerminalFolder, openHostTerminal } from '../hostTerminal';
 import { spacesTreeItem, SpaceNode } from '../views/spacesView';
 
 type Manifest = {
@@ -25,36 +25,34 @@ suite('host terminal', () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
-	test('a dev container: a panel terminal named `<folder>` in its project folder', async () => {
-		const terminal = openHostTerminal({ label: 'my-app', localFolder: dir });
+	test('a dev container: a panel terminal in its project folder, named by VS Code', async () => {
+		const terminal = openHostTerminal({ localFolder: dir });
 		assert.ok(terminal);
 		opened.push(terminal);
-		assert.strictEqual(terminal.name, 'my-app');
-		assert.strictEqual(hostTerminalName({ label: 'x' }), 'x');
+		assert.strictEqual((terminal.creationOptions as vscode.TerminalOptions).name, undefined, 'VS Code names it (shell, folder)');
 		const options = terminal.creationOptions as vscode.TerminalOptions;
 		assert.strictEqual(typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath, dir);
 		assert.strictEqual(options.location, vscode.TerminalLocation.Panel);
 	});
 
-	test('a space: its bind-mounted directory on this machine, else the project folder; named with the space', () => {
+	test('a space: its bind-mounted directory on this machine, else the project folder', () => {
 		const mounts = [{ source: '/Users/me/src/app', destination: '/workspaces/app' }];
 		assert.strictEqual(hostTerminalFolder('/Users/me/src/app', '/workspaces/app/pkg/web', mounts), '/Users/me/src/app/pkg/web');
 		assert.strictEqual(hostTerminalFolder('/Users/me/src/app', '/home/vscode/scratch', mounts), '/Users/me/src/app', 'not mounted');
 		assert.strictEqual(hostTerminalFolder('/Users/me/src/app', undefined, mounts), '/Users/me/src/app');
 		const sub = path.join(dir, 'pkg');
 		fs.mkdirSync(sub);
-		const terminal = openHostTerminal({ label: 'my-app', localFolder: dir }, { folder: sub, space: 'web' });
+		const terminal = openHostTerminal({ localFolder: dir }, { folder: sub });
 		assert.ok(terminal);
 		opened.push(terminal);
-		assert.strictEqual(terminal.name, 'my-app · web');
 		const options = terminal.creationOptions as vscode.TerminalOptions;
 		assert.strictEqual(typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath, sub);
 	});
 
 	test('no project folder, or one not on this machine: no terminal', () => {
 		const before = vscode.window.terminals.length;
-		assert.strictEqual(openHostTerminal({ label: 'this machine' }), undefined);
-		assert.strictEqual(openHostTerminal({ label: 'gone', localFolder: path.join(dir, 'missing') }), undefined);
+		assert.strictEqual(openHostTerminal({}), undefined);
+		assert.strictEqual(openHostTerminal({ localFolder: path.join(dir, 'missing') }), undefined);
 		assert.strictEqual(vscode.window.terminals.length, before);
 	});
 

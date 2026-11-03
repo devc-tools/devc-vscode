@@ -6,11 +6,6 @@ import { BindMount, hostPathOf } from './paths';
 /** True while the selected session runs in a dev container whose project folder is known. */
 export const HOST_FOLDER_CONTEXT_KEY = 'herdr.sessionHasHostFolder';
 
-/** The host terminal's name: `<folder name>`, or `<folder name> · <space>` for a space. */
-export function hostTerminalName(env: Pick<Environment, 'label'>, space?: string): string {
-	return space ? `${env.label} · ${space}` : env.label;
-}
-
 /** Where a host terminal starts: a space's directory on this machine when it is bind-mounted, else the project folder. */
 export function hostTerminalFolder(localFolder: string, dir: string | undefined, mounts: readonly BindMount[]): string {
 	return (dir && hostPathOf(dir, mounts)) || localFolder;
@@ -22,8 +17,8 @@ export function hostTerminalFolder(localFolder: string, dir: string | undefined,
  * such folder, or the folder is not on this machine.
  */
 export function openHostTerminal(
-	env: Pick<Environment, 'label' | 'localFolder'>,
-	place: { folder?: string; space?: string } = {},
+	env: Pick<Environment, 'localFolder'>,
+	place: { folder?: string } = {},
 	exists: (dir: string) => boolean = isDirectory,
 ): vscode.Terminal | undefined {
 	const folder = env.localFolder && (place.folder ?? env.localFolder);
@@ -36,7 +31,6 @@ export function openHostTerminal(
 		return undefined;
 	}
 	const terminal = vscode.window.createTerminal({
-		name: hostTerminalName(env, place.space),
 		cwd: folder,
 		location: vscode.TerminalLocation.Panel,
 	});

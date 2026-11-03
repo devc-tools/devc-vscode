@@ -409,7 +409,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			const mounts = node.directory ? await paths.mounts(env).catch(() => []) : [];
-			openHostTerminal(env, { folder: hostTerminalFolder(env.localFolder, node.directory, mounts), space: node.label });
+			openHostTerminal(env, { folder: hostTerminalFolder(env.localFolder, node.directory, mounts) });
 		}),
 		vscode.commands.registerCommand('herdr.closeSpace', (node?: SpaceNode) =>
 			node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId }),

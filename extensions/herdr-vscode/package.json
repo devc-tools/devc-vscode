@@ -319,13 +319,13 @@
           "group": "navigation@0"
         },
         {
-          "command": "herdr.newSpace",
-          "when": "view == herdr.spaces && herdr.sessionSelected",
+          "command": "herdr.openHostTerminal",
+          "when": "view == herdr.spaces && herdr.sessionHasHostFolder",
           "group": "navigation@1"
         },
         {
-          "command": "herdr.openHostTerminal",
-          "when": "view == herdr.spaces && herdr.sessionHasHostFolder",
+          "command": "herdr.newSpace",
+          "when": "view == herdr.spaces && herdr.sessionSelected",
           "group": "navigation@2"
         },
         {

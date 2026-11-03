@@ -32,7 +32,7 @@ and sessions are picked from **Switch Session**:
   a tab to open its space on that tab; click a pane to open its space on the pane's tab and focus its tile.
   Clicking a space or tab makes Active Pane and the status bar follow that tab's pane (herdr's focused pane
   there, else its first). Space rows expand with their arrow.
-- **Open Host Terminal** (`$(terminal)` in the Spaces title bar, or the command palette) while a dev container
+- **Open Host Terminal** (`$(terminal)` in the Spaces title bar, left of **+**, or the command palette) while a dev container
   session is selected: a terminal on this machine in the container's project folder (its
   `devcontainer.local_folder`), in the panel at the bottom. A dev container's space rows have the same button
   (`$(terminal)`, before the trash): it starts in the space's folder on this machine when that folder is
