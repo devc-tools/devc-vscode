@@ -25,12 +25,12 @@ suite('host terminal', () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 
-	test('a dev container: a panel terminal named `<folder> (host)` in its project folder', async () => {
+	test('a dev container: a panel terminal named `<folder>` in its project folder', async () => {
 		const terminal = openHostTerminal({ label: 'my-app', localFolder: dir });
 		assert.ok(terminal);
 		opened.push(terminal);
-		assert.strictEqual(terminal.name, 'my-app (host)');
-		assert.strictEqual(hostTerminalName({ label: 'x' }), 'x (host)');
+		assert.strictEqual(terminal.name, 'my-app');
+		assert.strictEqual(hostTerminalName({ label: 'x' }), 'x');
 		const options = terminal.creationOptions as vscode.TerminalOptions;
 		assert.strictEqual(typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath, dir);
 		assert.strictEqual(options.location, vscode.TerminalLocation.Panel);
@@ -46,7 +46,7 @@ suite('host terminal', () => {
 		const terminal = openHostTerminal({ label: 'my-app', localFolder: dir }, { folder: sub, space: 'web' });
 		assert.ok(terminal);
 		opened.push(terminal);
-		assert.strictEqual(terminal.name, 'my-app · web (host)');
+		assert.strictEqual(terminal.name, 'my-app · web');
 		const options = terminal.creationOptions as vscode.TerminalOptions;
 		assert.strictEqual(typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath, sub);
 	});

@@ -6,9 +6,9 @@ import { BindMount, hostPathOf } from './paths';
 /** True while the selected session runs in a dev container whose project folder is known. */
 export const HOST_FOLDER_CONTEXT_KEY = 'herdr.sessionHasHostFolder';
 
-/** The host terminal's name: `<folder name> (host)`, or `<folder name> · <space> (host)` for a space. */
+/** The host terminal's name: `<folder name>`, or `<folder name> · <space>` for a space. */
 export function hostTerminalName(env: Pick<Environment, 'label'>, space?: string): string {
-	return space ? `${env.label} · ${space} (host)` : `${env.label} (host)`;
+	return space ? `${env.label} · ${space}` : env.label;
 }
 
 /** Where a host terminal starts: a space's directory on this machine when it is bind-mounted, else the project folder. */
