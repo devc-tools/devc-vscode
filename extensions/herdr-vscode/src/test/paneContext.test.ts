@@ -22,7 +22,6 @@ import {
 	NO_PANE_MESSAGE,
 	paneContextItem,
 	PaneContextHost,
-	paneContextMessage,
 	paneHeaderDescription,
 	PaneContextNode,
 	PaneContextView,
@@ -71,27 +70,16 @@ suite('pane context: rules', () => {
 		assert.strictEqual(followedPaneKey({ lastFocused: key('w2:p9'), selectedSession: S, herdrFocused: 'w1:p1' }), key('w2:p9'));
 	});
 
-	test('pinned ignores both', () => {
-		assert.strictEqual(followedPaneKey({ pinned: key('w3:p3'), lastFocused: key('w2:p9'), selectedSession: S, herdrFocused: 'w1:p1' }), key('w3:p3'));
-	});
-
 	test('nothing to follow', () => {
 		assert.strictEqual(followedPaneKey({}), undefined);
 		assert.strictEqual(followedPaneKey({ selectedSession: S }), undefined);
 		assert.strictEqual(followedPaneKey({ herdrFocused: 'w1:p1' }), undefined);
 	});
 
-	test('the header, only with no pane', () => {
-		assert.strictEqual(paneContextMessage(false), 'Click into a herdr pane to see its files.');
-		assert.strictEqual(paneContextMessage(true), 'The pinned pane is not available. Unpin to follow panes again.');
-	});
-
 	test('the header description', () => {
-		const h = { name: 'Fixing the API', space: 'api', tab: 'main', shown: true, pinned: false };
+		const h = { name: 'Fixing the API', space: 'api', tab: 'main', shown: true };
 		assert.strictEqual(paneHeaderDescription(h), 'Fixing the API · api › main');
 		assert.strictEqual(paneHeaderDescription({ ...h, shown: false }), 'Fixing the API · api › main · not open in a tile');
-		assert.strictEqual(paneHeaderDescription({ ...h, pinned: true }), 'pinned · Fixing the API · api › main');
-		assert.strictEqual(paneHeaderDescription({ ...h, space: 'w2', tab: 'w2:t1', shown: false, pinned: true }), 'pinned · Fixing the API · w2 › w2:t1 · not open in a tile');
 	});
 
 	test('Show Pane is a title action while a pane is followed; no pane-row menu entries', () => {
@@ -145,7 +133,6 @@ suite('pane context: rules', () => {
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable'));
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable scm'));
 		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root scm'));
-		assert.ok(applies('herdr.paneContext.splitPane', 'herdr.paneContext.root'));
 
 		// Open in Source Control on a file: repo; Terminal Here on this machine.
 		assert.strictEqual(rootContextValue({ canAdd: true, scm: true, terminal: true }), 'herdr.paneContext.root addable scm terminal');
@@ -168,8 +155,8 @@ suite('pane context: rules', () => {
 		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
 		const groups = new Map(menus['view/item/context'].filter((m) => m.group?.startsWith('inline')).map((m) => [m.command, m.group]));
 		assert.deepStrictEqual(
-			['addToWorkspace', 'openSourceControl', 'openTerminal', 'splitPane'].map((c) => groups.get(`herdr.paneContext.${c}`)),
-			['inline@1', 'inline@2', 'inline@3', 'inline@4'],
+			['addToWorkspace', 'openSourceControl', 'openTerminal'].map((c) => groups.get(`herdr.paneContext.${c}`)),
+			['inline@1', 'inline@2', 'inline@3'],
 		);
 		for (const c of ['showPaneFiles', 'showAllFiles', 'openSourceControl', 'openTerminal']) {
 			assert.strictEqual(menus.commandPalette.find((m) => m.command === `herdr.paneContext.${c}`)?.when, 'false', c);
@@ -520,7 +507,7 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(rows[0].type, 'note');
 	});
 
-	test('follows herdr focus until a tile is focused, then only tiles; a pin holds', async () => {
+	test('follows herdr focus until a tile is focused, then only tiles', async () => {
 		view = makeView();
 		await rootIs(path.basename(dir));
 
@@ -538,16 +525,8 @@ suite('pane context: the view over a temp repo', function () {
 		await sleep(50);
 		assert.strictEqual(view.followed, makePaneKey(S, 'w2:p1'), 'herdr focus no longer counts');
 
-		// Pinned: another tile does not move it, until Unpin.
-		view.pin();
-		assert.ok(view.pinned);
-		assert.strictEqual(host.message, undefined, 'pinned shows in the title bar only');
+		// Another tile moves it.
 		focus.set(S, 'w2:p2');
-		await sleep(50);
-		assert.strictEqual(view.followed, makePaneKey(S, 'w2:p1'));
-		assert.strictEqual((await rootRow()).label, path.basename(dir));
-		view.unpin();
-		assert.ok(!view.pinned);
 		assert.strictEqual(view.followed, makePaneKey(S, 'w2:p2'));
 		await rootIs(path.basename(other));
 	});
@@ -562,30 +541,24 @@ suite('pane context: the view over a temp repo', function () {
 		await rootIs(path.basename(dir));
 	});
 
-	test('a pinned or focused pane follows a move to another workspace', async () => {
+	test('a focused pane follows a move to another workspace', async () => {
 		view = makeView();
 		focus.set(S, 'w2:p1');
-		view.pin();
 		const moved = { event: 'pane.moved', data: { previous_pane_id: 'w2:p1', pane: { pane_id: 'w9:p1' } } } as HerdrEvent;
 		model.events.fire({ sessionKey: S, event: moved });
 		assert.strictEqual(view.followed, makePaneKey(S, 'w9:p1'));
 		assert.strictEqual(focus.lastFocused, makePaneKey(S, 'w9:p1'));
-		view.unpin();
-		assert.strictEqual(view.followed, makePaneKey(S, 'w9:p1'));
 	});
 
-	test('the pane going away: the message comes back, a pin stays', async () => {
+	test('the pane going away: the message comes back', async () => {
 		view = makeView();
 		focus.set(S, 'w2:p1');
 		await rootIs(path.basename(dir));
-		view.pin();
 		const without = twoPanes(dir, other);
 		without.panes.splice(0, 1);
 		model.snapshots.set(S, without);
 		model.changed.fire();
 		assert.deepStrictEqual(await roots(), []);
-		assert.match(String(host.message), /pinned pane is not available/);
-		view.unpin();
 		assert.strictEqual(host.message, NO_PANE_MESSAGE);
 	});
 
@@ -610,10 +583,6 @@ suite('pane context: the view over a temp repo', function () {
 		model.snapshots.set(S, renamed);
 		model.changed.fire();
 		assert.strictEqual(host.description, 'Fixing the API · api › main');
-
-		view.pin();
-		assert.strictEqual(host.description, 'pinned · Fixing the API · api › main');
-		view.unpin();
 	});
 
 	test('no pane followed: no header description, the message instead', async () => {
@@ -623,15 +592,6 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(host.description, undefined);
 		assert.strictEqual(host.message, NO_PANE_MESSAGE);
 		assert.deepStrictEqual(await roots(), []);
-	});
-
-	test('Split Pane Here asks herdr for exactly that', async () => {
-		view = makeView();
-		await rootIs(path.basename(dir));
-		await view.splitPane();
-		assert.deepStrictEqual(model.requests.filter((r) => r.method === 'pane.split'), [
-			{ key: S, method: 'pane.split', params: { target_pane_id: 'w2:p1', direction: 'down', cwd: dir, focus: false } },
-		]);
 	});
 
 	test('poll: new status updates the row; a directory herdr reports no event for is followed', async () => {

@@ -119,8 +119,8 @@ suite('herdr-vscode', () => {
 		assert.deepStrictEqual(
 			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
-				.filter((c) => !c.startsWith('herdr.paneContext.') && !/^herdr\.(newTab|splitRight|splitDown)$/.test(c)),
-			['herdr.openPaneTab', 'herdr.focusPane'],
+				.filter((c) => !c.startsWith('herdr.paneContext.')),
+			['herdr.closeSpace', 'herdr.closeTab', 'herdr.closePane', 'herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
 		assert.strictEqual(focus?.title, 'Focus in herdr TUI');
@@ -159,25 +159,16 @@ suite('herdr-vscode', () => {
 		await ext.activate();
 		const contributed = ext.packageJSON.contributes;
 		const icon = (c: string) => (contributed.commands as { command: string; icon?: string }[]).find((x) => x.command === c)?.icon;
-		assert.strictEqual(icon('herdr.paneContext.pin'), '$(pin)');
-		assert.strictEqual(icon('herdr.paneContext.unpin'), '$(pinned)');
 		assert.strictEqual(icon('herdr.paneContext.refresh'), '$(refresh)');
 		assert.strictEqual(icon('herdr.paneContext.addToWorkspace'), '$(root-folder-opened)');
-		assert.strictEqual(icon('herdr.paneContext.splitPane'), '$(split-horizontal)');
 		assert.strictEqual(icon('herdr.paneContext.showPane'), '$(window)');
 		assert.strictEqual(icon('herdr.paneContext.openChanges'), '$(diff)');
-		const title = contributed.menus['view/title'] as { command: string; when: string }[];
-		assert.match(title.find((m) => m.command === 'herdr.paneContext.pin')!.when, /!herdr\.paneContextPinned/);
-		assert.match(title.find((m) => m.command === 'herdr.paneContext.unpin')!.when, /(^|\s)herdr\.paneContextPinned/);
 		for (const event of ['onFileSystem:herdr-container', 'onFileSystem:herdr-ssh']) {
 			assert.ok((ext.packageJSON.activationEvents as string[]).includes(event), event);
 		}
 		await vscode.commands.executeCommand('herdr.paneContext.focus');
 		await vscode.commands.executeCommand('herdr.paneContext.refresh');
 		// Nothing is followed in the test host: the actions have nothing to do.
-		await vscode.commands.executeCommand('herdr.paneContext.pin');
-		await vscode.commands.executeCommand('herdr.paneContext.unpin');
-		await vscode.commands.executeCommand('herdr.paneContext.splitPane');
 		await vscode.commands.executeCommand('herdr.paneContext.showPane');
 		// The real providers are registered, and turn away what discovery has not found.
 		await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.parse('herdr-container://abcdefabcdef/etc/hosts'))), /Not a known dev container/);

@@ -68,10 +68,11 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
   Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
-- **New Space** (Spaces title bar), **New Tab** (a space's row), and **Split Right** / **Split Down** (a tab's or
-  pane's row) create them in herdr and open their space on the tab they landed in. **New Space** first asks for the
+- **New Space** (Spaces title bar) creates a space in herdr and opens it. It first asks for the
   directory: the session's spaces' folders, VS Code's workspace folders and home are listed, or type a path
   (`/…`, `~/…`) or **Browse…** (in a dev container or over SSH, the environment's own files).
+- **Close** (the trash button on a space, tab or pane row in Spaces, and on an agent row in Agents) closes it in
+  herdr, after asking, because its processes end.
 - In **Switch Session**, clicking a stopped session starts it (a dev container's `herdr not running` row starts
   `devc`); **Stop** runs this machine's `herdr session stop`, after asking, because every pane in the session closes.
   A started session has no spaces until you add one. **Delete** runs `herdr session delete` in that session's
@@ -116,18 +117,17 @@ The **Active Pane** view shows the repo, changes and file tree of the pane you l
 VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
 herdr's own focus in the selected session; after that tiles count, and so does clicking a space or tab in
 Spaces or a tab in a space's strip (it follows that tab's pane). Clicking into a file editor or another view
-changes nothing, and **Pin** stops it following.
+changes nothing.
 
 - **Header:** the view's title names the pane: `ACTIVE PANE  <pane name> · <space> › <tab>`, plus
-  ` · not open in a tile` when no tile in this window shows it, and `pinned · ` in front while pinned.
+  ` · not open in a tile` when no tile in this window shows it.
   **Show Pane** (`$(window)` in the title bar) opens its space on its tab and focuses its tile.
 - **Repo row:** the repo (or directory, outside a repo) and its git status in the Spaces format
   (`⎇ main ● 3 ↑1`, `⎇ main · clean`).
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
   the action is there only for local paths. **Open in Source Control** (local repos) has VS Code's Git open the
   repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.
-  **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area; elsewhere,
-  **Split Pane Here** makes a herdr pane below, in that folder.
+  **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area.
 - **Changes:** the repo's whole `git status`, always shown (`0` and `No uncommitted changes` when clean). Click for a
   `HEAD ↔ working tree` diff;
   **Open File** opens the file as it is now.

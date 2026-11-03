@@ -377,9 +377,8 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   basename (agent panes, when it differs from the name). They follow the session model with no re-layout.
 - Golden Layout's close controls are intercepted in the capture phase: its own handlers would
   remove the tile before the user answers. The tile goes when herdr says the pane closed.
-- **New Space** and **New Tab** call `workspace.create` and `tab.create` with `focus:false`, wait for the
-  snapshot to hold the tab, and open it. A new tab starts in the space's focused pane's directory.
-  New Space passes `cwd` from a quick pick (`src/newSpace.ts`): the focused space's directory, the other spaces',
+- **New Space** calls `workspace.create` with `focus:false`, waits for the snapshot to hold its tab, and opens
+  it. It passes `cwd` from a quick pick (`src/newSpace.ts`): the focused space's directory, the other spaces',
   workspace folders mapped into the environment (container: through its bind mounts; SSH: `herdr-ssh` URIs of that
   alias), then `$HOME`; a typed `/…` or `~/…` path; or **Browse…**, `showOpenDialog` from the first candidate's
   environment URI (VS Code's simple dialog over `herdr-container`/`herdr-ssh`). Escape creates nothing.
@@ -390,6 +389,9 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   `foreground_cwd ?? cwd`), `herdr.tile.zoom` (`!zoomed`) / `unzoom` (`zoomed`), and `herdr.tile.close`
   (the same modal, then `pane.close`). The command gets the context object; `TilesPanels.panelOfPane`
   finds the panel whose shown tab has the pane.
+- **Close Space / Tab / Pane** (`herdr.closeSpace`, `closeTab`, `closePane`; `$(trash)` inline on Spaces' space,
+  tab and pane rows and Agents' rows): a modal, then `workspace.close {"workspace_id"}`, `tab.close {"tab_id"}`
+  or `pane.close {"pane_id"}`. The snapshot takes the row away.
 - The webview reports `focus` when an xterm gains focus; `src/focus.ts` keeps the window's last
   focused pane, fires `onDidChangeLastFocused`, and shows it in the status bar.
 
@@ -466,22 +468,22 @@ is disposed at once, and activation clears the old workspace-state key `herdr.la
 "previous_tab_id","previous_workspace_id","created_tab"?,"created_workspace"?,"closed_tab_id"?}`. A
 move inside a workspace keeps the id; a move to another workspace gives a new one
 (`previous_pane_id` is the old), on the same terminal. `parsePaneMoved` (`src/sessions.ts`) reads it for
-the focus tracker, Pane Context's pin, the touched-files store and its open spans, and Ask Agent's threads.
+the focus tracker, the touched-files store and its open spans, and Ask Agent's threads.
 
 ## Pane Context
 
-`src/paneContext.ts`. The followed pane is the pinned pane, else `FocusTracker.lastFocused`, else, while
+`src/paneContext.ts`. The followed pane is `FocusTracker.lastFocused`, else, while
 no tile has been focused in this window, the selected session's `focused_pane_id`. A tab switch from this
 window — a Spaces space row (its active tab), a Spaces tab row, a strip click — calls `FocusTracker.followTab`:
 once the snapshot shows the tab active (at most 2 s; a newer switch replaces a waiting one; a `tab.focus` error
 never confirms), `lastFocused` becomes the snapshot's `focused_pane_id` if it is in the tab, else the tab's first
 pane. Tab switches made in herdr itself do not move it. The snapshot is what
 carries that: `pane.focused` (`{"pane_id","workspace_id"}`) re-takes it like any event. `pane.moved` to another
-workspace changes a pane's id, so the pin and `lastFocused` move to the new key. A followed pane that is gone,
-or whose session is not connected, shows no rows; a pin stays until **Unpin**. Pin is not persisted.
+workspace changes a pane's id, so `lastFocused` moves to the new key. A followed pane that is gone,
+or whose session is not connected, shows no rows.
 
 The followed pane is named in the view header, `TreeView.description` (`paneHeaderDescription`):
-`[pinned · ]<pane name> · <space> › <tab>[ · not open in a tile]`, labels or ids. It is set as soon as the pane
+`<pane name> · <space> › <tab>[ · not open in a tile]`, labels or ids. It is set as soon as the pane
 is found, before (and without) the directory loading, and only when the string changes. Plain text: no mark.
 Context key `herdr.paneContext.following` (a pane followed and found) shows **Show Pane** (`paneClickCommand`) in
 the title bar. `TreeView.message` is set only when no pane is followed or found. The first row is the repo
@@ -633,8 +635,7 @@ The Repo row's `contextValue` is `herdr.paneContext.root` plus ` addable`, ` sho
 ` terminal` (this machine). **Open in Source Control** activates `vscode.git` if needed, then `getRepository(root) ??
 openRepository(root)` and `workbench.view.scm`. Git keeps a repo outside the workspace only for this window session; a
 bind-mounted repo of another uid trips `safe.directory` (Git says so; `openRepository` returns `null`). **Terminal Here** is
-`createTerminal({name, cwd, location: Editor})`, on this machine only: a container or SSH root has **Split Pane Here**, a herdr
-pane herdr can see.
+`createTerminal({name, cwd, location: Editor})`, on this machine only.
 
 ### Other panes
 

@@ -22,7 +22,7 @@ import {
 	TreeStatus,
 } from './git';
 import { environmentUri, EnvironmentPaths, isUnder, parseLinkText, resolveLinkPath } from './paths';
-import { hasAgent, paneLabel, parsePaneMoved, SessionModel, Snapshot, SnapshotPane } from './sessions';
+import { hasAgent, paneLabel, SessionModel, Snapshot, SnapshotPane } from './sessions';
 import { TilesPanels } from './tilesPanel';
 import { memoryMemento, TouchedStore } from './touched';
 import { makePaneKey, splitPaneKey } from './tilesProtocol';
@@ -33,8 +33,6 @@ import { gitDescription } from './spaceGit';
 export const PANE_CONTEXT_VIEW = 'herdr.paneContext';
 /** A click on a change row: its diff. */
 export const OPEN_CHANGES_COMMAND = 'herdr.paneContext.openChanges';
-/** Context key: whether the view is pinned. */
-export const PANE_CONTEXT_PINNED_KEY = 'herdr.paneContextPinned';
 /** Context key and workspaceState key: change sections show only the followed pane's files. */
 export const PANE_FILES_ONLY_KEY = 'herdr.paneContext.paneFilesOnly';
 export const NO_PANE_MESSAGE = 'Click into a herdr pane to see its files.';
@@ -53,26 +51,20 @@ const WATCH_DEBOUNCE_MS = 500;
 // ── The followed pane ───────────────────────────────────────────────────────
 
 /**
- * The pane the view follows: the pinned one; else the window's last focused
+ * The pane the view follows: the window's last focused
  * tile; else, while no tile has ever been focused in this window, herdr's own
  * focused pane in the selected session. Focusing anything else in VS Code
  * changes none of these, so it does not change the view.
  */
 export function followedPaneKey(state: {
-	pinned?: string;
 	lastFocused?: string;
 	selectedSession?: string;
 	herdrFocused?: string;
 }): string | undefined {
-	if (state.pinned ?? state.lastFocused) {
-		return state.pinned ?? state.lastFocused;
+	if (state.lastFocused) {
+		return state.lastFocused;
 	}
 	return state.selectedSession && state.herdrFocused ? makePaneKey(state.selectedSession, state.herdrFocused) : undefined;
-}
-
-/** The view's header while no pane is followed (or the followed one cannot be found). */
-export function paneContextMessage(pinned: boolean): string {
-	return pinned ? 'The pinned pane is not available. Unpin to follow panes again.' : NO_PANE_MESSAGE;
 }
 
 /** Context key: a pane is followed and found (Show Pane applies). */
@@ -80,10 +72,10 @@ export const PANE_CONTEXT_FOLLOWING_KEY = 'herdr.paneContext.following';
 
 /**
  * The view header's description for the followed pane:
- * `[pinned · ]<pane name> · <space> › <tab>[ · not open in a tile]`.
+ * `<pane name> · <space> › <tab>[ · not open in a tile]`.
  */
-export function paneHeaderDescription(h: { name: string; space: string; tab: string; shown: boolean; pinned: boolean }): string {
-	return `${h.pinned ? 'pinned · ' : ''}${h.name} · ${h.space} › ${h.tab}${h.shown ? '' : ' · not open in a tile'}`;
+export function paneHeaderDescription(h: { name: string; space: string; tab: string; shown: boolean }): string {
+	return `${h.name} · ${h.space} › ${h.tab}${h.shown ? '' : ' · not open in a tile'}`;
 }
 
 /** Whether **Add to Workspace** applies: a plain file that is not a workspace folder yet. */
@@ -375,7 +367,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	readonly onDidChangeTreeData = this.emitter.event;
 	private readonly host: PaneContextHost;
 	private readonly disposables: vscode.Disposable[] = [];
-	private pinnedKey: string | undefined;
 	private loaded: Loaded | undefined;
 	/** `<pane key>\n<dir>` of the load under way or done. */
 	private loadedFor: string | undefined;
@@ -418,13 +409,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 				}
 			}),
 			deps.model.onDidEvent((e) => {
-				if (e.event.event === 'pane.moved') {
-					const moved = parsePaneMoved(e.event.data);
-					if (moved && this.pinnedKey === makePaneKey(e.sessionKey, moved.from)) {
-						this.pinnedKey = makePaneKey(e.sessionKey, moved.to);
-						this.update();
-					}
-				} else if (e.event.event === 'pane.updated' && this.loaded?.paneKey === makePaneKey(e.sessionKey, String(e.event.data.pane_id ?? (e.event.data.pane as { pane_id?: unknown } | undefined)?.pane_id))) {
+				if (e.event.event === 'pane.updated' && this.loaded?.paneKey === makePaneKey(e.sessionKey, String(e.event.data.pane_id ?? (e.event.data.pane as { pane_id?: unknown } | undefined)?.pane_id))) {
 					this.scheduleReload();
 				}
 			}),
@@ -435,7 +420,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.host.onDidChangeVisibility(() => this.visibilityChanged()),
 			vscode.workspace.onDidChangeWorkspaceFolders(() => this.emitter.fire()),
 		);
-		void vscode.commands.executeCommand('setContext', PANE_CONTEXT_PINNED_KEY, false);
 		this.update();
 		this.visibilityChanged();
 	}
@@ -446,15 +430,10 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 	get followed(): string | undefined {
 		const selectedSession = this.deps.sessions.selected;
 		return followedPaneKey({
-			pinned: this.pinnedKey,
 			lastFocused: this.deps.focus.lastFocused,
 			selectedSession,
 			herdrFocused: selectedSession ? this.deps.focus.herdrFocused(selectedSession) : undefined,
 		});
-	}
-
-	get pinned(): boolean {
-		return this.pinnedKey !== undefined;
 	}
 
 	/** Whether the change sections show only the followed pane's files. */
@@ -467,23 +446,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			this.paneFilesOnlyNow = on;
 			this.emitter.fire();
 		}
-	}
-
-	pin(): void {
-		const key = this.followed;
-		if (key) {
-			this.setPinned(key);
-		}
-	}
-
-	unpin(): void {
-		this.setPinned(undefined);
-	}
-
-	private setPinned(key: string | undefined): void {
-		this.pinnedKey = key;
-		void vscode.commands.executeCommand('setContext', PANE_CONTEXT_PINNED_KEY, key !== undefined);
-		this.update();
 	}
 
 	/** The followed pane in its session's latest snapshot. */
@@ -502,7 +464,7 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		}
 		const key = this.followed;
 		const found = key ? this.find(key) : undefined;
-		this.host.message = found ? undefined : paneContextMessage(this.pinned);
+		this.host.message = found ? undefined : NO_PANE_MESSAGE;
 		this.updateHeader(key, found);
 		const dir = found?.pane.foreground_cwd ?? found?.pane.cwd;
 		if (!key || !found || !dir) {
@@ -534,7 +496,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 				space: snapshot.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label ?? pane.workspace_id,
 				tab: snapshot.tabs.find((t) => t.tab_id === pane.tab_id)?.label ?? pane.tab_id,
 				shown: this.deps.panels.showsPane(ref.sessionKey, ref.paneId),
-				pinned: this.pinned,
 			});
 			agent = hasAgent(pane);
 		}
@@ -941,19 +902,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		const root = this.loaded?.rootUri;
 		if (root && canAddToWorkspace(root, vscode.workspace.workspaceFolders)) {
 			vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, { uri: root });
-		}
-	}
-
-	async splitPane(): Promise<void> {
-		const loaded = this.loaded;
-		if (!loaded) {
-			return;
-		}
-		const { sessionKey, paneId } = splitPaneKey(loaded.paneKey);
-		try {
-			await this.deps.model.request(sessionKey, 'pane.split', { target_pane_id: paneId, direction: 'down', cwd: loaded.rootPath, focus: false });
-		} catch (err) {
-			void vscode.window.showWarningMessage(`herdr: ${errorText(err)}`);
 		}
 	}
 

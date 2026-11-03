@@ -148,18 +148,6 @@
         "icon": "$(target)"
       },
       {
-        "command": "herdr.paneContext.pin",
-        "title": "Pin",
-        "category": "herdr",
-        "icon": "$(pin)"
-      },
-      {
-        "command": "herdr.paneContext.unpin",
-        "title": "Unpin",
-        "category": "herdr",
-        "icon": "$(pinned)"
-      },
-      {
         "command": "herdr.paneContext.refresh",
         "title": "Refresh",
         "category": "herdr",
@@ -170,12 +158,6 @@
         "title": "Add to Workspace",
         "category": "herdr",
         "icon": "$(root-folder-opened)"
-      },
-      {
-        "command": "herdr.paneContext.splitPane",
-        "title": "Split Pane Here",
-        "category": "herdr",
-        "icon": "$(split-horizontal)"
       },
       {
         "command": "herdr.paneContext.showPane",
@@ -248,22 +230,22 @@
         "icon": "$(add)"
       },
       {
-        "command": "herdr.newTab",
-        "title": "New Tab",
+        "command": "herdr.closeSpace",
+        "title": "Close Space",
         "category": "herdr",
-        "icon": "$(add)"
+        "icon": "$(trash)"
       },
       {
-        "command": "herdr.splitRight",
-        "title": "Split Right",
+        "command": "herdr.closeTab",
+        "title": "Close Tab",
         "category": "herdr",
-        "icon": "$(split-horizontal)"
+        "icon": "$(trash)"
       },
       {
-        "command": "herdr.splitDown",
-        "title": "Split Down",
+        "command": "herdr.closePane",
+        "title": "Close Pane",
         "category": "herdr",
-        "icon": "$(split-vertical)"
+        "icon": "$(trash)"
       },
       {
         "command": "herdr.askAgent",
@@ -362,16 +344,6 @@
           "group": "navigation@3"
         },
         {
-          "command": "herdr.paneContext.pin",
-          "when": "view == herdr.paneContext && !herdr.paneContextPinned",
-          "group": "navigation@1"
-        },
-        {
-          "command": "herdr.paneContext.unpin",
-          "when": "view == herdr.paneContext && herdr.paneContextPinned",
-          "group": "navigation@1"
-        },
-        {
           "command": "herdr.paneContext.showPaneFiles",
           "when": "view == herdr.paneContext && !herdr.paneContext.paneFilesOnly",
           "group": "navigation@2"
@@ -389,19 +361,19 @@
       ],
       "view/item/context": [
         {
-          "command": "herdr.newTab",
+          "command": "herdr.closeSpace",
           "when": "view == herdr.spaces && viewItem == herdr.space",
           "group": "inline@1"
         },
         {
-          "command": "herdr.splitRight",
-          "when": "view == herdr.spaces && viewItem =~ /^herdr\\.(tab|pane\\.(agent|shell))$/",
+          "command": "herdr.closeTab",
+          "when": "view == herdr.spaces && viewItem == herdr.tab",
           "group": "inline@1"
         },
         {
-          "command": "herdr.splitDown",
-          "when": "view == herdr.spaces && viewItem =~ /^herdr\\.(tab|pane\\.(agent|shell))$/",
-          "group": "inline@2"
+          "command": "herdr.closePane",
+          "when": "view =~ /^herdr\\.(spaces|agents)$/ && viewItem =~ /^herdr\\.pane\\.(agent|shell)$/",
+          "group": "inline@1"
         },
         {
           "command": "herdr.openPaneTab",
@@ -427,11 +399,6 @@
           "command": "herdr.paneContext.openTerminal",
           "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* terminal/",
           "group": "inline@3"
-        },
-        {
-          "command": "herdr.paneContext.splitPane",
-          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root/",
-          "group": "inline@4"
         },
         {
           "command": "herdr.paneContext.openFile",
@@ -523,10 +490,6 @@
           "when": "false"
         },
         {
-          "command": "herdr.paneContext.splitPane",
-          "when": "false"
-        },
-        {
           "command": "herdr.paneContext.showPane",
           "when": "false"
         },
@@ -575,18 +538,6 @@
           "when": "herdr.sessionSelected"
         },
         {
-          "command": "herdr.newTab",
-          "when": "false"
-        },
-        {
-          "command": "herdr.splitRight",
-          "when": "false"
-        },
-        {
-          "command": "herdr.splitDown",
-          "when": "false"
-        },
-        {
           "command": "herdr.askAgent",
           "when": "herdr.hasAgents && editorIsOpen"
         },
@@ -624,6 +575,18 @@
         },
         {
           "command": "herdr.tile.close",
+          "when": "false"
+        },
+        {
+          "command": "herdr.closeSpace",
+          "when": "false"
+        },
+        {
+          "command": "herdr.closeTab",
+          "when": "false"
+        },
+        {
+          "command": "herdr.closePane",
           "when": "false"
         }
       ],

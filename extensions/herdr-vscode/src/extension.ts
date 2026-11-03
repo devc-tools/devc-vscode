@@ -10,7 +10,7 @@ import { applyPaneFilesOnly, ChangeNode, CommitFileNode, PANE_CONTEXT_VIEW, PANE
 import { pickSpaceDirectory } from './newSpace';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
-import { createdTabId, sessionDeleteArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
+import { createdTabId, sessionDeleteArgv, sessionStopArgv, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
 import { SessionModel, sessionKey } from './sessions';
 import { SidebarConfigSource, sidebarConfigPath } from './sidebarConfig';
 import { SpaceGit } from './spaceGit';
@@ -30,7 +30,7 @@ import {
 	SWITCH_SESSION_COMMAND,
 	validateSessionName,
 } from './views/sessionsView';
-import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneNode, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
+import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -338,26 +338,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		panels.openTab(key, tabId);
 	};
-	/** Splits a pane in herdr and shows its tab, where the new tile arrives. */
-	const splitPane = async (key: string, tabId: string, paneId: string | undefined, direction: 'right' | 'down') => {
-		if (!paneId) {
+	/** Closes a space, tab or pane in herdr once the user confirms; its processes end. */
+	const closeInHerdr = async (sessionKey: string, what: string, label: string, method: string, params: Record<string, unknown>) => {
+		const action = `Close ${what}`;
+		const answer = await vscode.window.showWarningMessage(
+			`Close ${what.toLowerCase()} "${label}" in herdr?`,
+			{ modal: true, detail: 'Its panes close, and the agents and programs running there end.' },
+			action,
+		);
+		if (answer !== action) {
 			return;
 		}
-		const pane = m.connection(key)?.snapshot?.panes.find((p) => p.pane_id === paneId);
-		const cwd = pane?.foreground_cwd ?? pane?.cwd;
 		try {
-			await m.request(key, 'pane.split', { target_pane_id: paneId, direction, ...(cwd ? { cwd } : {}), focus: false });
-			panels.openTab(key, tabId);
+			await m.request(sessionKey, method, params);
 		} catch (err) {
 			warn(err);
 		}
-	};
-	const splitRow = (node: TabNode | PaneNode | undefined, direction: 'right' | 'down') => {
-		if (node?.type === 'tab') {
-			const snapshot = m.connection(node.sessionKey)?.snapshot;
-			return splitPane(node.sessionKey, node.tabId, snapshot && splitTarget(snapshot, node.tabId), direction);
-		}
-		return node && splitPane(node.ref.sessionKey, node.pane.tab_id, node.ref.paneId, direction);
 	};
 
 	const tileCommand = async (
@@ -394,21 +390,15 @@ export function activate(context: vscode.ExtensionContext): void {
 				warn(err);
 			}
 		}),
-		vscode.commands.registerCommand('herdr.newTab', async (node?: SpaceNode) => {
-			if (!node) {
-				return;
-			}
-			const snapshot = m.connection(node.sessionKey)?.snapshot;
-			const cwd = snapshot && spaceCwd(snapshot, node.workspaceId);
-			try {
-				const result = await m.request(node.sessionKey, 'tab.create', { workspace_id: node.workspaceId, ...(cwd ? { cwd } : {}), focus: false });
-				await openCreatedTab(node.sessionKey, result);
-			} catch (err) {
-				warn(err);
-			}
-		}),
-		vscode.commands.registerCommand('herdr.splitRight', (node?: TabNode | PaneNode) => splitRow(node, 'right')),
-		vscode.commands.registerCommand('herdr.splitDown', (node?: TabNode | PaneNode) => splitRow(node, 'down')),
+		vscode.commands.registerCommand('herdr.closeSpace', (node?: SpaceNode) =>
+			node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId }),
+		),
+		vscode.commands.registerCommand('herdr.closeTab', (node?: TabNode) =>
+			node && closeInHerdr(node.sessionKey, 'Tab', node.label, 'tab.close', { tab_id: node.tabId }),
+		),
+		vscode.commands.registerCommand('herdr.closePane', (node?: { label: string; ref: PaneRef }) =>
+			node && closeInHerdr(node.ref.sessionKey, 'Pane', node.label, 'pane.close', { pane_id: node.ref.paneId }),
+		),
 		vscode.commands.registerCommand(FOCUS_PANE_COMMAND, async (arg?: PaneRef | { ref?: PaneRef }) => {
 			const ref = arg && 'ref' in arg ? arg.ref : (arg as PaneRef | undefined);
 			if (!ref?.sessionKey || !ref.paneId) {
@@ -457,11 +447,8 @@ export function activate(context: vscode.ExtensionContext): void {
 				panels.revealPane(sessionKey, paneId);
 			}
 		}),
-		vscode.commands.registerCommand('herdr.paneContext.pin', () => paneContext.pin()),
-		vscode.commands.registerCommand('herdr.paneContext.unpin', () => paneContext.unpin()),
 		vscode.commands.registerCommand('herdr.paneContext.refresh', () => paneContext.refresh()),
 		vscode.commands.registerCommand('herdr.paneContext.addToWorkspace', () => paneContext.addToWorkspace()),
-		vscode.commands.registerCommand('herdr.paneContext.splitPane', () => paneContext.splitPane()),
 		vscode.commands.registerCommand('herdr.paneContext.showPane', () => paneContext.showPane()),
 		vscode.commands.registerCommand('herdr.paneContext.openChanges', (node?: ChangeNode | CommitFileNode) => paneContext.openChanges(node)),
 		vscode.commands.registerCommand('herdr.paneContext.openFile', (node?: ChangeNode | CommitFileNode) => paneContext.openFile(node)),

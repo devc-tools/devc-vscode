@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import { containerStartArgs, createdTabId, sessionDeleteArgv, sessionServerArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
+import { containerStartArgs, createdTabId, sessionDeleteArgv, sessionServerArgv, sessionStopArgv, spaceCwd, startContainerSession, startDetached, startHostSession, whenTabKnown } from '../sessionControl';
 import { Snapshot, SessionModel } from '../sessions';
 import { spacesTreeItem, SpaceNode } from '../views/spacesView';
 import { sessionRows } from '../views/sessionsView';
@@ -92,12 +92,6 @@ suite('session control', () => {
 		assert.deepStrictEqual(host.map((r) => [r.label, r.description, r.contextValue]), [['s', 'stopped', 'herdr.session.stopped']]);
 		assert.strictEqual(sessionRows(state('ssh', 'ssh:b'), () => undefined, false)[0].contextValue, 'herdr.session.absent');
 		assert.strictEqual(sessionRows(state('ssh', 'ssh:b'), () => undefined, true)[0].contextValue, 'herdr.session.stopped');
-	});
-
-	test('a split starts from the tab focused pane, else its first', () => {
-		assert.strictEqual(splitTarget(snapshot([pane('a', 't1'), pane('b', 't1', true), pane('c', 't2')]), 't1'), 'b');
-		assert.strictEqual(splitTarget(snapshot([pane('a', 't1'), pane('c', 't2', true)]), 't1'), 'a');
-		assert.strictEqual(splitTarget(snapshot([]), 't1'), undefined);
 	});
 
 	test('a new tab starts in the space focused directory', () => {

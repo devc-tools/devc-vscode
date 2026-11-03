@@ -103,12 +103,6 @@ export async function startContainerSession(
 	return waitForSession(model, env.key, session);
 }
 
-/** The pane a tab's split starts from: the tab's focused pane, else its first. */
-export function splitTarget(snapshot: Snapshot, tabId: string): string | undefined {
-	const panes = snapshot.panes.filter((p) => p.tab_id === tabId);
-	return (panes.find((p) => p.focused) ?? panes[0])?.pane_id;
-}
-
 /** A new tab starts where the space is working: its focused pane's directory, else its first pane's. */
 export function spaceCwd(snapshot: Snapshot, workspaceId: string): string | undefined {
 	const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);

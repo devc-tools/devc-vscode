@@ -195,17 +195,12 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		await req('pane.focus', { pane_id: p1 });
 	});
 
-	test('focusing another tile switches it; Pin holds until Unpin', async () => {
+	test('focusing another tile switches it', async () => {
 		panels.openPaneTab(key, p2);
 		await waitFor('p2 last focused', 15000, () => focus.lastFocused === pk(p2));
 		await rootIs(path.basename(plain));
-		view.pin();
-		assert.strictEqual(tree.message, undefined, 'pinned shows in the title bar only');
 		panels.openPaneTab(key, p1);
 		await waitFor('p1 last focused', 15000, () => focus.lastFocused === pk(p1));
-		await sleep(300);
-		assert.strictEqual((await rootRow())?.label, path.basename(plain));
-		view.unpin();
 		await rootIs(path.basename(repo));
 	});
 
@@ -247,20 +242,6 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 		const change = changes.find((c) => c.label === 'middleware.ts')!;
 		assert.deepStrictEqual(parseGitHeadUri(change.headUri), { envKey: 'host', toplevel: repo, file: 'src/auth/middleware.ts' });
 		assert.strictEqual(await provider.provideTextDocumentContent(change.headUri), 'head one\nhead two\nhead three\n');
-	});
-
-	test('Split Pane Here: a new pane below the followed one, in the repo root', async () => {
-		const before = new Set(model.connection(key)!.snapshot!.panes.map((p) => p.pane_id));
-		await view.splitPane();
-		const fresh = await waitFor('the new pane', 5000, () => model.connection(key)?.snapshot?.panes.find((p) => !before.has(p.pane_id)));
-		assert.strictEqual(fresh.tab_id, tabId);
-		assert.strictEqual(fresh.foreground_cwd ?? fresh.cwd, repo);
-		const exported = (await req('layout.export', { tab_id: tabId })) as { layout: { root: unknown } };
-		const find = (n: { type: string; direction?: string; first?: unknown; second?: { pane_id?: string } }): boolean =>
-			n.type === 'split' && ((n.direction === 'down' && n.second?.pane_id === fresh.pane_id) || find(n.first as never) || find(n.second as never));
-		assert.ok(find(exported.layout.root as never), JSON.stringify(exported.layout.root));
-		assert.strictEqual(model.connection(key)?.snapshot?.focusedPaneId !== fresh.pane_id, true, 'focus: false');
-		await req('pane.close', { pane_id: fresh.pane_id });
 	});
 
 	test('a file written from the pane is in Changes within a poll', async () => {
@@ -374,8 +355,7 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 
 	// Mocha runs a suite's nested suites after its own tests, and this one takes the pane away.
 	suite('last', () => {
-		test('a pinned pane follows a real move to another workspace', async () => {
-			view.pin();
+		test('the followed pane follows a real move to another workspace', async () => {
 			const move = await shell.run(herdrArgv(['--session', SESSION, 'pane', 'move', p1, '--new-workspace', '--label', 'moved-ctx', '--no-focus']), { timeoutMs: 10000 });
 			assert.strictEqual(move.exitCode, 0, move.stderr.toString());
 			const r = JSON.parse(move.stdout.toString()) as { result: { move_result: { pane: { pane_id: string; workspace_id: string } } } };
@@ -385,7 +365,6 @@ async function waitFor<T>(what: string, ms: number, get: () => T | undefined | f
 			assert.strictEqual(focus.lastFocused, pk(moved.pane_id));
 			await waitFor('the header', 5000, () => String(tree.description).includes('moved-ctx'));
 			await rootIs(path.basename(repo));
-			view.unpin();
 			await req('workspace.close', { workspace_id: moved.workspace_id });
 			await waitFor('the pane gone: the message', 5000, () => tree.message === 'Click into a herdr pane to see its files.');
 		});
