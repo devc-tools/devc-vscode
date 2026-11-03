@@ -928,6 +928,11 @@ export class MirrorPanel extends TilesPanel {
 		this.postZoom();
 	}
 
+	/** The pane this space tab is on (see {@link actionPane}): what the window title follows. */
+	get activePaneId(): string | undefined {
+		return this.actionPane();
+	}
+
 	/** The tile new tabs start from: the panel's focused tile, else herdr's focused pane if shown here. */
 	private actionPane(): string | undefined {
 		if (this.focusedPane && this.paneIds.has(this.focusedPane)) {
@@ -1187,6 +1192,16 @@ export class TilesPanels implements vscode.Disposable, vscode.WebviewPanelSerial
 
 	private createPanel(title: string): vscode.WebviewPanel {
 		return vscode.window.createWebviewPanel(TILES_VIEW_TYPE, title, vscode.ViewColumn.Active, WEBVIEW_OPTIONS(this.deps.extensionUri));
+	}
+
+	/**
+	 * The space panel that is the active editor tab, if one is. Matched by the
+	 * panel's own `active` and column: a webview tab's `TabInputWebview.viewType`
+	 * reads `mainThreadWebview-herdr.tiles`, not {@link TILES_VIEW_TYPE}.
+	 */
+	activeSpacePanel(): MirrorPanel | undefined {
+		const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
+		return this.allPanels().find((p) => p.panel.active && p.panel.viewColumn === column);
 	}
 
 	/** Whether any tile of this window shows the pane. */

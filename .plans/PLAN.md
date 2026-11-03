@@ -42,6 +42,8 @@
 
 - [herdr SSH](herdr-ssh.md) — live checks and fixes for SSH hosts across every herdr-vscode feature, plus Start / Stop on SSH sessions. Blocked until a reachable SSH host with herdr is available.
 
+- [herdr Window Title](herdr-window-title.md) — `herdr.windowTitle`: the window title names the repo or worktree of the active editor tab — a space tab's active pane (git run in the pane's environment) or any other tab's file — written to a saved `.code-workspace`'s `window.title`.
+
 ### Completed
 
 - [herdr Commit Changes](archived/herdr-commit-changes.md) — Active Pane's baseline section replaced by Uncommitted plus expandable Commits (vs the default branch, else recent), with a toggle to show only files this pane's agent changed while working. ✅ Done (manual checks pending; snapshots run without the repo as an alternate so git cannot freshen its objects)
@@ -90,3 +92,4 @@
 | 28 | [herdr-commit-changes.md](archived/herdr-commit-changes.md) | Active Pane: Uncommitted + per-commit changes, this-pane filter; baseline section removed (depends on phases 20 and 27) | complete |
 | 29 | [herdr-sidebar-clarity.md](herdr-sidebar-clarity.md) | Active Pane header identity, tab switch follows pane, one git format, Sessions on demand (depends on phases 27 and 28) | implemented, manual checks pending |
 | 30 | [herdr-session-picker.md](herdr-session-picker.md) | Sessions view removed: picker select / start / stop / delete / new; Select Session welcome; Active Pane Changes always shown (depends on phase 29) | implemented, manual checks pending |
+| 31 | [herdr-window-title.md](herdr-window-title.md) | `herdr.windowTitle`: window title from the active tab's repo — space tab's active pane or the file's nearest repo (depends on phase 26) | implemented, manual checks pending |

@@ -752,3 +752,40 @@ devc-vscode has the same feature for its dev container agents. Every id here is 
 (devc's is `Agent (devc)`), the reply root `/tmp/herdr-vscode/review` (devc's `/tmp/devc-vscode/review`) and the tag
 `[herdr-vscode review …]` (devc's `[devc review …]`), so each watcher ignores the other's files. Context values
 (`failed`, `hasAgent`) are the same strings, but every menu is scoped by `commentController == herdr.agentReview`.
+
+## Window title
+
+`WindowTitleController` (`src/windowTitle.ts`) writes `herdr.windowTitle`, expanded, to the workspace value of
+`window.title`. VS Code has no API for the title, and only the workspace value belongs to one window, so it acts only
+in a saved `.code-workspace` (`workspace.workspaceFile.scheme === 'file'`), never in a folder's `.vscode/settings.json`.
+
+**Source.** The active editor tab decides:
+
+1. A space panel that is `active` in the active tab group's column (not matched by `TabInputWebview.viewType`, which VS
+   Code reports as `mainThreadWebview-herdr.tiles`): its active pane — the panel's focused tile, else herdr's focused
+   pane if shown there, else its first tile. The folder is `foreground_cwd ?? cwd`, read in the session's environment.
+   No pane yet: keep. No folder: restore.
+2. A tab with a file (`TabInputText`, `TabInputCustom`, `TabInputNotebook`, or a diff's `modified`): `file:` and `git:`
+   on this machine, `herdr-container:` / `herdr-ssh:` / `herdr-git:` in their environment; the folder is the file's
+   directory. Another scheme, or an environment not found: keep.
+3. Anything else: keep.
+
+**Repo.** `git -C <dir> rev-parse --path-format=absolute --show-toplevel --git-common-dir`, then
+`git -C <toplevel> symbolic-ref --short -q HEAD` (`readRepo`, `src/git.ts`). The main worktree is the common dir's
+parent when it is named `.git`, else the toplevel. Not in a repo, git refusing, or the environment unreachable: restore.
+
+**Template.** `${project}` = basename of the main worktree, `${branch}` = the branch or the toplevel's basename when
+detached, `${folder}` = the toplevel's basename, `${space}` = the space's label, `${title}` = the pane's
+`terminal_title_stripped` unless it repeats the pane's label or folder (or, outside an agent, either folder) — the rule
+devc web and devc-vscode use. Other `${…}` are left for VS Code. A `$` in a value is written as `＄`, since VS Code takes
+any `$` in `window.title` to start a variable and drops what follows.
+
+**Writing.** The value last written is remembered in workspace state (`herdr.windowTitle.written`). A `window.title`
+that differs from it was set by you, and becomes the title to restore (`herdr.windowTitle.original`, `{}` when unset).
+Restoring writes it back only while `window.title` is still what this extension wrote.
+
+**When.** Tab and tab-group changes, a tile focus report, tile changes, every snapshot and the two settings schedule a
+run 300 ms later; a run writes only on a change, and a run overtaken by a newer one does not write. Every 15 s while
+the setting is on: a re-run (a `git switch` in the same folder), after a `pane.get` for a pane source, since herdr
+0.9.5 reports a `cd` with no event. One run 5 s after activation drops a title left by the last window session.
+

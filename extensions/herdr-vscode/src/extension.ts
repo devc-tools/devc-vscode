@@ -32,6 +32,8 @@ import {
 	validateSessionName,
 } from './views/sessionsView';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
+import { LocalShell } from './remoteShell';
+import { WindowTitleController } from './windowTitle';
 
 let model: SessionModel | undefined;
 let streams: PaneStreams | undefined;
@@ -206,6 +208,19 @@ export function activate(context: vscode.ExtensionContext): void {
 			]),
 		),
 		vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, new GitHeadContentProvider((key) => environments.find(key))),
+	);
+
+	// The window title names the active editor tab's repo: a space tab's pane, or a file.
+	context.subscriptions.push(
+		new WindowTitleController({
+			model: m,
+			focus,
+			panels,
+			findEnv: (key) => environments.find(key),
+			hostShell: new LocalShell(),
+			state: context.workspaceState,
+			log,
+		}),
 	);
 
 	// Ask Agent: comment threads answered by a herdr agent in any environment that can see the file.

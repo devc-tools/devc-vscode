@@ -71,6 +71,37 @@ export async function readToplevel(shell: RemoteShell, dir: string): Promise<str
 	return res.exitCode === 0 ? res.stdout.toString('utf8').replace(/\r?\n$/, '') || undefined : undefined;
 }
 
+/** A repo or worktree: its toplevel, its main worktree, and its branch (undefined when detached). */
+export interface RepoInfo {
+	toplevel: string;
+	main: string;
+	branch?: string;
+}
+
+/**
+ * The repo or worktree holding `dir`, read in its environment; undefined when
+ * it is in none, git refuses, or the environment cannot be reached.
+ */
+export async function readRepo(shell: RemoteShell, dir: string): Promise<RepoInfo | undefined> {
+	try {
+		const res = await shell.run(['git', '-C', dir, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'], {
+			timeoutMs: GIT_TIMEOUT_MS,
+		});
+		const [toplevel, common] = res.stdout
+			.toString('utf8')
+			.split('\n')
+			.map((line) => line.replace(/\r$/, ''));
+		if (res.exitCode !== 0 || !toplevel || !common) {
+			return undefined;
+		}
+		const head = await shell.run(['git', '-C', toplevel, 'symbolic-ref', '--short', '-q', 'HEAD'], { timeoutMs: GIT_TIMEOUT_MS });
+		const branch = head.exitCode === 0 ? head.stdout.toString('utf8').trim() || undefined : undefined;
+		return { toplevel, main: path.posix.basename(common) === '.git' ? path.posix.dirname(common) : toplevel, branch };
+	} catch {
+		return undefined;
+	}
+}
+
 export interface GitInfo extends GitStatus {
 	/** What to call HEAD: the branch, or the short SHA when detached. */
 	head: string;

@@ -251,6 +251,32 @@ id; an agents section with only `rows_by_agent` leaves other agents' rows as the
   herdr itself ignores its whole config when anything in it is wrong, outside the sidebar rows too, so
   if herdr's sidebar shows its defaults while VS Code follows your rows, run `herdr config check`.
 
+## Window title
+
+In a saved `.code-workspace`, the window title can name the branch the active editor tab is on, such as
+`feature-a (my-workspace)`, so a time tracker reading window titles sees what you are working on:
+
+- a **herdr space tab**: the repo or worktree of its active pane (the tile you last clicked in it, else herdr's
+  focused pane there), read with git in the pane's own environment — this machine, a dev container or an SSH host;
+- any **other tab with a file** (an editor, a diff's right side, a notebook): the nearest repo or worktree holding
+  the file, including files opened from a dev container or SSH host.
+
+Other tabs (Settings, extension pages, other webviews) leave the title as it was. The terminal panel plays no part.
+
+- Off by default. Set `herdr.windowTitle` to turn it on, for example to `${branch} (${rootNameShort})`. Set it back
+  to `null` to turn it off and restore your own title.
+- `${branch}` (the folder name for a detached HEAD), `${project}` (the repo's folder), `${folder}` (the worktree's
+  folder), `${space}` (the herdr space's label) and `${title}` (what the pane's program says it is doing) come from
+  the tab; anything else, such as `${rootNameShort}`, is one of `window.title`'s own variables.
+- `${space}` and `${title}` are empty for a file, and `${title}` for a shell whose title only names its folder.
+  Surround them with VS Code's `${separator}`, which is dropped next to an empty value:
+  `${project}:${branch}${separator}${title}` gives `devc-tools:main — Fixing the title` with
+  `window.titleSeparator` set to ` — `.
+- The title returns to your own `window.title` when the tab's folder is not in a repo. A branch switched in the same
+  folder shows within about 15 s.
+- The title is written to `window.title` in the `.code-workspace` file each time it changes, so a workspace file
+  tracked in Git will show a diff. Don't also turn on devc-vscode's `devc-vscode.windowTitle`: both would write it.
+
 ## Requirements
 
 - herdr **0.9.5 or later** in each environment, on `PATH` or in `~/.local/bin`. Older herdr
@@ -270,6 +296,7 @@ id; an agents section with only `rows_by_agent` leaves other agents' rows as the
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
 | `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
 | `herdr.useHerdrSidebarConfig` | `true` | lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
+| `herdr.windowTitle` | `null` | the window title while the active editor tab is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).
 

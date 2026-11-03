@@ -705,6 +705,15 @@
           "default": true,
           "scope": "window",
           "markdownDescription": "Lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml`. Off: the built-in rows."
+        },
+        "herdr.windowTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "scope": "window",
+          "markdownDescription": "The window title while the active editor tab is in a Git repo or worktree: a herdr space tab's active pane's folder, or any other tab's file. `${branch}` is its branch (the folder name for a detached HEAD), `${project}` the repo's folder name, `${folder}` the worktree's folder name, `${space}` the herdr space's label and `${title}` the title the pane's program sets (what an agent is doing), empty when it only repeats the pane's name or folder; `${space}` and `${title}` are empty for a file. Put `${separator}` around them so the separator is dropped while they are empty. Anything else, such as `${rootNameShort}`, is one of `#window.title#`'s own variables. Applies only to a saved `.code-workspace`, whose `window.title` setting is rewritten as the active tab changes. Off (`null`) by default; set it, for example to `${branch} (${rootNameShort})`, to turn it on."
         }
       }
     }

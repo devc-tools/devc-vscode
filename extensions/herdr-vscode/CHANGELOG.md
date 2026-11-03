@@ -4,6 +4,9 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **Window title from the active tab's repo** (`herdr.windowTitle`, off by default): in a saved `.code-workspace`, the
+  window title can name the branch of the active herdr space tab's pane, or of the repo holding the active editor's
+  file, with `${branch}`, `${project}`, `${folder}`, `${space}` and `${title}`.
 - **Closing a space closes its editor tab**, whether it was closed from Spaces, the herdr TUI or by closing its last tab
   (the tab used to stay open saying *This herdr space was closed.*).
 - **Open Host Terminal** (Spaces title bar and command palette, for a dev container session): a terminal on this machine
