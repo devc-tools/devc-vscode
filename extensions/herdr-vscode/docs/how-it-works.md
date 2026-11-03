@@ -631,11 +631,10 @@ has a repository for them, re-fired on its `onDidOpenRepository`, `onDidCloseRep
 
 ### Repo-row actions
 
-The Repo row's `contextValue` is `herdr.paneContext.root` plus ` addable`, ` showable`, ` scm` (a `file:` repo) and
-` terminal` (this machine). **Open in Source Control** activates `vscode.git` if needed, then `getRepository(root) ??
+The Repo row's `contextValue` is `herdr.paneContext.root` plus ` addable` and ` scm` (a `file:` repo).
+**Open in Source Control** activates `vscode.git` if needed, then `getRepository(root) ??
 openRepository(root)` and `workbench.view.scm`. Git keeps a repo outside the workspace only for this window session; a
-bind-mounted repo of another uid trips `safe.directory` (Git says so; `openRepository` returns `null`). **Terminal Here** is
-`createTerminal({name, cwd, location: Editor})`, on this machine only.
+bind-mounted repo of another uid trips `safe.directory` (Git says so; `openRepository` returns `null`).
 
 ### Other panes
 

@@ -455,7 +455,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('herdr.paneContext.showPaneFiles', () => applyPaneFilesOnly(true, paneContext, context.workspaceState)),
 		vscode.commands.registerCommand('herdr.paneContext.showAllFiles', () => applyPaneFilesOnly(false, paneContext, context.workspaceState)),
 		vscode.commands.registerCommand('herdr.paneContext.openSourceControl', () => paneContext.openSourceControl()),
-		vscode.commands.registerCommand('herdr.paneContext.openTerminal', () => paneContext.openTerminal()),
 		vscode.commands.registerCommand('herdr.paneContext.newFile', (node?: PaneContextNode) => paneContext.promptNew(node, 'file')),
 		vscode.commands.registerCommand('herdr.paneContext.newFolder', (node?: PaneContextNode) => paneContext.promptNew(node, 'folder')),
 		vscode.commands.registerCommand('herdr.paneContext.rename', (node?: PaneContextNode) => paneContext.promptRename(node)),

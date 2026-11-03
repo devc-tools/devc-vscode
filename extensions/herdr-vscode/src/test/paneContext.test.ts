@@ -134,15 +134,11 @@ suite('pane context: rules', () => {
 		assert.ok(applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root addable scm'));
 		assert.ok(!applies('herdr.paneContext.addToWorkspace', 'herdr.paneContext.root scm'));
 
-		// Open in Source Control on a file: repo; Terminal Here on this machine.
-		assert.strictEqual(rootContextValue({ canAdd: true, scm: true, terminal: true }), 'herdr.paneContext.root addable scm terminal');
-		assert.strictEqual(rootContextValue({ canAdd: false, scm: false, terminal: true }), 'herdr.paneContext.root terminal');
-		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root addable scm terminal'));
+		// Open in Source Control on a file: repo.
+		assert.strictEqual(rootContextValue({ canAdd: true, scm: true }), 'herdr.paneContext.root addable scm');
+		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root addable scm'));
 		assert.ok(applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root scm'));
-		assert.ok(!applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root terminal'));
-		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root scm terminal'));
-		assert.ok(applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root terminal'));
-		assert.ok(!applies('herdr.paneContext.openTerminal', 'herdr.paneContext.root addable scm'));
+		assert.ok(!applies('herdr.paneContext.openSourceControl', 'herdr.paneContext.root addable'));
 		// A click on a change row opens its diff; the inline action opens the file.
 		assert.ok(!whens.has('herdr.paneContext.openChanges'));
 		assert.ok(applies('herdr.paneContext.openFile', 'herdr.paneContext.change'));
@@ -155,10 +151,10 @@ suite('pane context: rules', () => {
 		const menus = ext.packageJSON.contributes.menus as Record<string, { command: string; when: string; group?: string }[]>;
 		const groups = new Map(menus['view/item/context'].filter((m) => m.group?.startsWith('inline')).map((m) => [m.command, m.group]));
 		assert.deepStrictEqual(
-			['addToWorkspace', 'openSourceControl', 'openTerminal'].map((c) => groups.get(`herdr.paneContext.${c}`)),
-			['inline@1', 'inline@2', 'inline@3'],
+			['addToWorkspace', 'openSourceControl'].map((c) => groups.get(`herdr.paneContext.${c}`)),
+			['inline@1', 'inline@2'],
 		);
-		for (const c of ['showPaneFiles', 'showAllFiles', 'openSourceControl', 'openTerminal']) {
+		for (const c of ['showPaneFiles', 'showAllFiles', 'openSourceControl']) {
 			assert.strictEqual(menus.commandPalette.find((m) => m.command === `herdr.paneContext.${c}`)?.when, 'false', c);
 		}
 	});
@@ -438,7 +434,7 @@ suite('pane context: the view over a temp repo', function () {
 		await rootIs(path.basename(dir));
 		const root = await rootRow();
 		assert.strictEqual(root.description, '⎇ main ● 4');
-		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable scm terminal');
+		assert.strictEqual(paneContextItem(root).contextValue, 'herdr.paneContext.root addable scm');
 		assert.deepStrictEqual((paneContextItem(root).iconPath as vscode.ThemeIcon).id, 'repo');
 
 		const changes = (await view.getChildren(await group('changes'))) as ChangeNode[];
@@ -901,20 +897,6 @@ suite('pane context: the view over a temp repo', function () {
 		assert.deepStrictEqual(rowLabels(await commitRows()), ['No agent in this pane: showing all files', 'one']);
 		// Files is never filtered.
 		assert.ok(labels(await view.getChildren(await group('files'))).includes('README.md'));
-	});
-
-	test('Terminal Here: a terminal editor in the root, named after it', async () => {
-		view = makeView();
-		await rootIs(path.basename(dir));
-		const terminal = view.openTerminal()!;
-		try {
-			const options = terminal.creationOptions as vscode.TerminalOptions;
-			assert.strictEqual(options.name, path.basename(dir));
-			assert.strictEqual(options.cwd, dir);
-			assert.strictEqual(options.location, vscode.TerminalLocation.Editor);
-		} finally {
-			terminal.dispose();
-		}
 	});
 
 	test("Open in Source Control: VS Code's Git has the temp repo afterwards", async () => {

@@ -196,12 +196,6 @@
         "icon": "$(source-control)"
       },
       {
-        "command": "herdr.paneContext.openTerminal",
-        "title": "Terminal Here",
-        "category": "herdr",
-        "icon": "$(terminal)"
-      },
-      {
         "command": "herdr.paneContext.newFile",
         "title": "New File…",
         "category": "herdr",
@@ -396,11 +390,6 @@
           "group": "inline@2"
         },
         {
-          "command": "herdr.paneContext.openTerminal",
-          "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.root.* terminal/",
-          "group": "inline@3"
-        },
-        {
           "command": "herdr.paneContext.openFile",
           "when": "view == herdr.paneContext && viewItem =~ /^herdr\\.paneContext\\.(change|commitFile)$/",
           "group": "inline@1"
@@ -511,10 +500,6 @@
         },
         {
           "command": "herdr.paneContext.openSourceControl",
-          "when": "false"
-        },
-        {
-          "command": "herdr.paneContext.openTerminal",
           "when": "false"
         },
         {

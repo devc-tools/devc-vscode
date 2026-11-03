@@ -125,8 +125,6 @@ export interface RootNode {
 	canAdd: boolean;
 	/** **Open in Source Control** applies: a `file:` repo. */
 	scm?: boolean;
-	/** **Terminal Here** applies: this machine. */
-	terminal?: boolean;
 }
 
 export interface GroupNode {
@@ -200,8 +198,8 @@ export interface NoteNode {
 export type PaneContextNode = RootNode | GroupNode | ChangeNode | CommitNode | CommitFileNode | EntryNode | NoteNode;
 
 /** The Repo row's context value, which the inline actions' `when` clauses read. */
-export function rootContextValue(node: Pick<RootNode, 'canAdd' | 'scm' | 'terminal'>): string {
-	return `herdr.paneContext.root${node.canAdd ? ' addable' : ''}${node.scm ? ' scm' : ''}${node.terminal ? ' terminal' : ''}`;
+export function rootContextValue(node: Pick<RootNode, 'canAdd' | 'scm'>): string {
+	return `herdr.paneContext.root${node.canAdd ? ' addable' : ''}${node.scm ? ' scm' : ''}`;
 }
 
 /** A commit row's description: `<sha7> · <time>`. */
@@ -722,7 +720,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			isRepo: loaded.toplevel !== undefined,
 			canAdd: canAddToWorkspace(loaded.rootUri, vscode.workspace.workspaceFolders),
 			scm: loaded.rootUri.scheme === 'file' && loaded.toplevel !== undefined,
-			terminal: loaded.env.kind === 'host',
 		};
 		const rows: PaneContextNode[] = [root];
 		const filter = this.filterFor(loaded);
@@ -973,21 +970,6 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 			return;
 		}
 		await vscode.commands.executeCommand('workbench.view.scm');
-	}
-
-	/** **Terminal Here** (this machine only): VS Code's terminal, in the editor area, in the root. */
-	openTerminal(): vscode.Terminal | undefined {
-		const loaded = this.loaded;
-		if (!loaded || loaded.env.kind !== 'host') {
-			return undefined;
-		}
-		const terminal = vscode.window.createTerminal({
-			name: path.posix.basename(loaded.rootPath) || loaded.rootPath,
-			cwd: loaded.rootPath,
-			location: vscode.TerminalLocation.Editor,
-		});
-		terminal.show();
-		return terminal;
 	}
 
 	/** Where a new file goes: into a folder row, beside a file row, else at the root. */

@@ -6,8 +6,8 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 - **Fewer row actions, and Close on every row**: a trash button on space, tab and pane rows in Spaces and on agent
   rows in Agents closes it in herdr, after asking. **New Tab** (space rows), **Split Right** / **Split Down** (tab and
-  pane rows), **Split Pane Here** and **Pin** / **Unpin** (Active Pane) are gone; the space strip's **+** and the
-  tile context menu still make tabs and splits.
+  pane rows), **Split Pane Here**, **Terminal Here** and **Pin** / **Unpin** (Active Pane) are gone; the space strip's **+**
+  and the tile context menu still make tabs and splits.
 - **New Space asks where the space starts**: pick one of the session's space folders, a workspace folder or home,
   type a path, or **Browse…**.
 - **Open File** on an Active Pane change row opens the file even while its diff is the active editor (it only

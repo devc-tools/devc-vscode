@@ -127,7 +127,6 @@ changes nothing.
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
   the action is there only for local paths. **Open in Source Control** (local repos) has VS Code's Git open the
   repo and shows the Source Control view; outside the workspace Git keeps it only until the window reloads.
-  **Terminal Here** (this machine only) opens VS Code's terminal in the repo, in the editor area.
 - **Changes:** the repo's whole `git status`, always shown (`0` and `No uncommitted changes` when clean). Click for a
   `HEAD ↔ working tree` diff;
   **Open File** opens the file as it is now.
