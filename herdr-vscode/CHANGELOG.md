@@ -4,6 +4,10 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 
 ## [Unreleased]
 
+- **New Space asks where the space starts**: pick one of the session's space folders, a workspace folder or home,
+  type a path, or **Browse…**.
+- **Open File** on an Active Pane change row opens the file even while its diff is the active editor (it only
+  re-focused the diff).
 - **Active Pane names its pane in the view header** (`ACTIVE PANE  Fixing the API · api › main`), with
   `pinned · ` and ` · not open in a tile` when they apply. The pane row is gone; the repo row is first, and
   **Show Pane** is in the title bar.

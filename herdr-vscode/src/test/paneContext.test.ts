@@ -694,15 +694,15 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(tab.label, 'a.ts (HEAD ↔ working tree)');
 		assert.ok(tab.input instanceof vscode.TabInputTextDiff);
 		assert.strictEqual((tab.input as vscode.TabInputTextDiff).modified.fsPath, path.join(dir, 'src', 'a.ts'));
-		provider.dispose();
 
-		await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+		// With the diff still open and active (a row click), Open File still opens the file.
 		await view.openFile(a);
 		const file = await waitFor('the file tab', () => {
 			const t = vscode.window.tabGroups.activeTabGroup.activeTab;
 			return t?.input instanceof vscode.TabInputText ? t : undefined;
 		});
 		assert.strictEqual((file.input as vscode.TabInputText).uri.fsPath, path.join(dir, 'src', 'a.ts'), 'Open File: the working tree file');
+		provider.dispose();
 	});
 
 	test('new file and folder, rename and delete, in the temp repo', async () => {

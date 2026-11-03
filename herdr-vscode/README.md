@@ -69,7 +69,9 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
   Mac, `Cmd+C/V` on it). A multi-line paste goes as one bracketed paste.
 - **New Space** (Spaces title bar), **New Tab** (a space's row), and **Split Right** / **Split Down** (a tab's or
-  pane's row) create them in herdr and open their space on the tab they landed in.
+  pane's row) create them in herdr and open their space on the tab they landed in. **New Space** first asks for the
+  directory: the session's spaces' folders, VS Code's workspace folders and home are listed, or type a path
+  (`/…`, `~/…`) or **Browse…** (in a dev container or over SSH, the environment's own files).
 - In **Switch Session**, clicking a stopped session starts it (a dev container's `herdr not running` row starts
   `devc`); **Stop** runs this machine's `herdr session stop`, after asking, because every pane in the session closes.
   A started session has no spaces until you add one. **Delete** runs `herdr session delete` in that session's

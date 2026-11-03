@@ -243,6 +243,15 @@ export function markedDescription(marker: string | undefined, description: strin
 	return description ? `${marker} · ${description}` : marker;
 }
 
+/**
+ * The file in a text editor. `vscode.open` would only re-focus a diff
+ * editor already showing it (a row click opens one), so the document is
+ * opened and shown as text.
+ */
+async function openAsFile(uri: vscode.Uri): Promise<void> {
+	await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
+}
+
 export function paneContextItem(node: PaneContextNode): vscode.TreeItem {
 	switch (node.type) {
 		case 'root': {
@@ -986,10 +995,10 @@ export class PaneContextView implements vscode.TreeDataProvider<PaneContextNode>
 		}
 		if (node.type === 'commitFile') {
 			const exists = await this.exists(node.fileUri);
-			await vscode.commands.executeCommand('vscode.open', exists ? node.fileUri : node.status === 'D' ? node.leftUri : node.rightUri);
+			await openAsFile(exists ? node.fileUri : node.status === 'D' ? node.leftUri : node.rightUri);
 			return;
 		}
-		await vscode.commands.executeCommand('vscode.open', node.deleted ? node.headUri : node.uri);
+		await openAsFile(node.deleted ? node.headUri : node.uri);
 	}
 
 	/** **Open in Source Control**: VS Code's Git opens the repo (for this window session), and its view shows. */

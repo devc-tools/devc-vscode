@@ -7,6 +7,7 @@ import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './en
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { applyPaneFilesOnly, ChangeNode, CommitFileNode, PANE_CONTEXT_VIEW, PANE_FILES_ONLY_KEY, PaneContextNode, PaneContextView, storedPaneFilesOnly } from './paneContext';
+import { pickSpaceDirectory } from './newSpace';
 import { CONTAINER_SCHEME, EnvironmentPaths, SSH_SCHEME } from './paths';
 import { ChangePoller, ContainerFileSystemProvider, PolledProvider, SshFileSystemProvider } from './remoteFs';
 import { createdTabId, sessionDeleteArgv, sessionStopArgv, spaceCwd, splitTarget, startContainerSession, startHostSession, whenTabKnown } from './sessionControl';
@@ -378,8 +379,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!key) {
 				return;
 			}
+			const conn = m.connection(key);
+			if (!conn) {
+				return;
+			}
 			try {
-				await openCreatedTab(key, await m.request(key, 'workspace.create', { focus: false }));
+				const [mounts, home] = await Promise.all([paths.mounts(conn.env), paths.home(conn.env)]);
+				const cwd = await pickSpaceDirectory({ env: conn.env, snapshot: conn.snapshot, mounts, home });
+				if (!cwd) {
+					return;
+				}
+				await openCreatedTab(key, await m.request(key, 'workspace.create', { cwd, focus: false }));
 			} catch (err) {
 				warn(err);
 			}

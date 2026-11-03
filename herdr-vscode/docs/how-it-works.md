@@ -379,6 +379,10 @@ and paste back into the webview. Elsewhere plain `Ctrl+C/V` belong to the app, s
   remove the tile before the user answers. The tile goes when herdr says the pane closed.
 - **New Space** and **New Tab** call `workspace.create` and `tab.create` with `focus:false`, wait for the
   snapshot to hold the tab, and open it. A new tab starts in the space's focused pane's directory.
+  New Space passes `cwd` from a quick pick (`src/newSpace.ts`): the focused space's directory, the other spaces',
+  workspace folders mapped into the environment (container: through its bind mounts; SSH: `herdr-ssh` URIs of that
+  alias), then `$HOME`; a typed `/…` or `~/…` path; or **Browse…**, `showOpenDialog` from the first candidate's
+  environment URI (VS Code's simple dialog over `herdr-container`/`herdr-ssh`). Escape creates nothing.
 - **Tile context menu.** Each tile's host element and Golden Layout tab carry `data-vscode-context`
   `{"webviewSection":"tile","paneKey","zoomed","preventDefaultContextMenuItems":true}`, rewritten when
   the zoom changes. `webview/context` menus (`webviewId == 'herdr.tiles' && webviewSection == 'tile'`)
