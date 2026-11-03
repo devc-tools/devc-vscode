@@ -412,11 +412,8 @@ suite('git', () => {
 			assert.strictEqual(commits[2].body, 'merge\x1fwith a unit separator\n');
 		});
 
-		test('base detection: a clone with origin/HEAD, a local main, and on main itself', async () => {
+		test('base detection: a clone counts against origin/HEAD', async () => {
 			const upstream = repo();
-			for (let i = 0; i < 3; i++) {
-				commit(upstream, `up ${i}`);
-			}
 			const clone = path.join(tempDir('hv-clone-'), 'c');
 			cp.execFileSync('git', ['clone', '-q', upstream, clone], { env });
 			configure(clone);
@@ -428,8 +425,9 @@ suite('git', () => {
 			assert.strictEqual(list.description, 'vs origin/main');
 			assert.deepStrictEqual(list.commits.map((c) => c.sha), [f2, f1], "only the branch's commits");
 			assert.strictEqual(list.head, f2);
+		});
 
-			// No remote, but a main.
+		test('base detection: no remote, but a main', async () => {
 			const local = repo();
 			run(local, 'checkout', '-q', '-b', 'topic');
 			const t1 = commit(local, 'topic one');
@@ -437,18 +435,21 @@ suite('git', () => {
 			const vsMain = (await readCommits(shell, local))!;
 			assert.strictEqual(vsMain.description, 'vs main');
 			assert.deepStrictEqual(vsMain.commits.map((c) => c.sha), [t1]);
+		});
 
-			// On main itself: recent, at most 20.
-			run(local, 'checkout', '-q', 'main');
+		test('base detection: on main itself, the most recent, at most 20', async () => {
+			const local = repo();
+			// Empty commits: one git process each, where commit() takes three.
 			for (let i = 0; i < 24; i++) {
-				commit(local, `main ${i}`);
+				run(local, 'commit', '-q', '--allow-empty', '-m', `main ${i}`);
 			}
 			const recent = (await readCommits(shell, local))!;
 			assert.strictEqual(recent.description, 'recent');
 			assert.strictEqual(recent.commits.length, 20);
 			assert.strictEqual(recent.commits[0].body, 'main 23\n');
+		});
 
-			// A master, and neither.
+		test('base detection: a master, and neither', async () => {
 			const m = tempDir('hv-master-');
 			run(m, 'init', '-q', '-b', 'master');
 			configure(m);
