@@ -632,6 +632,11 @@ container's carries its `devcontainer.local_folder` (`localFolder`, from `docker
 entry. The command opens `vscode.window.createTerminal({ name: "<folder name> (host)", cwd: <localFolder>, location:
 Panel })` and shows it. A folder that is not a directory on this machine (Docker on another host) warns instead.
 
+Space rows of a dev container session (session key `container:…`) have contextValue `herdr.space.container` (others
+`herdr.space`) and the command inline before Close Space. From a row it starts at `hostPathOf(<space directory>,
+<bind mounts>)` when the space's directory is under a bind mount, else at `localFolder`, and is named
+`<folder name> · <space> (host)`.
+
 ### Git markers
 
 `src/decorations.ts`, a `FileDecorationProvider` for the followed repo only: each status path's URI

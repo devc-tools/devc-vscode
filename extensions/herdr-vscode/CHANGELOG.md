@@ -7,7 +7,8 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 - **Closing a space closes its editor tab**, whether it was closed from Spaces, the herdr TUI or by closing its last tab
   (the tab used to stay open saying *This herdr space was closed.*).
 - **Open Host Terminal** (Spaces title bar and command palette, for a dev container session): a terminal on this machine
-  in the container's project folder, in the bottom panel.
+  in the container's project folder, in the bottom panel. Also a button on dev container space rows, starting in the
+  space's own folder on this machine when it is bind-mounted.
 - **Show Only This Pane's Changes shows a working agent's files**: while the filter is on, Active Pane checks what the
   followed agent has changed so far on each refresh; before, nothing showed until the agent stopped working.
 

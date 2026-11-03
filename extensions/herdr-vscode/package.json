@@ -366,8 +366,13 @@
       ],
       "view/item/context": [
         {
+          "command": "herdr.openHostTerminal",
+          "when": "view == herdr.spaces && viewItem == herdr.space.container",
+          "group": "inline@0"
+        },
+        {
           "command": "herdr.closeSpace",
-          "when": "view == herdr.spaces && viewItem == herdr.space",
+          "when": "view == herdr.spaces && viewItem =~ /^herdr\\.space(\\.container)?$/",
           "group": "inline@1"
         },
         {

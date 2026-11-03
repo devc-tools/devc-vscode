@@ -204,7 +204,8 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			item.tooltip = node.tooltip;
 			// A space is always in a connected snapshot: no agents is idle, not off.
 			item.iconPath = node.noIcon ? undefined : statusIcon(node.status ?? 'idle');
-			item.contextValue = 'herdr.space';
+			// A dev container's space also offers Open Host Terminal.
+			item.contextValue = node.sessionKey.startsWith('container:') ? 'herdr.space.container' : 'herdr.space';
 			item.command = { command: OPEN_SPACE_COMMAND, title: 'Open herdr Space', arguments: [node.sessionKey, node.workspaceId] };
 			return item;
 		}

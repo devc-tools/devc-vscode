@@ -120,7 +120,7 @@ suite('herdr-vscode', () => {
 			(contributed.menus['view/item/context'] as { command: string }[])
 				.map((m) => m.command)
 				.filter((c) => !c.startsWith('herdr.paneContext.')),
-			['herdr.closeSpace', 'herdr.closeTab', 'herdr.closePane', 'herdr.openPaneTab', 'herdr.focusPane'],
+			['herdr.openHostTerminal', 'herdr.closeSpace', 'herdr.closeTab', 'herdr.closePane', 'herdr.openPaneTab', 'herdr.focusPane'],
 		);
 		const focus = (contributed.commands as { command: string; title: string }[]).find((c) => c.command === 'herdr.focusPane');
 		assert.strictEqual(focus?.title, 'Focus in herdr TUI');

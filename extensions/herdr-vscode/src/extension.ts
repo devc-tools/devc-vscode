@@ -4,7 +4,7 @@ import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
 import { PaneDecorations } from './decorations';
 import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
-import { HOST_FOLDER_CONTEXT_KEY, openHostTerminal } from './hostTerminal';
+import { HOST_FOLDER_CONTEXT_KEY, hostTerminalFolder, openHostTerminal } from './hostTerminal';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
 import { applyPaneFilesOnly, ChangeNode, CommitFileNode, PANE_CONTEXT_VIEW, PANE_FILES_ONLY_KEY, PaneContextNode, PaneContextView, storedPaneFilesOnly } from './paneContext';
@@ -398,12 +398,18 @@ export function activate(context: vscode.ExtensionContext): void {
 				warn(err);
 			}
 		}),
-		vscode.commands.registerCommand('herdr.openHostTerminal', () => {
-			const key = sessions.selected;
+		vscode.commands.registerCommand('herdr.openHostTerminal', async (node?: SpaceNode) => {
+			const key = node?.sessionKey ?? sessions.selected;
 			const env = key ? m.connection(key)?.env : undefined;
-			if (env) {
-				openHostTerminal(env);
+			if (!env) {
+				return;
 			}
+			if (!node || !env.localFolder) {
+				openHostTerminal(env);
+				return;
+			}
+			const mounts = node.directory ? await paths.mounts(env).catch(() => []) : [];
+			openHostTerminal(env, { folder: hostTerminalFolder(env.localFolder, node.directory, mounts), space: node.label });
 		}),
 		vscode.commands.registerCommand('herdr.closeSpace', (node?: SpaceNode) =>
 			node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId }),

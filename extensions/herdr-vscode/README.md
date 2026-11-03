@@ -34,7 +34,9 @@ and sessions are picked from **Switch Session**:
   there, else its first). Space rows expand with their arrow.
 - **Open Host Terminal** (`$(terminal)` in the Spaces title bar, or the command palette) while a dev container
   session is selected: a terminal on this machine in the container's project folder (its
-  `devcontainer.local_folder`), in the panel at the bottom.
+  `devcontainer.local_folder`), in the panel at the bottom. A dev container's space rows have the same button
+  (`$(terminal)`, before the trash): it starts in the space's folder on this machine when that folder is
+  bind-mounted (as the project folder usually is), else in the project folder.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
   tooltip); click it to switch session.
 

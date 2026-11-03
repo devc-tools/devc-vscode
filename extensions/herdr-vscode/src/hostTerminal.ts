@@ -1,13 +1,19 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { Environment } from './environments';
+import { BindMount, hostPathOf } from './paths';
 
 /** True while the selected session runs in a dev container whose project folder is known. */
 export const HOST_FOLDER_CONTEXT_KEY = 'herdr.sessionHasHostFolder';
 
-/** The host terminal's name: `<folder name> (host)`. */
-export function hostTerminalName(env: Pick<Environment, 'label'>): string {
-	return `${env.label} (host)`;
+/** The host terminal's name: `<folder name> (host)`, or `<folder name> · <space> (host)` for a space. */
+export function hostTerminalName(env: Pick<Environment, 'label'>, space?: string): string {
+	return space ? `${env.label} · ${space} (host)` : `${env.label} (host)`;
+}
+
+/** Where a host terminal starts: a space's directory on this machine when it is bind-mounted, else the project folder. */
+export function hostTerminalFolder(localFolder: string, dir: string | undefined, mounts: readonly BindMount[]): string {
+	return (dir && hostPathOf(dir, mounts)) || localFolder;
 }
 
 /**
@@ -15,8 +21,12 @@ export function hostTerminalName(env: Pick<Environment, 'label'>): string {
  * `devcontainer.local_folder`), in the panel. Warns when the environment has no
  * such folder, or the folder is not on this machine.
  */
-export function openHostTerminal(env: Pick<Environment, 'label' | 'localFolder'>, exists: (dir: string) => boolean = isDirectory): vscode.Terminal | undefined {
-	const folder = env.localFolder;
+export function openHostTerminal(
+	env: Pick<Environment, 'label' | 'localFolder'>,
+	place: { folder?: string; space?: string } = {},
+	exists: (dir: string) => boolean = isDirectory,
+): vscode.Terminal | undefined {
+	const folder = env.localFolder && (place.folder ?? env.localFolder);
 	if (!folder) {
 		void vscode.window.showWarningMessage('herdr: the selected session is not in a dev container.');
 		return undefined;
@@ -26,7 +36,7 @@ export function openHostTerminal(env: Pick<Environment, 'label' | 'localFolder'>
 		return undefined;
 	}
 	const terminal = vscode.window.createTerminal({
-		name: hostTerminalName(env),
+		name: hostTerminalName(env, place.space),
 		cwd: folder,
 		location: vscode.TerminalLocation.Panel,
 	});
