@@ -127,3 +127,44 @@ export function desiredOpen(
 ): string[] {
   return [...listed].filter(p => pending.get(p) ?? open.has(p));
 }
+
+/**
+ * The workspace folders, by path, that no listed pin covers: ones added
+ * outside the view. The first folder is never among them.
+ */
+export function unpinnedFolders(
+  open: readonly string[],
+  covered: ReadonlySet<string>
+): string[] {
+  return open.slice(1).filter(p => !covered.has(p));
+}
+
+/**
+ * How to move the workspace folders at `moved` (indices) onto the one at
+ * `target`, of `count` folders: after it when moving down or onto the first
+ * folder, before it when moving up, to the end when `target` is undefined.
+ * The first folder never moves. Returns the first index that changes and
+ * the original indices of the folders from there on, or undefined when
+ * nothing would move.
+ */
+export function planMove(
+  count: number,
+  moved: readonly number[],
+  target: number | undefined
+): { start: number; order: number[] } | undefined {
+  const moving = [...new Set(moved)]
+    .filter(i => i > 0 && i < count)
+    .sort((a, b) => a - b);
+  if (!moving.length || (target !== undefined && moving.includes(target))) {
+    return undefined;
+  }
+  const staying = [...Array(count).keys()].filter(i => !moving.includes(i));
+  let at = staying.length;
+  if (target !== undefined && target >= 0 && target < count) {
+    const pos = staying.indexOf(target);
+    at = target === 0 || target > moving[0] ? pos + 1 : pos;
+  }
+  const order = [...staying.slice(0, at), ...moving, ...staying.slice(at)];
+  const start = order.findIndex((original, i) => original !== i);
+  return start < 0 ? undefined : { start, order: order.slice(start) };
+}

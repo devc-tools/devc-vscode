@@ -2,7 +2,7 @@
   "name": "workspace-folders-vscode",
   "displayName": "Workspace Folders",
   "publisher": "devc-tools",
-  "description": "Pin folders and Git repos with their worktrees, tick the ones you want, and apply them as the window's workspace folders.",
+  "description": "Pin folders and Git repos with their worktrees, tick the ones you want, and apply them as the window's workspace folders; reorder and rename the workspace folders.",
   "repository": {
     "type": "git",
     "url": "https://github.com/devc-tools/devc-vscode.git"
@@ -29,6 +29,18 @@
         "title": "Unpin",
         "category": "Workspace Folders",
         "icon": "$(close)"
+      },
+      {
+        "command": "workspaceFolders.pinWorkspaceFolder",
+        "title": "Pin",
+        "category": "Workspace Folders",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "workspaceFolders.rename",
+        "title": "Rename in Workspace…",
+        "category": "Workspace Folders",
+        "icon": "$(edit)"
       },
       {
         "command": "workspaceFolders.apply",
@@ -90,6 +102,21 @@
           "command": "workspaceFolders.unpin",
           "when": "view == workspaceFolders.view && viewItem =~ /^pinned/",
           "group": "1_pin"
+        },
+        {
+          "command": "workspaceFolders.pinWorkspaceFolder",
+          "when": "view == workspaceFolders.view && viewItem == workspaceFolderUnpinned",
+          "group": "inline"
+        },
+        {
+          "command": "workspaceFolders.pinWorkspaceFolder",
+          "when": "view == workspaceFolders.view && viewItem == workspaceFolderUnpinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "workspaceFolders.rename",
+          "when": "view == workspaceFolders.view && viewItem =~ /^workspaceFolder/",
+          "group": "2_edit"
         }
       ],
       "commandPalette": [
@@ -104,9 +131,24 @@
         {
           "command": "workspaceFolders.discard",
           "when": "workspaceFolders.pending"
+        },
+        {
+          "command": "workspaceFolders.pinWorkspaceFolder",
+          "when": "false"
+        },
+        {
+          "command": "workspaceFolders.rename",
+          "when": "false"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "workspaceFolders.rename",
+        "key": "f2",
+        "when": "focusedView == workspaceFolders.view && !inputFocus"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

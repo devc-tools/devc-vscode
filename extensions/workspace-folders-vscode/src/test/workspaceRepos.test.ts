@@ -5,12 +5,14 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   desiredOpen,
+  planMove,
   prunePending,
   readPinnedRepo,
   resolvePin,
   rootPin,
   sortPinned,
   togglePending,
+  unpinnedFolders,
 } from '../workspaceRepos';
 import { makeGit } from '../git';
 
@@ -185,5 +187,49 @@ suite('workspace repos: pending toggles', () => {
       ),
       ['/a', '/c']
     );
+  });
+});
+
+suite('workspace repos: unpinned folders', () => {
+  test('lists open folders no pin covers, never the first', () => {
+    assert.deepStrictEqual(
+      unpinnedFolders(
+        ['/root', '/a', '/manual', '/a.worktrees/x', '/other'],
+        new Set(['/a', '/a.worktrees/x'])
+      ),
+      ['/manual', '/other']
+    );
+  });
+});
+
+suite('workspace repos: moving folders', () => {
+  test('moving down lands after the target', () => {
+    assert.deepStrictEqual(planMove(5, [1], 3), { start: 1, order: [2, 3, 1, 4] });
+  });
+
+  test('moving up lands before the target', () => {
+    assert.deepStrictEqual(planMove(5, [4], 2), { start: 2, order: [4, 2, 3] });
+  });
+
+  test('dropping on the first folder lands right after it', () => {
+    assert.deepStrictEqual(planMove(4, [3], 0), { start: 1, order: [3, 1, 2] });
+  });
+
+  test('no target moves to the end', () => {
+    assert.deepStrictEqual(planMove(4, [1], undefined), { start: 1, order: [2, 3, 1] });
+  });
+
+  test('several folders keep their order and move together', () => {
+    assert.deepStrictEqual(planMove(6, [4, 1], 2), { start: 1, order: [2, 1, 4, 3, 5] });
+  });
+
+  test('the first folder never moves', () => {
+    assert.strictEqual(planMove(3, [0], 2), undefined);
+  });
+
+  test('a drop onto a moved folder, or one that changes nothing, is nothing', () => {
+    assert.strictEqual(planMove(4, [1, 2], 2), undefined);
+    assert.strictEqual(planMove(4, [3], undefined), undefined);
+    assert.strictEqual(planMove(2, [1], 0), undefined);
   });
 });
