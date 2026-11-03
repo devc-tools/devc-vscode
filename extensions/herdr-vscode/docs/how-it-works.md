@@ -610,10 +610,10 @@ restored one, so dropping entries on absence is what keeps a reused id from inhe
 saw the pane go. Earlier builds' `herdr.paneContext.baselines` is cleared on activation.
 
 **The filter** (`herdr.paneContext.paneFilesOnly`, workspaceState and context key, default off; **Show Only This Pane's
-Files** / **Show All Files** in the title bar) applies to whichever pane is followed. For an agent pane with touched set `T`:
+Changes** / **Show All Changes** in the title bar) applies to whichever pane is followed. For an agent pane with touched set `T`:
 Changes keeps rows in `T` (an untracked `dir/` row when a path in `T` is under it) and reads `<shown> of <all>`; Commits loads every listed commit's files (four at a time) and hides commits with none in
 `T`, its description gaining ` · this pane`. An empty section shows `Nothing recorded for this pane`. A shell pane's sections
-are unfiltered, each with the note `No agent in this pane: showing all files` first. Files is never filtered. A recording
+are unfiltered, each with the note `No agent in this pane: showing all changes` first. Files is never filtered. A recording
 refreshes the view while the filter is on.
 
 ### Git markers

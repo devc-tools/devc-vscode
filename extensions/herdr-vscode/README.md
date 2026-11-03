@@ -134,7 +134,7 @@ changes nothing.
   `main` or `master`), or the 20 most recent (`recent`) on the default branch itself. Expand a commit for its files
   (`A`, `M`, `D` against its first parent); click one for its diff in that commit, and **Open File** for the file as
   it is now (or as the commit has it, when it is gone).
-- **Show Only This Pane's Files** (the filter in the title bar; **Show All Files** turns it off) narrows Changes
+- **Show Only This Pane's Changes** (the filter in the title bar; **Show All Changes** turns it off) narrows Changes
   and Commits to the files this pane's agent changed while it was **working**: herdr-vscode snapshots the worktree
   when an agent starts and stops working, in every connected session, whether or not this view is open. Git cannot
   say which process changed a file, so two agents working in one worktree at the same time see each other's files.

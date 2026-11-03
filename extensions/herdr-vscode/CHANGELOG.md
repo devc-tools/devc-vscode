@@ -28,7 +28,7 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
   now **Uncommitted** (expanded), followed by **Commits** (collapsed): your branch's commits since the default branch
   (`vs origin/main`), or the 20 most recent on the default branch itself. Expand a commit for its files; click one for
   its diff in that commit, **Open File** for the file.
-- **Show Only This Pane's Files** (title bar filter): Uncommitted and Commits narrow to the files the pane's agent
+- **Show Only This Pane's Changes** (title bar filter): Uncommitted and Commits narrow to the files the pane's agent
   changed while it was working, recorded by snapshotting the worktree when an agent starts and stops working, in every
   session. Nothing is written to the repo's `.git` (the old baselines wrote unreferenced objects there); the snapshots
   live in a temporary directory that is removed afterwards.

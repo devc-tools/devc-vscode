@@ -41,7 +41,7 @@ export const NO_CHANGES = 'No uncommitted changes';
 /** A change section with nothing this pane touched. */
 export const NOTHING_RECORDED = 'Nothing recorded for this pane';
 /** First row of each change section for a shell pane in pane mode. */
-export const NO_AGENT_NOTE = 'No agent in this pane: showing all files';
+export const NO_AGENT_NOTE = 'No agent in this pane: showing all changes';
 /** How many commits' files load at once (pane mode loads them all). */
 const COMMIT_FILES_PARALLEL = 4;
 
@@ -97,7 +97,7 @@ export interface PaneFilesMemento {
 	update(key: string, value: unknown): Thenable<void>;
 }
 
-/** **Show Only This Pane's Files** / **Show All Files**: the view, the workspaceState value and the context key. */
+/** **Show Only This Pane's Changes** / **Show All Changes**: the view, the workspaceState value and the context key. */
 export async function applyPaneFilesOnly(
 	on: boolean,
 	view: Pick<PaneContextView, 'setPaneFilesOnly'>,

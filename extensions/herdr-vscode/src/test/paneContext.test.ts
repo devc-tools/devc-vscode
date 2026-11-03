@@ -164,8 +164,8 @@ suite('pane context: rules', () => {
 		const contributed = ext.packageJSON.contributes;
 		const commands = contributed.commands as { command: string; title: string; icon?: string }[];
 		const cmd = (c: string) => commands.find((x) => x.command === c);
-		assert.deepStrictEqual([cmd('herdr.paneContext.showPaneFiles')?.title, cmd('herdr.paneContext.showPaneFiles')?.icon], ["Show Only This Pane's Files", '$(filter)']);
-		assert.deepStrictEqual([cmd('herdr.paneContext.showAllFiles')?.title, cmd('herdr.paneContext.showAllFiles')?.icon], ['Show All Files', '$(filter-filled)']);
+		assert.deepStrictEqual([cmd('herdr.paneContext.showPaneFiles')?.title, cmd('herdr.paneContext.showPaneFiles')?.icon], ["Show Only This Pane's Changes", '$(filter)']);
+		assert.deepStrictEqual([cmd('herdr.paneContext.showAllFiles')?.title, cmd('herdr.paneContext.showAllFiles')?.icon], ['Show All Changes', '$(filter-filled)']);
 		const title = contributed.menus['view/title'] as { command: string; when: string; group: string }[];
 		const at = (c: string) => title.find((m) => m.command === c)!;
 		assert.strictEqual(at('herdr.paneContext.showPaneFiles').when, 'view == herdr.paneContext && !herdr.paneContext.paneFilesOnly');
@@ -891,10 +891,10 @@ suite('pane context: the view over a temp repo', function () {
 		assert.strictEqual(uncommitted.description, '4');
 		const rows = await view.getChildren(uncommitted);
 		assert.strictEqual(rows.length, 5);
-		assert.deepStrictEqual([rows[0].type, (rows[0] as { label: string }).label], ['note', 'No agent in this pane: showing all files']);
+		assert.deepStrictEqual([rows[0].type, (rows[0] as { label: string }).label], ['note', 'No agent in this pane: showing all changes']);
 		assert.strictEqual(paneContextItem(rows[0]).iconPath, undefined);
 		assert.strictEqual((await group('commits'))!.description, 'recent');
-		assert.deepStrictEqual(rowLabels(await commitRows()), ['No agent in this pane: showing all files', 'one']);
+		assert.deepStrictEqual(rowLabels(await commitRows()), ['No agent in this pane: showing all changes', 'one']);
 		// Files is never filtered.
 		assert.ok(labels(await view.getChildren(await group('files'))).includes('README.md'));
 	});

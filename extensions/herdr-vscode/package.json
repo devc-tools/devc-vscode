@@ -179,13 +179,13 @@
       },
       {
         "command": "herdr.paneContext.showPaneFiles",
-        "title": "Show Only This Pane's Files",
+        "title": "Show Only This Pane's Changes",
         "category": "herdr",
         "icon": "$(filter)"
       },
       {
         "command": "herdr.paneContext.showAllFiles",
-        "title": "Show All Files",
+        "title": "Show All Changes",
         "category": "herdr",
         "icon": "$(filter-filled)"
       },
