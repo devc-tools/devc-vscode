@@ -25,8 +25,8 @@ import {
 	sessionTreeDescription,
 	validateSessionName,
 } from '../views/sessionsView';
-import { sessionsRoots, sessionTreeIcon, sessionTreeItem } from '../views/sessionsTree';
-import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, spacesTreeItem, tabSummary } from '../views/spacesView';
+import { SessionSpaceNode, sessionRowOf, sessionsRoots, sessionSpaceTreeItem, sessionTreeIcon, sessionTreeItem } from '../views/sessionsTree';
+import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, SpaceNode, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
 
@@ -782,7 +782,7 @@ suite('Sessions tree', () => {
 		]);
 	});
 
-	test('session rows: selected expanded and highlighted, icons, click selects running only', () => {
+	test('session rows: highlighted when selected, icons, click selects running only', () => {
 		const [a, old] = rowsOf(
 			{
 				env: hostEnv,
@@ -794,16 +794,14 @@ suite('Sessions tree', () => {
 			},
 			{ 'host/a': conn('connected') },
 		);
-		const selected = sessionTreeItem(a, true, true);
-		assert.strictEqual(selected.collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+		const selected = sessionTreeItem(a, true);
+		assert.strictEqual(selected.collapsibleState, vscode.TreeItemCollapsibleState.None, 'a running session with no spaces');
 		assert.deepStrictEqual(selected.label, { label: 'a', highlights: [[0, 1]] });
 		assert.strictEqual(selected.id, 'session|host/a');
 		assert.ok(String(selected.tooltip).endsWith('\nSelected session'));
 		assert.deepStrictEqual(selected.command?.arguments, ['host/a']);
 		assert.strictEqual(selected.command?.command, 'herdr.sessions.select');
-		assert.strictEqual(sessionTreeItem(a, false, true).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
-		assert.strictEqual(sessionTreeItem(a, false, false).collapsibleState, vscode.TreeItemCollapsibleState.None);
-		const stopped = sessionTreeItem(old, false, false);
+		const stopped = sessionTreeItem(old, false);
 		assert.strictEqual(stopped.command, undefined);
 		const icon = (i: vscode.TreeItem) => {
 			const t = i.iconPath as vscode.ThemeIcon;
@@ -819,5 +817,40 @@ suite('Sessions tree', () => {
 		assert.strictEqual(sessionTreeIcon(unreachable).id, 'warning');
 		const [pending] = rowsOf({ env: sshEnv, status: 'pending', sessions: [] });
 		assert.strictEqual(sessionTreeIcon(pending).id, 'loading~spin');
+	});
+
+	test('space rows: space name, then session · where · git · counts; the space\'s status icon; click opens it', () => {
+		const [api] = rowsOf({ env: sshEnv, status: 'ok', sessions: [{ name: 'api', default: true, running: true }] }, { 'ssh:devbox/api': conn('connected') });
+		const space = (over: Partial<SpaceNode>): SpaceNode => ({
+			type: 'space',
+			id: 'ssh:devbox/api|space|w1',
+			sessionKey: 'ssh:devbox/api',
+			workspaceId: 'w1',
+			label: 'billing',
+			description: '\u2387 main',
+			tooltip: 'billing',
+			focused: true,
+			children: [{ type: 'tab', id: 't', label: 'tab · 1', focused: true, sessionKey: 'ssh:devbox/api', tabId: 't1', children: [] }],
+			status: 'done',
+			counts: '1 done',
+			...over,
+		});
+		const node = (s: SpaceNode): SessionSpaceNode => ({ type: 'sessionSpace', id: `session|${s.id}`, row: api, space: s });
+		const selected = sessionSpaceTreeItem(node(space({})), true);
+		assert.deepStrictEqual(selected.label, { label: 'billing', highlights: [[0, 7]] });
+		assert.strictEqual(selected.description, 'api · ssh devbox · \u2387 main · 1 done');
+		assert.strictEqual(selected.collapsibleState, vscode.TreeItemCollapsibleState.Expanded, 'the selected session\'s focused space');
+		assert.deepStrictEqual((selected.iconPath as vscode.ThemeIcon).id, 'remote');
+		assert.deepStrictEqual((selected.iconPath as vscode.ThemeIcon).color?.id, 'charts.green', 'the space\'s status, not the session\'s');
+		assert.strictEqual(selected.contextValue, 'herdr.session.running ssh space');
+		assert.deepStrictEqual(selected.command?.arguments, ['ssh:devbox/api', 'w1']);
+		const other = sessionSpaceTreeItem(node(space({ description: undefined, status: undefined, counts: 'idle', focused: false })), false);
+		assert.strictEqual(other.label, 'billing');
+		assert.strictEqual(other.description, 'api · ssh devbox · idle');
+		assert.strictEqual(other.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+		assert.strictEqual((other.iconPath as vscode.ThemeIcon).color, undefined, 'idle: uncoloured');
+		assert.strictEqual(sessionSpaceTreeItem(node(space({ children: [] })), true).collapsibleState, vscode.TreeItemCollapsibleState.None);
+		assert.strictEqual(sessionRowOf(node(space({}))), api);
+		assert.strictEqual(sessionRowOf(api), api);
 	});
 });

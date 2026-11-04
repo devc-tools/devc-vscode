@@ -46,7 +46,7 @@
 
 - [Remote Files Extension](remote-files-extension.md) — a new self-contained `remote-files-vscode` extension: an Explorer tree of running dev containers and `remoteFiles.sshHosts` hosts with file operations, drag-and-drop, Add SSH Host… and Terminal Here, on providers ported from herdr-vscode; devc-vscode and herdr-vscode unchanged.
 
-- [herdr Sessions Tree](herdr-sessions-tree.md) — a Sessions view first in the sidebar: Running sessions (expandable to spaces, tabs and panes) above Stopped ones, environment in the description (`ssh devbox · 1 done`, `dev container · idle`, nothing for this machine), selected session expanded and highlighted, row buttons to start / stop / delete / add a space.
+- [herdr Sessions Tree](herdr-sessions-tree.md) — a Sessions view first in the sidebar: running sessions as one row per space (space name, then `session · ssh devbox · 1 done`; environment icon), expandable to tabs and panes, above Stopped sessions; selected session highlighted, row buttons to start / stop / delete / add a space.
 
 ### Completed
 

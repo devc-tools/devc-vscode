@@ -126,6 +126,8 @@ suite('herdr-vscode', () => {
 				'herdr.sessions.start',
 				'herdr.sessions.stop',
 				'herdr.sessions.delete',
+				'herdr.sessions.delete',
+				'herdr.closeSpace',
 				'herdr.openHostTerminal',
 				'herdr.closeSpace',
 				'herdr.closeTab',

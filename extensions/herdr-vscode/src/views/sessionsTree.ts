@@ -10,6 +10,7 @@ import {
 	sessionTreeContextValue,
 	sessionTreeDescription,
 	sessionTreeSection,
+	sessionTreeWhere,
 } from './sessionsView';
 import { buildSpaces, SpaceNode, SpacesNode, spacesTreeItem } from './spacesView';
 
@@ -24,7 +25,20 @@ export interface SessionsRootNode {
 	rows: SessionRowNode[];
 }
 
-export type SessionsTreeNode = SessionsRootNode | SessionRowNode | SpacesNode;
+/** One space of a running session, standing for both: a session with spaces has one row per space. */
+export interface SessionSpaceNode {
+	type: 'sessionSpace';
+	id: string;
+	row: SessionRowNode;
+	space: SpaceNode;
+}
+
+export type SessionsTreeNode = SessionsRootNode | SessionRowNode | SessionSpaceNode | SpacesNode;
+
+/** The session a Sessions row's command acts on. */
+export function sessionRowOf(arg: SessionRowNode | SessionSpaceNode | undefined): SessionRowNode | undefined {
+	return arg?.type === 'sessionSpace' ? arg.row : arg?.type === 'session' ? arg : undefined;
+}
 
 const ROOT_LABEL = { running: 'Running', stopped: 'Stopped' } as const;
 
@@ -52,7 +66,11 @@ export const ENV_ICON: Record<SessionRowNode['envKind'], string> = {
  * status of a connected running session (uncoloured when idle), dimmed when
  * stopped or not connected; a warning or spinner for an environment that is not usable.
  */
-export function sessionTreeIcon(row: Pick<SessionRowNode, 'contextValue' | 'snapshot' | 'envStatus' | 'envKind'>): vscode.ThemeIcon {
+export function sessionTreeIcon(
+	row: Pick<SessionRowNode, 'contextValue' | 'snapshot' | 'envStatus' | 'envKind'>,
+	/** A space row's: its own worst status, rather than the session's. */
+	space?: Pick<SpaceNode, 'status'>,
+): vscode.ThemeIcon {
 	if (row.contextValue === 'herdr.session.absent') {
 		switch (row.envStatus) {
 			case 'unreachable':
@@ -67,21 +85,20 @@ export function sessionTreeIcon(row: Pick<SessionRowNode, 'contextValue' | 'snap
 	if (row.contextValue !== 'herdr.session.running' || !row.snapshot) {
 		return new vscode.ThemeIcon(id, new vscode.ThemeColor('disabledForeground'));
 	}
-	const status = sessionRowStatus(row.snapshot) ?? 'idle';
+	const status = (space ? space.status : sessionRowStatus(row.snapshot)) ?? 'idle';
 	// Idle stays the plain foreground: gray would look like stopped.
 	const color = status === 'idle' || status === 'unknown' ? undefined : statusIconSpec(status).color;
 	return new vscode.ThemeIcon(id, color ? new vscode.ThemeColor(color) : undefined);
 }
 
-/** A session row's tree item. `hasChildren`: a running, connected session with spaces to show. */
-export function sessionTreeItem(row: SessionRowNode, selected: boolean, hasChildren: boolean): vscode.TreeItem {
-	const collapsible = !hasChildren
-		? vscode.TreeItemCollapsibleState.None
-		: selected
-			? vscode.TreeItemCollapsibleState.Expanded
-			: vscode.TreeItemCollapsibleState.Collapsed;
-	// A tree item label has no other way to look distinct, and the tree's own selection moves on clicks.
-	const item = new vscode.TreeItem(selected ? { label: row.label, highlights: [[0, row.label.length]] } : row.label, collapsible);
+/** A label highlighted for the selected session: a tree item has no other way to look distinct, and the tree's own selection moves on clicks. */
+function rowLabel(label: string, selected: boolean): string | vscode.TreeItemLabel {
+	return selected ? { label, highlights: [[0, label.length]] } : label;
+}
+
+/** A session row's tree item: a stopped session, a place that can't be used, or a running session with no spaces. */
+export function sessionTreeItem(row: SessionRowNode, selected: boolean): vscode.TreeItem {
+	const item = new vscode.TreeItem(rowLabel(row.label, selected), vscode.TreeItemCollapsibleState.None);
 	item.id = `session|${row.key}`;
 	item.description = sessionTreeDescription(row);
 	item.tooltip = selected ? `${row.tooltip}\nSelected session` : row.tooltip;
@@ -93,18 +110,49 @@ export function sessionTreeItem(row: SessionRowNode, selected: boolean, hasChild
 	return item;
 }
 
+/**
+ * A running session's space row: the space name, then the session name, where
+ * it runs, the space's git (or repo) text and its agent counts. Expanded at
+ * first when it is the selected session's focused space.
+ */
+export function sessionSpaceTreeItem(node: SessionSpaceNode, selected: boolean): vscode.TreeItem {
+	const { row, space } = node;
+	const collapsible =
+		space.children.length === 0
+			? vscode.TreeItemCollapsibleState.None
+			: selected && space.focused
+				? vscode.TreeItemCollapsibleState.Expanded
+				: vscode.TreeItemCollapsibleState.Collapsed;
+	const item = new vscode.TreeItem(rowLabel(space.label, selected), collapsible);
+	item.id = node.id;
+	item.description = [row.label, ...sessionTreeWhere(row), space.description, space.counts]
+		.filter((x): x is string => !!x)
+		.join(' · ');
+	item.tooltip = [row.tooltip, space.tooltip, selected ? 'Selected session' : undefined].filter((x) => !!x).join('\n');
+	item.iconPath = sessionTreeIcon(row, space);
+	item.contextValue = `${sessionTreeContextValue(row)} space`;
+	item.command = { command: SELECT_SESSION_COMMAND, title: 'Open herdr Space', arguments: [row.key, space.workspaceId] };
+	return item;
+}
+
+/** A running session's rows: one per space, or the session row with none. */
+function rowsOfSession(row: SessionRowNode, spaces: Map<string, SessionSpaceNode[]>): (SessionRowNode | SessionSpaceNode)[] {
+	const list = spaces.get(row.key);
+	return list && list.length > 0 ? list : [row];
+}
+
 function nodeId(node: SessionsTreeNode): string {
 	return node.type === 'session' ? `session|${node.key}` : node.id;
 }
 
-/** Running sessions above stopped ones; running ones expand to their spaces, tabs and panes. */
+/** Running sessions' spaces above stopped sessions; a space row expands to its tabs and panes. */
 export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNode>, vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<SessionsTreeNode | undefined | void>();
 	readonly onDidChangeTreeData = this.emitter.event;
 	readonly treeView: vscode.TreeView<SessionsTreeNode>;
 	private readonly disposables: vscode.Disposable[] = [];
 	private roots: SessionsRootNode[] = [];
-	private spaces = new Map<string, SpaceNode[]>();
+	private spaces = new Map<string, SessionSpaceNode[]>();
 	private parents = new Map<string, SessionsTreeNode>();
 	private selected: string | undefined;
 
@@ -150,12 +198,14 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 				}
 				const key = row.key;
 				const lookup = key === selected && git ? (id: string, dir: string | undefined) => git.description(key, id, dir) : undefined;
-				const spaces = buildSpaces(row.snapshot, key, lookup, rows);
+				const spaces = buildSpaces(row.snapshot, key, lookup, rows).map(
+					(space): SessionSpaceNode => ({ type: 'sessionSpace', id: `session|${space.id}`, row, space }),
+				);
 				this.spaces.set(key, spaces);
-				for (const space of spaces) {
-					this.parents.set(space.id, row);
-					for (const tab of space.children) {
-						this.parents.set(tab.id, space);
+				for (const node of spaces) {
+					this.parents.set(node.id, root);
+					for (const tab of node.space.children) {
+						this.parents.set(tab.id, node);
 						for (const pane of tab.children) {
 							this.parents.set(pane.id, tab);
 						}
@@ -166,14 +216,15 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 		this.emitter.fire();
 	}
 
-	/** Expands the selected session's row. `reveal` on a hidden view would open it. */
+	/** Expands the selected session's focused space row. `reveal` on a hidden view would open it. */
 	private revealSelected(): void {
 		if (!this.treeView.visible || !this.selected) {
 			return;
 		}
-		const row = this.roots.flatMap((r) => r.rows).find((r) => r.key === this.selected);
-		if (row && this.spaces.has(row.key)) {
-			void Promise.resolve(this.treeView.reveal(row, { expand: true, select: false, focus: false })).catch(() => undefined);
+		const spaces = this.spaces.get(this.selected) ?? [];
+		const node = spaces.find((n) => n.space.focused) ?? spaces[0];
+		if (node && node.space.children.length > 0) {
+			void Promise.resolve(this.treeView.reveal(node, { expand: true, select: false, focus: false })).catch(() => undefined);
 		}
 	}
 
@@ -187,7 +238,9 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 				return item;
 			}
 			case 'session':
-				return sessionTreeItem(node, node.key === this.selected, (this.spaces.get(node.key)?.length ?? 0) > 0);
+				return sessionTreeItem(node, node.key === this.selected);
+			case 'sessionSpace':
+				return sessionSpaceTreeItem(node, node.row.key === this.selected);
 			default:
 				return spacesTreeItem(node);
 		}
@@ -199,9 +252,11 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 		}
 		switch (node.type) {
 			case 'root':
-				return node.rows;
+				return node.rows.flatMap((row) => rowsOfSession(row, this.spaces));
 			case 'session':
-				return this.spaces.get(node.key) ?? [];
+				return [];
+			case 'sessionSpace':
+				return node.space.children;
 			case 'pane':
 				return [];
 			default:

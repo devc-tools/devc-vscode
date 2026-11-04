@@ -69,14 +69,14 @@ suite('host terminal', () => {
 			{ command: 'herdr.openHostTerminal', when: 'view == herdr.sessions && viewItem =~ /^herdr\\.session\\.running container/', group: 'inline@0' },
 			{ command: 'herdr.openHostTerminal', when: 'view =~ /^herdr\\.(spaces|sessions)$/ && viewItem == herdr.space.container', group: 'inline@0' },
 		]);
-		const close = manifest.contributes.menus['view/item/context'].find((m) => m.command === 'herdr.closeSpace')!;
+		const close = manifest.contributes.menus['view/item/context'].find((m) => m.command === 'herdr.closeSpace' && m.when!.includes('spaces|'))!;
 		const closes = (value: string) => new RegExp(/viewItem =~ \/(.*)\//.exec(close.when!)![1]).test(value);
 		assert.ok(closes('herdr.space') && closes('herdr.space.container') && !closes('herdr.tab'));
 	});
 
 	test('space rows: a dev container session\'s are herdr.space.container', () => {
 		const node = (sessionKey: string): SpaceNode =>
-			({ type: 'space', id: 'x', sessionKey, workspaceId: 'w1', label: 'web', tooltip: '', focused: false, children: [], status: undefined }) as SpaceNode;
+			({ type: 'space', id: 'x', sessionKey, workspaceId: 'w1', label: 'web', tooltip: '', focused: false, children: [], status: undefined, counts: 'idle' }) as SpaceNode;
 		assert.strictEqual(spacesTreeItem(node('container:3f2a9c1b04de/default')).contextValue, 'herdr.space.container');
 		assert.strictEqual(spacesTreeItem(node('host/default')).contextValue, 'herdr.space');
 		assert.strictEqual(spacesTreeItem(node('ssh:dev/default')).contextValue, 'herdr.space');

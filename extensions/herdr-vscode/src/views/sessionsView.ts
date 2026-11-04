@@ -154,24 +154,35 @@ export function sessionTreeSection(row: Pick<SessionRowNode, 'contextValue'>): '
 }
 
 /**
- * A Sessions tree row's description: the SSH host (`ssh <alias>`; nothing on
- * this machine or in a dev container, whose icon says it), a container's
- * session name unless `devc`, then its status; the parts that are non-empty, joined with ` · `.
+ * Where a Sessions tree row runs, beyond its icon: the SSH host (`ssh <alias>`,
+ * `ssh` on an environment-level row, whose label is the alias) and a
+ * container's session name unless `devc`; nothing on this machine.
+ */
+export function sessionTreeWhere(row: Pick<SessionRowNode, 'key' | 'envKey' | 'session' | 'envKind' | 'alias'>): string[] {
+	const envLevel = row.key === `${row.envKey}/`;
+	const parts: string[] = [];
+	if (row.envKind === 'ssh') {
+		parts.push(envLevel ? 'ssh' : `ssh ${row.alias ?? ''}`.trim());
+	}
+	if (!envLevel && row.envKind === 'container' && row.session && row.session !== DEVC_SESSION) {
+		parts.push(row.session);
+	}
+	return parts;
+}
+
+/**
+ * A Sessions tree row's description: {@link sessionTreeWhere}, then its
+ * status; the parts that are non-empty, joined with ` · `.
  */
 export function sessionTreeDescription(
 	row: Pick<SessionRowNode, 'key' | 'envKey' | 'session' | 'contextValue' | 'envKind' | 'alias' | 'statusText'>,
 ): string {
 	const envLevel = row.key === `${row.envKey}/`;
-	let where: string | undefined;
-	if (row.envKind === 'ssh') {
-		where = envLevel ? 'ssh' : `ssh ${row.alias ?? ''}`.trim();
-	}
-	const name = !envLevel && row.envKind === 'container' && row.session !== DEVC_SESSION ? row.session : undefined;
 	let status: string | undefined = row.statusText;
 	if (!envLevel && row.contextValue === 'herdr.session.stopped') {
 		status = row.envKind === 'ssh' ? 'start not supported' : undefined;
 	}
-	return [where, name, status].filter((x): x is string => !!x).join(' · ');
+	return [...sessionTreeWhere(row), status].filter((x): x is string => !!x).join(' · ');
 }
 
 /** A Sessions tree row's context value: `herdr.session.<state> <kind>[ deletable]`. */

@@ -440,8 +440,18 @@
         },
         {
           "command": "herdr.sessions.delete",
-          "when": "view == herdr.sessions && viewItem =~ /deletable/",
+          "when": "view == herdr.sessions && viewItem =~ /deletable$/",
           "group": "inline@3"
+        },
+        {
+          "command": "herdr.sessions.delete",
+          "when": "view == herdr.sessions && viewItem =~ /deletable space$/",
+          "group": "session@3"
+        },
+        {
+          "command": "herdr.closeSpace",
+          "when": "view == herdr.sessions && viewItem =~ / space$/",
+          "group": "inline@4"
         },
         {
           "command": "herdr.openHostTerminal",

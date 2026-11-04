@@ -31,7 +31,7 @@ import {
 	SWITCH_SESSION_COMMAND,
 	validateSessionName,
 } from './views/sessionsView';
-import { SELECT_SESSION_COMMAND, SessionsTreeView } from './views/sessionsTree';
+import { SELECT_SESSION_COMMAND, SessionSpaceNode, sessionRowOf, SessionsTreeView } from './views/sessionsTree';
 import { FOCUS_PANE_COMMAND, OPEN_PANE_TAB_COMMAND, OPEN_SPACE_COMMAND, OPEN_TAB_COMMAND, PaneRef, SpaceNode, SpacesView, TabNode } from './views/spacesView';
 import { LocalShell } from './remoteShell';
 import { WindowTitleController } from './windowTitle';
@@ -396,14 +396,32 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('herdr.refresh', () => m.refresh()),
 		vscode.commands.registerCommand(SWITCH_SESSION_COMMAND, () => pickSession(sessionActions)),
-		vscode.commands.registerCommand(SELECT_SESSION_COMMAND, (key?: string) => key && sessions.select(key)),
-		vscode.commands.registerCommand('herdr.sessions.start', (row?: SessionRowNode) => row && sessionActions.start(row)),
-		vscode.commands.registerCommand('herdr.sessions.stop', (row?: SessionRowNode) => row && sessionActions.stop(row)),
-		vscode.commands.registerCommand('herdr.sessions.delete', (row?: SessionRowNode) => row && sessionActions.remove(row)),
+		// A space row also opens its space.
+		vscode.commands.registerCommand(SELECT_SESSION_COMMAND, async (key?: string, workspaceId?: string) => {
+			if (!key) {
+				return;
+			}
+			sessions.select(key);
+			if (workspaceId) {
+				await vscode.commands.executeCommand(OPEN_SPACE_COMMAND, key, workspaceId);
+			}
+		}),
+		vscode.commands.registerCommand('herdr.sessions.start', (arg?: SessionRowNode | SessionSpaceNode) => {
+			const row = sessionRowOf(arg);
+			return row && sessionActions.start(row);
+		}),
+		vscode.commands.registerCommand('herdr.sessions.stop', (arg?: SessionRowNode | SessionSpaceNode) => {
+			const row = sessionRowOf(arg);
+			return row && sessionActions.stop(row);
+		}),
+		vscode.commands.registerCommand('herdr.sessions.delete', (arg?: SessionRowNode | SessionSpaceNode) => {
+			const row = sessionRowOf(arg);
+			return row && sessionActions.remove(row);
+		}),
 		vscode.commands.registerCommand('herdr.sessions.new', () => sessionActions.create()),
 		// From a Sessions row, in that session; else in the selected one.
-		vscode.commands.registerCommand('herdr.newSpace', async (row?: SessionRowNode) => {
-			const key = row?.type === 'session' ? row.key : sessions.selected;
+		vscode.commands.registerCommand('herdr.newSpace', async (arg?: SessionRowNode | SessionSpaceNode) => {
+			const key = sessionRowOf(arg)?.key ?? sessions.selected;
 			if (!key) {
 				return;
 			}
@@ -422,8 +440,8 @@ export function activate(context: vscode.ExtensionContext): void {
 				warn(err);
 			}
 		}),
-		vscode.commands.registerCommand('herdr.openHostTerminal', async (arg?: SpaceNode | SessionRowNode) => {
-			const node = arg?.type === 'space' ? arg : undefined;
+		vscode.commands.registerCommand('herdr.openHostTerminal', async (arg?: SpaceNode | SessionRowNode | SessionSpaceNode) => {
+			const node = arg?.type === 'space' ? arg : arg?.type === 'sessionSpace' ? arg.space : undefined;
 			const key = arg?.type === 'session' ? arg.key : (node?.sessionKey ?? sessions.selected);
 			const env = key ? m.connection(key)?.env : undefined;
 			if (!env) {
@@ -436,9 +454,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			const mounts = node.directory ? await paths.mounts(env).catch(() => []) : [];
 			openHostTerminal(env, { folder: hostTerminalFolder(env.localFolder, node.directory, mounts) });
 		}),
-		vscode.commands.registerCommand('herdr.closeSpace', (node?: SpaceNode) =>
-			node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId }),
-		),
+		vscode.commands.registerCommand('herdr.closeSpace', (arg?: SpaceNode | SessionSpaceNode) => {
+			const node = arg?.type === 'sessionSpace' ? arg.space : arg;
+			return node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId });
+		}),
 		vscode.commands.registerCommand('herdr.closeTab', (node?: TabNode) =>
 			node && closeInHerdr(node.sessionKey, 'Tab', node.label, 'tab.close', { tab_id: node.tabId }),
 		),

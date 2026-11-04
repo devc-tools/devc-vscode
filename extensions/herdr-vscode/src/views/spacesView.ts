@@ -36,6 +36,8 @@ export interface SpaceNode {
 	children: TabNode[];
 	/** The worst agent status in the space, undefined with no agents. */
 	status: ReturnType<typeof worstStatus>;
+	/** Its agent counts, `1 blocked · 2 working`, or `idle`. */
+	counts: string;
 	/** Configured rows without `state_icon`: no icon. */
 	noIcon?: boolean;
 }
@@ -164,7 +166,8 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 			);
 		const agents = snapshot.panes.filter((p) => p.workspace_id === w.workspace_id && hasAgent(p)).map((p) => p.agent_status);
 		const directory = spaceDirectory(snapshot, w.workspace_id);
-		const tooltip = [w.label, w.repoName, directory, countsDescription(countStatuses(agents))].filter((x): x is string => !!x);
+		const counts = countsDescription(countStatuses(agents));
+		const tooltip = [w.label, w.repoName, directory, counts].filter((x): x is string => !!x);
 		const status = worstStatus(agents);
 		const gitText = git?.(w.workspace_id, directory);
 		const node: SpaceNode = {
@@ -179,6 +182,7 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 			focused: w.focused,
 			children: tabs,
 			status,
+			counts,
 		};
 		if (rows) {
 			const r = renderSpaceRow(rows, { label: w.label, status, git: gitText, tokens: w.tokens });

@@ -72,23 +72,31 @@ Stopped            4
 - **Session row `contextValue`**: `herdr.session.<state> <kind>[ deletable]`, state `running` | `stopped` | `absent`,
   kind `host` | `ssh` | `container`, ` deletable` when `row.deletable` and state is not `absent`. E.g.
   `herdr.session.running host deletable`, `herdr.session.stopped container`, `herdr.session.absent ssh`.
-- **Children of a running, connected session**: `buildSpaces(snapshot, key, git, sidebarRows)` rendered with
-  `spacesTreeItem` — identical rows, icons, commands and context values to Spaces. Running but not connected: no
-  children (`TreeItemCollapsibleState.None`). Stopped / absent rows: no children.
+- **Space rows** (replace the session row of a running, connected session with at least one space): one row per
+  space from `buildSpaces(snapshot, key, git, sidebarRows)`, in its order. A running session with no spaces, a running
+  session not connected, and stopped / absent rows are session rows with no children (`None`).
+  - Label: the space's label. Description: `[session label, ...where (ssh alias, container session unless devc),
+    space git / repo text, space agent counts (`1 done`, `idle`)]` joined with ` · `, e.g.
+    `api · ssh devbox · ⎇ main · 1 done`.
+  - Icon: the environment codicon, coloured by the **space's** worst status (uncoloured when idle).
+  - id `session|<space id>`; `contextValue` the session's plus ` space` (e.g. `herdr.session.running host deletable space`).
+  - Tooltip: the session's tooltip, the space's tooltip, then `Selected session` on the selected session's rows.
+  - Click: `herdr.sessions.select <key> <workspaceId>` — select the session, then `herdr.openSpace`.
+  - Children: the space's tab rows (`spacesTreeItem`), then panes, identical to Spaces.
 - **Git text on space rows**: only the selected session's spaces get branch / git status (SpaceGit tracks one
   session); other sessions' space rows fall back to the repo name as `buildSpaces` does without a git lookup. SpaceGit
   polls while **Spaces or Sessions** is visible (today: Spaces only).
 
 ### Expansion and selection
 
-- Initial state: the selected session's row `Expanded`; every other running, connected session `Collapsed`. Space and
-  tab rows keep Spaces' rule (focused → `Expanded`, else `Collapsed`).
-- When `SessionList.onDidChangeSelected` fires and the view is visible, `treeView.reveal(selectedRow, { expand: true,
-  select: false, focus: false })`. Implement `getParent` (pane → tab → space → session row → `Running` root).
+- Initial state: the selected session's focused space row `Expanded`; every other space row `Collapsed`. Tab rows keep
+  Spaces' rule (focused → `Expanded`, else `Collapsed`).
+- When `SessionList.onDidChangeSelected` fires and the view is visible, `treeView.reveal(focusedSpaceRow ?? firstSpaceRow,
+  { expand: true, select: false, focus: false })`. Implement `getParent` (pane → tab → space row → root).
 - Gotcha: VS Code remembers a user's expand / collapse per item `id` and ignores `collapsibleState` for ids it has
   seen, so the reveal is what expands a newly selected session; never change ids to force expansion. Gotcha: `reveal`
   on a hidden view opens the view, so skip it unless `treeView.visible`.
-- The selected session's label is shown highlighted: `label: { label, highlights: [[0, label.length]] }` (a
+- The selected session's labels (its session row or every space row) are shown highlighted: `label: { label, highlights: [[0, label.length]] }` (a
   `TreeItemLabel`; tree item labels have no other way to look distinct and the tree's own selection moves on clicks).
 
 ### Clicks and row actions
@@ -105,11 +113,14 @@ Stopped            4
   | `herdr.newSpace` | `$(add)` | `^herdr\.session\.running ` — `inline@1` |
   | `herdr.sessions.stop` | `$(debug-stop)` | `^herdr\.session\.running host` — `inline@2` |
   | `herdr.sessions.start` | `$(play)` | `^herdr\.session\.stopped (host\|container)` — `inline@1` |
-  | `herdr.sessions.delete` | `$(trash)` | `deletable` — `inline@3` |
+  | `herdr.sessions.delete` | `$(trash)` | `deletable$` — `inline@3`; on `deletable space$` in the context menu (`session@3`) |
+  | `herdr.closeSpace` | `$(trash)` | ` space$` — `inline@4` |
 
 - `herdr.sessions.start` / `stop` / `delete` take the tree's session row and call the existing Switch Session actions
   (`sessionActions.start` / `stop` / `remove`), including their confirmation modals. The `herdr not running` row in a
   container is `herdr.session.stopped container` (session `devc`), so Start starts devc's session as in the picker.
+- Commands given a space row act on its session (start / stop / delete / new space) or its space (Close, Open Host
+  Terminal with the space's folder).
 - `herdr.newSpace` given a session row creates the space in **that** session (today it always uses the selected one);
   with no argument it keeps using the selected session.
 - `herdr.openHostTerminal` given a session row opens the terminal in that session's environment's project folder
@@ -158,11 +169,16 @@ config source's `onDidChange`, firing one full `onDidChangeTreeData`.
 - [x] contextValue unit cases: `herdr.session.running host deletable`, `herdr.session.running container`,
   `herdr.session.stopped host deletable`, `herdr.session.absent ssh`.
 - [x] Tree unit case: with no stopped rows the only root is `Running`; with nothing at all `getChildren()` is `[]`.
+- [x] Space row unit case: label `billing`, description `api · ssh devbox · ⎇ main · 1 done`, `remote` icon in
+  `charts.green`, `contextValue` `herdr.session.running ssh space`, click arguments `[key, workspaceId]`; selected
+  focused space `Expanded`, others `Collapsed`, no tabs `None`.
 - [ ] Manual: the herdr sidebar shows Sessions first; `Running` lists running sessions with descriptions as above and
   `Stopped` lists stopped ones; no row mentions "this machine".
-- [ ] Manual: the selected session is expanded with its label highlighted and its spaces show branch / git status;
-  other running sessions are collapsed and expand to space / tab / pane rows that open and focus like Spaces'.
-- [ ] Manual: clicking another running session selects it (status bar and Spaces follow) and it expands.
+- [ ] Manual: each running session with spaces shows one row per space (space name, then session); the selected
+  session's rows are highlighted, its focused space is expanded and its spaces show branch / git status; space rows
+  expand to tab / pane rows that open and focus like Spaces'. A running session with no spaces is one session row.
+- [ ] Manual: clicking another session's space row selects that session (status bar and Spaces follow) and opens the
+  space; Close on a space row closes it after asking.
 - [ ] Manual: Start on a stopped host session starts it and it moves to `Running`; Stop (host) and Delete ask first;
   `+` on a session row creates a space in that session; `$(terminal)` on a container session opens a host terminal.
 - [ ] Manual: Switch Session, Spaces, Agents and Active Pane behave as before.

@@ -30,12 +30,16 @@ and sessions are picked from **Sessions** or **Switch Session**:
   `unreachable`, `herdr not installed`, `herdr not running`) under **Stopped**. The description says where a session
   runs and how its agents are doing: nothing for this machine, `ssh devbox · 1 done`, `idle`,
   `herdr not running`. Its icon shows where it runs (a desktop for this machine, the remote icon for
-  SSH, a box for a dev container), coloured like a status dot while running and gray when stopped. A running session expands to the same space, tab and pane rows as Spaces.
-  - Click a running session to select it; the selected one is highlighted and expanded, and only its spaces show
-    branch and git status.
+  SSH, a box for a dev container), coloured like a status dot while running and gray when stopped.
+  - A running session with spaces has one row per space instead: the space name, then the session, where it runs and
+    the space's agents (`billing   api · ssh devbox · 1 done`), with the icon coloured by that space's status. A space
+    row expands to its tabs and panes. A running session with no spaces keeps a single session row.
+  - Click a space row to select its session and open the space; click a session row to select it. The selected
+    session's rows are highlighted, its focused space is expanded, and only its spaces show branch and git status.
   - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's
     running ones, **Delete** on any but herdr's default session (both ask first), **New Space** in a running session,
-    and **Open Host Terminal** on a dev container's. The title bar has **New Session…**, **New Space**, **Refresh** and
+    **Open Host Terminal** on a dev container's, and **Close** on a space row. On a space row, Delete is in the
+    right-click menu. The title bar has **New Session…**, **New Space**, **Refresh** and
     **Collapse All**.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
