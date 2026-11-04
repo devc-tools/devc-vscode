@@ -44,7 +44,8 @@
         },
         {
           "id": "herdr.spaces",
-          "name": "Spaces"
+          "name": "Spaces",
+          "when": "false"
         },
         {
           "id": "herdr.agents",
@@ -803,7 +804,7 @@
           "type": "boolean",
           "default": true,
           "scope": "window",
-          "markdownDescription": "Lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml`. Off: the built-in rows."
+          "markdownDescription": "Lay out Sessions' space rows and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml`. Off: the built-in rows."
         },
         "herdr.windowTitle": {
           "type": [

@@ -1,12 +1,11 @@
 # herdr-vscode
 
 herdr sessions, spaces, agents and panes in VS Code, for people who already use
-[herdr](https://herdr.dev). The **herdr** activity-bar container has four views (Sessions, Spaces, Agents, Active Pane),
+[herdr](https://herdr.dev). The **herdr** activity-bar container has three views (Sessions, Agents, Active Pane),
 and sessions are picked from **Sessions** or **Switch Session**:
 
-- **Switch Session** (`$(arrow-swap)` in the Spaces title bar, the session in the status bar, **Select Session**
-  in Spaces while none is selected, or the command palette): every herdr session on this machine, on the SSH
-  hosts in `herdr.sshHosts`, and in every running dev container, under *This machine*, *SSH · &lt;alias&gt;* and
+- **Switch Session** (the session in the status bar, or the command palette): every herdr session on this
+  machine, on the SSH hosts in `herdr.sshHosts`, and in every running dev container, under *This machine*, *SSH · &lt;alias&gt;* and
   *Dev containers*. Each running session shows its agents' counts (`2 blocked · 1 working`) and an icon for its
   worst status.
   - Click a running session to select it; click a stopped one (this machine or a dev container) to start and
@@ -22,7 +21,7 @@ and sessions are picked from **Sessions** or **Switch Session**:
 
   **Pane names and agent marks.** A pane is named by what it is working on: its herdr agent name if it has
   one, else its terminal title (Claude Code keeps that set to the current task), else its herdr label, its
-  folder, and only then its agent kind (`claude`). Where one pane is shown (pane rows in Spaces, Agents rows,
+  folder, and only then its agent kind (`claude`). Where one pane is shown (pane rows in Sessions, Agents rows,
   Active Pane, tile headers and the focused-pane status bar item) Claude Code, GitHub Copilot, pi and
   OpenCode panes show their agent's mark, coloured like the status dot, instead of the dot; other agents
   keep the dot. Agent pane rows and tile headers show the pane's folder after the name.
@@ -33,23 +32,21 @@ and sessions are picked from **Sessions** or **Switch Session**:
   SSH, a box for a dev container), coloured like a status dot while running and gray when stopped.
   - A running session with spaces has one row per space instead: the space name, then the session, where it runs and
     the space's agents (`billing   api · ssh devbox · 1 done`), with the icon coloured by that space's status. A space
-    row expands to its tabs and panes. A running session with no spaces keeps a single session row.
-  - Click a space row to select its session and open the space; click a session row to select it. The selected
-    session's rows are highlighted, its focused space is expanded, and only its spaces show branch and git status.
+    row expands to its tabs and panes; tab rows sum up their panes (`claude, copilot`, `2 shells`). A running session
+    with no spaces keeps a single session row.
+  - Click a space row to select its session and open the space in the editor area (below); click a session row to
+    select it. Click a tab to open its space on that tab, or a pane to open its space on the pane's tab and focus its
+    tile; Active Pane and the status bar then follow that tab's pane (herdr's focused pane there, else its first).
+  - The selected session's rows are highlighted, its focused space is expanded, and only its spaces show branch and
+    git status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Sessions is visible.
   - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's
     running ones, **Delete** on any but herdr's default session (both ask first), **New Space** in a running session,
     **Open Host Terminal** on a dev container's, and **Close** on a space row. On a space row, Delete is in the
     right-click menu. The title bar has **New Session…**, **Refresh** and **Collapse All**.
-- **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
-  status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
-  their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or
-  a tab to open its space on that tab; click a pane to open its space on the pane's tab and focus its tile.
-  Clicking a space or tab makes Active Pane and the status bar follow that tab's pane (herdr's focused pane
-  there, else its first). Space rows expand with their arrow.
-- **Open Host Terminal** (`$(terminal)` in the Spaces title bar, left of **+**, or the command palette) while a dev container
-  session is selected: a terminal on this machine in the container's project folder (its
-  `devcontainer.local_folder`), in the panel at the bottom. A dev container's space rows have the same button
-  (`$(terminal)`, before the trash): it starts in the space's folder on this machine when that folder is
+- **Open Host Terminal** (`$(terminal)` on a dev container session's row in Sessions, or the command palette while a
+  dev container session is selected): a terminal on this machine in the container's project folder (its
+  `devcontainer.local_folder`), in the panel at the bottom. From a dev container's space row (`$(terminal)`,
+  before the trash) it starts in the space's folder on this machine when that folder is
   bind-mounted (as the project folder usually is), else in the project folder.
 - The status bar shows the selected session (`herdr: deephaven-mcp (devc)`; the herdr version is in its
   tooltip); click it to switch session.
@@ -60,7 +57,7 @@ move the herdr TUI's focus to it. Times count from when VS Code saw the state be
 reload; a state that began while VS Code was closed shows no time until it next changes.
 - **Agents**: every agent pane across all connected sessions, blocked first, each with its state and
   how long it has been in it (`deephaven-mcp › v3_auth · blocked 2m`). Clicking one works as for a pane
-  in Spaces. The title bar switches between **all sessions** and **this session** (the selected one, with
+  in Sessions. The title bar switches between **all sessions** and **this session** (the selected one, with
   `<space> › <tab>` rows), and **Filter Agents…** picks All, Blocked, Working or Done, with their counts;
   the view's description shows the counts (`all sessions · 2 blocked · 3 working`) or the filter
   (`blocked 2 of 7`). The number of blocked agents shows as a badge on the herdr icon and as a
@@ -70,7 +67,7 @@ reload; a state that began while VS Code was closed shows no time until it next 
 
 ## herdr spaces in the editor area
 
-Clicking a space in **Spaces** opens it as an editor tab. One editor tab is one herdr space, titled with the
+Clicking a space in **Sessions** opens it as an editor tab. One editor tab is one herdr space, titled with the
 space's name, or `<session> · <space>` for a session other than `default`. It shows the space's active herdr
 tab: its split layout, with every pane a live terminal tile. The strip across the top lists the space's tabs
 in herdr's order, each with its worst agent status. herdr's layout is the only one: everything below edits it.
@@ -81,17 +78,17 @@ in herdr's order, each with its worst agent status. herdr's layout is the only o
 - **+** on the strip creates a tab in the space, in the focused tile's directory, and shows it. **×** on an
   entry closes that tab in herdr, after asking, because its processes end. Double-click an entry to rename it.
   Closing a space's last tab closes the space, and its editor tab closes with it. So does closing the space
-  from **Spaces**, the herdr TUI or anywhere else.
-- Clicking a tab in **Spaces** opens its space on that tab. Clicking a pane or agent row (or **Open in herdr
+  from **Sessions**, the herdr TUI or anywhere else.
+- Clicking a tab in **Sessions** opens its space on that tab. Clicking a pane or agent row (or **Open in herdr
   Space** in its context menu) does the same for the pane's tab and focuses its tile.
 
 - Type in a tile as in the herdr TUI; the wheel scrolls herdr's own scrollback. Mouse clicks are
   not forwarded to the app yet: a drag selects text locally for copying (`Ctrl+Shift+C/V` off the
   Mac, `Cmd+C/V` on it; or on selection with `terminal.integrated.copyOnSelection`). A multi-line paste goes as one bracketed paste.
-- **New Space** (Spaces title bar) creates a space in herdr and opens it. It first asks for the
+- **New Space** (on a running session's rows in Sessions) creates a space in herdr and opens it. It first asks for the
   directory: the session's spaces' folders, VS Code's workspace folders and home are listed, or type a path
   (`/…`, `~/…`) or **Browse…** (in a dev container or over SSH, the environment's own files).
-- **Close** (the trash button on a space, tab or pane row in Spaces, and on an agent row in Agents) closes it in
+- **Close** (the trash button on a space, tab or pane row in Sessions, and on an agent row in Agents) closes it in
   herdr, after asking, because its processes end.
 - In **Switch Session**, clicking a stopped session starts it (a dev container's `herdr not running` row starts
   `devc`); **Stop** runs this machine's `herdr session stop`, after asking, because every pane in the session closes.
@@ -136,13 +133,13 @@ move herdr's own focus; **Focus in herdr TUI** on a pane row does.
 The **Active Pane** view shows the repo, changes and file tree of the pane you last clicked into, so
 VS Code's editing is one click from any agent. Until you have clicked into a tile in this window it follows
 herdr's own focus in the selected session; after that tiles count, and so does clicking a space or tab in
-Spaces or a tab in a space's strip (it follows that tab's pane). Clicking into a file editor or another view
+Sessions or a tab in a space's strip (it follows that tab's pane). Clicking into a file editor or another view
 changes nothing.
 
 - **Header:** the view's title names the pane: `ACTIVE PANE  <pane name> · <space> › <tab>`, plus
   ` · not open in a tile` when no tile in this window shows it.
   **Show Pane** (`$(window)` in the title bar) opens its space on its tab and focuses its tile.
-- **Repo row:** the repo (or directory, outside a repo) and its git status in the Spaces format
+- **Repo row:** the repo (or directory, outside a repo) and its git status in the Sessions format
   (`⎇ main ● 3 ↑1`, `⎇ main · clean`).
   **Add to Workspace** adds it as a workspace folder; workspace folders never change any other way, and
   the action is there only for local paths. **Open in Source Control** (local repos) has VS Code's Git open the
@@ -221,7 +218,7 @@ each answers in its own threads.
 ## Rows from herdr's config
 
 If you lay out herdr's own sidebar with `[ui.sidebar.spaces]` and `[ui.sidebar.agents]` rows in herdr's
-`config.toml`, Spaces' space rows and Agents' rows follow the same rows, so both sidebars show the same
+`config.toml`, Sessions' space rows and Agents' rows follow the same rows, so both sidebars show the same
 things. Without them (or with `herdr.useHerdrSidebarConfig` off), the rows stay as described above.
 
 ```toml
@@ -309,7 +306,7 @@ Other tabs (Settings, extension pages, other webviews) leave the title as it was
 | `herdr.sshPath` | `"ssh"` | ssh client (application scope) |
 | `herdr.dockerPath` | `"docker"` | Docker CLI (application scope) |
 | `herdr.showStoppedSessions` | `false` | list stopped sessions on SSH hosts and in dev containers too; this machine's are always listed |
-| `herdr.useHerdrSidebarConfig` | `true` | lay out Spaces and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
+| `herdr.useHerdrSidebarConfig` | `true` | lay out Sessions' space rows and Agents rows from `[ui.sidebar.*]` in this machine's herdr `config.toml` (see [Rows from herdr's config](#rows-from-herdrs-config)); off: the built-in rows |
 | `herdr.windowTitle` | `null` | the window title while the active editor tab is in a repo or worktree, such as `${branch} (${rootNameShort})`; `null` turns it off (see [Window title](#window-title)) |
 
 How discovery, the bridge protocol and refreshing work: [docs/how-it-works.md](docs/how-it-works.md).
