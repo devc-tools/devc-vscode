@@ -154,9 +154,9 @@ export function sessionTreeSection(row: Pick<SessionRowNode, 'contextValue'>): '
 }
 
 /**
- * A Sessions tree row's description: where it runs (nothing for this machine,
- * `ssh <alias>`, `dev container`), a container's session name unless `devc`,
- * then its status; the parts that are non-empty, joined with ` · `.
+ * A Sessions tree row's description: the SSH host (`ssh <alias>`; nothing on
+ * this machine or in a dev container, whose icon says it), a container's
+ * session name unless `devc`, then its status; the parts that are non-empty, joined with ` · `.
  */
 export function sessionTreeDescription(
 	row: Pick<SessionRowNode, 'key' | 'envKey' | 'session' | 'contextValue' | 'envKind' | 'alias' | 'statusText'>,
@@ -165,8 +165,6 @@ export function sessionTreeDescription(
 	let where: string | undefined;
 	if (row.envKind === 'ssh') {
 		where = envLevel ? 'ssh' : `ssh ${row.alias ?? ''}`.trim();
-	} else if (row.envKind === 'container') {
-		where = 'dev container';
 	}
 	const name = !envLevel && row.envKind === 'container' && row.session !== DEVC_SESSION ? row.session : undefined;
 	let status: string | undefined = row.statusText;

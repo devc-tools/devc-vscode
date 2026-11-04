@@ -31,10 +31,10 @@ Running            3
         ✳ Sessions panel mockup   herdr-vscode
         ▢ zsh
   ● api                ssh devbox · 1 done           ← collapsed
-  ● deephaven-mcp      dev container · idle
+  ● deephaven-mcp      idle
 Stopped            4
   ○ scratch
-  ○ web-ui             dev container · herdr not running
+  ○ web-ui             herdr not running
   ○ nightly            ssh devbox · start not supported
   ⚠ buildbox           ssh · unreachable
 ```
@@ -50,7 +50,7 @@ Stopped            4
   `env.label` for environment-level rows).
 - **Session row description**: the parts below that are non-empty, joined with ` · `:
   1. environment: none for this machine; `ssh <alias>` on SSH session rows; `ssh` on an SSH environment-level row
-     (its label is already the alias); `dev container` in a dev container;
+     (its label is already the alias); none in a dev container (the icon says it);
   2. in a dev container, the session name when it is not `devc`;
   3. status: running and connected → `snapshotDescription(snapshot)` (`1 blocked · 1 working`, `idle` with no
      agents); running and not connected → `connecting…` / `disconnected` / `needs herdr 0.9.5 or later` as today;
@@ -58,12 +58,14 @@ Stopped            4
      `start not supported`; environment-level row → its text (`herdr not running`, `unreachable`, `herdr not installed`,
      `checking…`, `error`).
 
-  Examples: `1 blocked · 1 working`, `ssh devbox · 1 done`, `dev container · idle`, `dev container · web · idle`,
-  `dev container · herdr not running`, `ssh devbox · start not supported`, `ssh · unreachable`, `herdr not installed`.
+  Examples: `1 blocked · 1 working`, `ssh devbox · 1 done`, `idle`, `web · idle`,
+  `herdr not running`, `ssh devbox · start not supported`, `ssh · unreachable`, `herdr not installed`.
   This description is computed for the tree only; Switch Session's descriptions do not change.
-- **Session row icon**: running and connected → `statusIcon(sessionRowStatus(snapshot))`; running not connected,
-  stopped, and `herdr not running` → `statusIcon(undefined)` (empty circle); `unreachable`, `herdr not installed`,
-  `error` → `new ThemeIcon('warning', new ThemeColor('list.warningForeground'))`; `checking…` → `ThemeIcon('loading~spin')`.
+- **Session row icon**: the environment's codicon — `device-desktop` (this machine), `remote` (SSH), `package` (dev
+  container; there is no container codicon). Running and connected: coloured by the worst agent status
+  (`charts.orange` / `charts.blue` / `charts.green`), uncoloured when idle; running not connected, stopped, and
+  `herdr not running` → `disabledForeground`. `unreachable`, `herdr not installed`, `error` →
+  `new ThemeIcon('warning', new ThemeColor('list.warningForeground'))`; `checking…` → `ThemeIcon('loading~spin')`.
 - **Session row tooltip**: `SessionRowNode.tooltip`, plus a last line `Selected session` on the selected row.
 - **Session row id**: `session|<row.key>`. Space / tab / pane ids are `buildSpaces`' (`<sessionKey>|space|…`), already
   unique per session.
@@ -150,8 +152,8 @@ config source's `onDidChange`, firing one full `onDidChangeTreeData`.
 
 - [x] `cd extensions/herdr-vscode && npm test` passes (build, lint, unit tests). In this dev container: `ESBUILD_BINARY_PATH=<linux esbuild>` (node_modules has the macOS binary) and `xvfb-run -a`.
 - [x] Description builder unit cases produce exactly: `1 blocked · 1 working` (host running), `idle` (host running, no
-  agents), `ssh devbox · 1 done`, `dev container · idle`, `dev container · web · idle` (container session `web`),
-  `dev container · herdr not running`, `ssh devbox · start not supported`, `ssh · unreachable`, `herdr not installed`
+  agents), `ssh devbox · 1 done`, `idle` (container), `web · idle` (container session `web`),
+  `herdr not running` (container), `ssh devbox · start not supported`, `ssh · unreachable`, `herdr not installed`
   (host), `` (empty, host stopped), `connecting…` (host running, not connected).
 - [x] contextValue unit cases: `herdr.session.running host deletable`, `herdr.session.running container`,
   `herdr.session.stopped host deletable`, `herdr.session.absent ssh`.

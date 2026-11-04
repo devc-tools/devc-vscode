@@ -742,8 +742,8 @@ suite('Sessions tree', () => {
 			},
 			{ [`${containerEnv.key}/devc`]: noAgents(), [`${containerEnv.key}/web`]: noAgents() },
 		);
-		assert.deepStrictEqual(container.map(sessionTreeDescription), ['dev container · idle', 'dev container · web · idle']);
-		assert.deepStrictEqual(rowsOf({ env: containerEnv, status: 'ok', sessions: [] }).map(sessionTreeDescription), ['dev container · herdr not running']);
+		assert.deepStrictEqual(container.map(sessionTreeDescription), ['idle', 'web · idle']);
+		assert.deepStrictEqual(rowsOf({ env: containerEnv, status: 'ok', sessions: [] }).map(sessionTreeDescription), ['herdr not running']);
 		assert.deepStrictEqual(rowsOf({ env: sshEnv, status: 'unreachable', sessions: [] }).map(sessionTreeDescription), ['ssh · unreachable']);
 		assert.deepStrictEqual(rowsOf({ env: hostEnv, status: 'notInstalled', sessions: [] }).map(sessionTreeDescription), ['herdr not installed']);
 	});
@@ -805,8 +805,16 @@ suite('Sessions tree', () => {
 		assert.strictEqual(sessionTreeItem(a, false, false).collapsibleState, vscode.TreeItemCollapsibleState.None);
 		const stopped = sessionTreeItem(old, false, false);
 		assert.strictEqual(stopped.command, undefined);
-		assert.strictEqual((stopped.iconPath as vscode.ThemeIcon).id, 'circle-outline');
-		assert.strictEqual((selected.iconPath as vscode.ThemeIcon).id, 'circle-filled');
+		const icon = (i: vscode.TreeItem) => {
+			const t = i.iconPath as vscode.ThemeIcon;
+			return [t.id, t.color?.id];
+		};
+		assert.deepStrictEqual(icon(stopped), ['device-desktop', 'disabledForeground'], 'stopped: dimmed');
+		assert.deepStrictEqual(icon(selected), ['device-desktop', 'charts.orange'], 'worst status: blocked');
+		const [idle] = rowsOf({ env: containerEnv, status: 'ok', sessions: [{ name: 'devc', default: true, running: true }] }, { [`${containerEnv.key}/devc`]: noAgents() });
+		assert.deepStrictEqual([sessionTreeIcon(idle).id, sessionTreeIcon(idle).color], ['package', undefined], 'idle: uncoloured');
+		const [api] = rowsOf({ env: sshEnv, status: 'ok', sessions: [{ name: 'api', default: true, running: true }] }, { 'ssh:devbox/api': conn('disconnected') });
+		assert.deepStrictEqual([sessionTreeIcon(api).id, sessionTreeIcon(api).color?.id], ['remote', 'disabledForeground'], 'not connected: dimmed');
 		const [unreachable] = rowsOf({ env: sshEnv, status: 'unreachable', sessions: [] });
 		assert.strictEqual(sessionTreeIcon(unreachable).id, 'warning');
 		const [pending] = rowsOf({ env: sshEnv, status: 'pending', sessions: [] });

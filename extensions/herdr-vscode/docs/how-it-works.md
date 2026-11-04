@@ -115,13 +115,14 @@ when its session stops and when its environment goes away.
   rows is left out, and its description is its row count.
   - Description (`sessionTreeDescription`): `[where, container session, status]` joined with ` · `, empty parts
     dropped. `where` is nothing on this machine, `ssh <alias>` (`ssh` on an environment-level SSH row, whose label is
-    the alias) or `dev container`; the container session name is left out for `devc`; status is the agent counts,
+    the alias); nothing in a dev container (the icon says it); the container session name is left out for `devc`; status is the agent counts,
     the connection state, nothing for a stopped session (`start not supported` on SSH), or the environment row's text.
   - `contextValue` (`sessionTreeContextValue`): `herdr.session.<running|stopped|absent> <host|ssh|container>`, plus
     ` deletable`; the inline menus match it by regex. The container `herdr not running` row is
     `herdr.session.stopped container`, so Start starts devc's session.
-  - Icons (`sessionTreeIcon`): the worst status of a connected running session; `warning` for `unreachable`,
-    `notInstalled`, `error`; `loading~spin` for `pending`; else `circle-outline`.
+  - Icons (`sessionTreeIcon`): the environment's codicon (`ENV_ICON`: `device-desktop`, `remote`, `package`), in the
+    worst status's colour for a connected running session (no colour when idle, since gray reads as stopped) and in
+    `disabledForeground` otherwise; `warning` for `unreachable`, `notInstalled`, `error`; `loading~spin` for `pending`.
   - Children: `buildSpaces` / `spacesTreeItem` for running, connected sessions, so space, tab and pane rows and their
     menus are Spaces' (the `when`s match `view =~ /^herdr\.(spaces|sessions)$/`). Only the selected session gets a
     git lookup: `SpaceGit` follows one session, and runs while Spaces or Sessions is visible (`update`'s `source`).

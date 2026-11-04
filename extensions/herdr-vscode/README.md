@@ -28,8 +28,9 @@ and sessions are picked from **Sessions** or **Switch Session**:
   keep the dot. Agent pane rows and tile headers show the pane's folder after the name.
 - **Sessions**: every session, running ones under **Running** and stopped ones (and places that can't be used:
   `unreachable`, `herdr not installed`, `herdr not running`) under **Stopped**. The description says where a session
-  runs and how its agents are doing: nothing for this machine, `ssh devbox · 1 done`, `dev container · idle`,
-  `dev container · herdr not running`. A running session expands to the same space, tab and pane rows as Spaces.
+  runs and how its agents are doing: nothing for this machine, `ssh devbox · 1 done`, `idle`,
+  `herdr not running`. Its icon shows where it runs (a desktop for this machine, the remote icon for
+  SSH, a box for a dev container), coloured like a status dot while running and gray when stopped. A running session expands to the same space, tab and pane rows as Spaces.
   - Click a running session to select it; the selected one is highlighted and expanded, and only its spaces show
     branch and git status.
   - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's

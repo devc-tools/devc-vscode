@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Snapshot } from '../sessions';
 import { SidebarRowsSource } from '../sidebarConfig';
 import { SpaceGit } from '../spaceGit';
-import { statusIcon } from '../status';
+import { statusIconSpec } from '../status';
 import {
 	SessionList,
 	SessionRowNode,
@@ -40,8 +40,19 @@ export function sessionsRoots(rows: readonly SessionRowNode[]): SessionsRootNode
 	return roots;
 }
 
-/** A session row's icon: its worst agent status when connected, a warning or spinner for an environment that is not usable, else the empty circle. */
-export function sessionTreeIcon(row: Pick<SessionRowNode, 'contextValue' | 'snapshot' | 'envStatus'>): vscode.ThemeIcon {
+/** The codicon for each environment kind: there is no container codicon, so a package (box). */
+export const ENV_ICON: Record<SessionRowNode['envKind'], string> = {
+	host: 'device-desktop',
+	ssh: 'remote',
+	container: 'package',
+};
+
+/**
+ * A session row's icon: its environment's codicon, coloured by the worst agent
+ * status of a connected running session (uncoloured when idle), dimmed when
+ * stopped or not connected; a warning or spinner for an environment that is not usable.
+ */
+export function sessionTreeIcon(row: Pick<SessionRowNode, 'contextValue' | 'snapshot' | 'envStatus' | 'envKind'>): vscode.ThemeIcon {
 	if (row.contextValue === 'herdr.session.absent') {
 		switch (row.envStatus) {
 			case 'unreachable':
@@ -52,7 +63,14 @@ export function sessionTreeIcon(row: Pick<SessionRowNode, 'contextValue' | 'snap
 				return new vscode.ThemeIcon('loading~spin');
 		}
 	}
-	return statusIcon(row.contextValue === 'herdr.session.running' && row.snapshot ? sessionRowStatus(row.snapshot) : undefined);
+	const id = ENV_ICON[row.envKind];
+	if (row.contextValue !== 'herdr.session.running' || !row.snapshot) {
+		return new vscode.ThemeIcon(id, new vscode.ThemeColor('disabledForeground'));
+	}
+	const status = sessionRowStatus(row.snapshot) ?? 'idle';
+	// Idle stays the plain foreground: gray would look like stopped.
+	const color = status === 'idle' || status === 'unknown' ? undefined : statusIconSpec(status).color;
+	return new vscode.ThemeIcon(id, color ? new vscode.ThemeColor(color) : undefined);
 }
 
 /** A session row's tree item. `hasChildren`: a running, connected session with spaces to show. */
