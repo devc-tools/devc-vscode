@@ -407,11 +407,6 @@
           "group": "navigation@0"
         },
         {
-          "command": "herdr.newSpace",
-          "when": "view == herdr.sessions && herdr.sessionSelected",
-          "group": "navigation@1"
-        },
-        {
           "command": "herdr.refresh",
           "when": "view == herdr.sessions",
           "group": "navigation@2"

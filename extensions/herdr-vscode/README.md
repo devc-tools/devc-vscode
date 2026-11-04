@@ -39,8 +39,7 @@ and sessions are picked from **Sessions** or **Switch Session**:
   - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's
     running ones, **Delete** on any but herdr's default session (both ask first), **New Space** in a running session,
     **Open Host Terminal** on a dev container's, and **Close** on a space row. On a space row, Delete is in the
-    right-click menu. The title bar has **New Session…**, **New Space**, **Refresh** and
-    **Collapse All**.
+    right-click menu. The title bar has **New Session…**, **Refresh** and **Collapse All**.
 - **Spaces**: the selected session's spaces, tabs and panes. Space rows show their branch and git
   status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Spaces is visible; tab rows sum up
   their panes (`claude, copilot`, `2 shells`). Click a space to open it in the editor area (below), or

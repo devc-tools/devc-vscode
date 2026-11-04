@@ -16,8 +16,8 @@ delete / create actions.
 
 - View id `herdr.sessions`, name `Sessions`, **first** in the `herdr` container (before Spaces, Agents, Active Pane).
 - Created with `showCollapseAll: true`.
-- Title bar (`view/title`, `navigation`): `herdr.sessions.new` (`$(add)`, "New Session…") at `@0`, `herdr.newSpace`
-  at `@1` when `herdr.sessionSelected`, `herdr.refresh` (`$(refresh)`) at `@2`. Collapse All comes from
+- Title bar (`view/title`, `navigation`): `herdr.sessions.new` (`$(add)`, "New Session…") at `@0`,
+  `herdr.refresh` (`$(refresh)`) at `@2`; no New Space (each running session's rows have their own). Collapse All comes from
   `showCollapseAll`.
 - `viewsWelcome` for `herdr.sessions` (shown when the tree has no roots): `No herdr sessions.\n[New Session](command:herdr.sessions.new)`.
 
