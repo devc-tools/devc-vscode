@@ -63,6 +63,10 @@ export interface PickDirectoryDeps {
 	snapshot: Snapshot | undefined;
 	mounts: readonly BindMount[];
 	home: string | undefined;
+	/** The picker's and Browse… dialog's title; New Space's by default. */
+	title?: string;
+	/** The Browse… dialog's button. */
+	openLabel?: string;
 }
 
 type Item = vscode.QuickPickItem & { dir?: string; browse?: true };
@@ -70,6 +74,7 @@ type Item = vscode.QuickPickItem & { dir?: string; browse?: true };
 /** Picks the directory; undefined when cancelled. */
 export async function pickSpaceDirectory(deps: PickDirectoryDeps): Promise<string | undefined> {
 	const { env, mounts, home } = deps;
+	const title = deps.title ?? NEW_SPACE_TITLE;
 	const workspaceDirs = (vscode.workspace.workspaceFolders ?? []).map((f) => environmentPathOf(f.uri, env, mounts)).filter((d): d is string => !!d);
 	const candidates = newSpaceCandidates(deps.snapshot, workspaceDirs, home);
 	const fixed: Item[] = [
@@ -79,7 +84,7 @@ export async function pickSpaceDirectory(deps: PickDirectoryDeps): Promise<strin
 	];
 
 	const qp = vscode.window.createQuickPick<Item>();
-	qp.title = NEW_SPACE_TITLE;
+	qp.title = title;
 	qp.placeholder = NEW_SPACE_PLACEHOLDER;
 	qp.matchOnDescription = true;
 	qp.items = fixed;
@@ -100,11 +105,11 @@ export async function pickSpaceDirectory(deps: PickDirectoryDeps): Promise<strin
 
 	const start = candidates[0] ?? home;
 	const chosen = await vscode.window.showOpenDialog({
-		title: NEW_SPACE_TITLE,
+		title,
 		canSelectFolders: true,
 		canSelectFiles: false,
 		canSelectMany: false,
-		openLabel: 'Create Space Here',
+		openLabel: deps.openLabel ?? 'Create Space Here',
 		...(start ? { defaultUri: environmentUri(env, start, mounts) } : {}),
 	});
 	if (!chosen?.[0]) {

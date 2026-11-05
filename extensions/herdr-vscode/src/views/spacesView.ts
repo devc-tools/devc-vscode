@@ -64,14 +64,29 @@ export interface PaneNode {
 
 export type SpacesNode = SpaceNode | TabNode | PaneNode;
 
+const trimSlashes = (dir: string) => dir.replace(/(.)\/+$/, '$1');
+
+/**
+ * The directory a space's agents are compared with: its worktree checkout,
+ * else its first pane's starting `cwd`. Not the focused pane's, which moves.
+ */
+export function spaceHome(snapshot: Snapshot, workspaceId: string): string | undefined {
+	return snapshot.workspaces.find((w) => w.workspace_id === workspaceId)?.checkoutPath ?? snapshot.panes.find((p) => p.workspace_id === workspaceId)?.cwd;
+}
+
 /**
  * A pane row's description: for an agent, its folder (basename of
- * `foreground_cwd ?? cwd`), omitted when it equals the pane's name; for a
+ * `foreground_cwd ?? cwd`), omitted when it equals the pane's name or when the
+ * agent works in the space's own directory (`home`, by full path); for a
  * shell, the full cwd.
  */
-export function paneDescription(pane: SnapshotPane, name?: string): string | undefined {
+export function paneDescription(pane: SnapshotPane, name?: string, home?: string): string | undefined {
 	if (!hasAgent(pane)) {
 		return pane.foreground_cwd ?? pane.cwd;
+	}
+	const dir = pane.foreground_cwd ?? pane.cwd;
+	if (dir && home && trimSlashes(dir) === trimSlashes(home)) {
+		return undefined;
 	}
 	const folder = paneFolder(pane);
 	return folder !== undefined && folder !== name ? folder : undefined;
@@ -137,6 +152,7 @@ export function renderSpaceRow(
 export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceGitLookup, rows?: SidebarRows): SpaceNode[] {
 	const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 	return [...snapshot.workspaces].sort(byNumber).map((w) => {
+		const home = spaceHome(snapshot, w.workspace_id);
 		const tabs = snapshot.tabs
 			.filter((t) => t.workspace_id === w.workspace_id)
 			.sort(byNumber)
@@ -157,7 +173,7 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 								type: 'pane',
 								id: `${sessionKey}|pane|${p.pane_id}`,
 								label,
-								description: paneDescription(p, label),
+								description: paneDescription(p, label, home),
 								pane: p,
 								ref: { sessionKey, paneId: p.pane_id },
 							};

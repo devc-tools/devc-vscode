@@ -13,7 +13,8 @@ and sessions are picked from **Sessions** or **Switch Session**:
   - **Stop** (this machine's running sessions) and **Delete** (any session but herdr's default one) are buttons on
     the row; both ask first, and the list updates in place.
   - **New Session…** (`+` in the picker's title bar) asks where (this machine, or a dev container whose herdr is
-    reachable) and a name, then starts and selects it. **Refresh** re-lists every place.
+    reachable), a name and a working directory (as New Space offers), then starts and selects it with its first
+    space in that directory. **Refresh** re-lists every place.
 
   **Status dots:** orange is blocked, blue working, green done, and filled gray idle (also a session or
   space with no agents). An empty circle means herdr is not running there, or not connected. Plain shell
@@ -26,7 +27,7 @@ and sessions are picked from **Sessions** or **Switch Session**:
   OpenCode panes show their agent's mark, coloured like the status dot, instead of the dot; other agents
   keep the dot. Agent pane rows and tile headers show the pane's folder after the name.
 - **Sessions**: every session, running ones under **Running** and stopped ones (and places that can't be used:
-  `unreachable`, `herdr not installed`, `herdr not running`) under **Stopped**. The description says where a session
+  `unreachable`, `herdr not installed`, `herdr not running`) under **Stopped**, which starts collapsed. The description says where a session
   runs and how its agents are doing: nothing for this machine, `ssh devbox · 1 done`, `idle`,
   `herdr not running`. Its icon shows where it runs (a desktop for this machine, the remote icon for
   SSH, a box for a dev container), coloured like a status dot while running and gray when stopped.
@@ -41,7 +42,8 @@ and sessions are picked from **Sessions** or **Switch Session**:
     git status (`⎇ v3_auth ● 4 ↑1`, `⎇ main · clean`), read every 10 s while Sessions is visible.
   - Row buttons: **Start** on a stopped session on this machine or in a dev container, **Stop** on this machine's
     running ones, **Delete** on any but herdr's default session (both ask first), **New Space** in a running session,
-    **Open Host Terminal** on a dev container's, and **Close** on a space row. On a space row, Delete is in the
+    **Open Host Terminal** on a dev container's, and **Close** on a space row. When it is the session's only space,
+    the button is **Close Session**: the session is stopped and deleted (herdr's default session is only stopped). On a space row, Delete is in the
     right-click menu. The title bar has **New Session…**, **Refresh** and **Collapse All**.
 - **Open Host Terminal** (`$(terminal)` on a dev container session's row in Sessions, or the command palette while a
   dev container session is selected): a terminal on this machine in the container's project folder (its

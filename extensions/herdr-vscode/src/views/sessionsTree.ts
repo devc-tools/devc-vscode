@@ -31,6 +31,8 @@ export interface SessionSpaceNode {
 	id: string;
 	row: SessionRowNode;
 	space: SpaceNode;
+	/** The session's only space: closing it closes the session. */
+	only?: boolean;
 }
 
 export type SessionsTreeNode = SessionsRootNode | SessionRowNode | SessionSpaceNode | SpacesNode;
@@ -52,6 +54,18 @@ export function sessionsRoots(rows: readonly SessionRowNode[]): SessionsRootNode
 		}
 	}
 	return roots;
+}
+
+/** A root's tree item: `Running` starts expanded, `Stopped` collapsed; its description is the row count. */
+export function sessionsRootTreeItem(node: SessionsRootNode): vscode.TreeItem {
+	const item = new vscode.TreeItem(
+		ROOT_LABEL[node.section],
+		node.section === 'running' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
+	);
+	item.id = node.id;
+	item.description = String(node.rows.length);
+	item.contextValue = 'herdr.sessions.group';
+	return item;
 }
 
 /** The codicon for each environment kind: there is no container codicon, so a package (box). */
@@ -130,7 +144,7 @@ export function sessionSpaceTreeItem(node: SessionSpaceNode, selected: boolean):
 		.join(' · ');
 	item.tooltip = [row.tooltip, space.tooltip, selected ? 'Selected session' : undefined].filter((x) => !!x).join('\n');
 	item.iconPath = sessionTreeIcon(row, space);
-	item.contextValue = `${sessionTreeContextValue(row)} space`;
+	item.contextValue = `${sessionTreeContextValue(row)} ${node.only ? 'onlySpace' : 'space'}`;
 	item.command = { command: SELECT_SESSION_COMMAND, title: 'Open herdr Space', arguments: [row.key, space.workspaceId] };
 	return item;
 }
@@ -198,8 +212,9 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 				}
 				const key = row.key;
 				const lookup = key === selected && git ? (id: string, dir: string | undefined) => git.description(key, id, dir) : undefined;
-				const spaces = buildSpaces(row.snapshot, key, lookup, rows).map(
-					(space): SessionSpaceNode => ({ type: 'sessionSpace', id: `session|${space.id}`, row, space }),
+				const built = buildSpaces(row.snapshot, key, lookup, rows);
+				const spaces = built.map(
+					(space): SessionSpaceNode => ({ type: 'sessionSpace', id: `session|${space.id}`, row, space, only: built.length === 1 }),
 				);
 				this.spaces.set(key, spaces);
 				for (const node of spaces) {
@@ -230,13 +245,8 @@ export class SessionsTreeView implements vscode.TreeDataProvider<SessionsTreeNod
 
 	getTreeItem(node: SessionsTreeNode): vscode.TreeItem {
 		switch (node.type) {
-			case 'root': {
-				const item = new vscode.TreeItem(ROOT_LABEL[node.section], vscode.TreeItemCollapsibleState.Expanded);
-				item.id = node.id;
-				item.description = String(node.rows.length);
-				item.contextValue = 'herdr.sessions.group';
-				return item;
-			}
+			case 'root':
+				return sessionsRootTreeItem(node);
 			case 'session':
 				return sessionTreeItem(node, node.key === this.selected);
 			case 'sessionSpace':

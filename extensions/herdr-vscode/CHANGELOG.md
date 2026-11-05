@@ -7,7 +7,9 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
 - **Sessions view**: every session at the top of the herdr sidebar, running ones under *Running* as one row per
   space (`billing   api · ssh devbox · 1 done`, expanding to its tabs and panes) and stopped ones under *Stopped*.
   Each row's icon shows where it runs, coloured by its agents' status. Click a space row to select its session and
-  open the space; Start, Stop, Delete, New Space, Close and Open Host Terminal are row buttons.
+  open the space; Start, Stop, Delete, New Space, Close and Open Host Terminal are row buttons. Closing a session's
+  only space closes the session (**Close Session**), and **New Session…** asks for the first space's directory.
+  An agent row shows its folder only when the agent works outside its space's directory. *Stopped* starts collapsed.
 - **Copy on select in tiles**: with `terminal.integrated.copyOnSelection` on, a drag in a tile copies the selected
   text, as in VS Code's terminal.
 - **Space tab icon is visible in dark themes**: it was drawn black on any theme.

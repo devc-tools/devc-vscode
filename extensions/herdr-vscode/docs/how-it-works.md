@@ -112,7 +112,8 @@ when its session stops and when its environment goes away.
 - **Sessions** view (`herdr.sessions`, `src/views/sessionsTree.ts`): the same rows as Switch Session
   (`SessionList.allRows`, so `herdr.showStoppedSessions` applies), split by `sessionTreeSection` into a `Running` root
   (`herdr.session.running`) and a `Stopped` root (everything else, environment-level rows included); a root with no
-  rows is left out, and its description is its session count.
+  rows is left out, and its description is its session count. `Running` starts expanded and `Stopped` collapsed
+  (`sessionsRootTreeItem`); VS Code then keeps the user's expansion per item id.
   - A running, connected session with spaces is shown as one `SessionSpaceNode` per space (`buildSpaces` order), in
     place of its session row; one with no spaces, and every other row, is a session row with no children.
   - Session row description (`sessionTreeDescription`): `[...sessionTreeWhere, status]` joined with ` · `, empty
@@ -123,12 +124,16 @@ when its session stops and when its environment goes away.
   - Space row (`sessionSpaceTreeItem`): label is the space's (`SpaceNode.label`, so `[ui.sidebar.spaces] rows`
     apply); description is `[session label, ...sessionTreeWhere, space description (git or repo), space counts]`;
     icon is the environment codicon in the space's worst status colour; `contextValue` is the session's plus
-    ` space`; id `session|<space id>`. Click runs `herdr.sessions.select <key> <workspaceId>`, which selects the
+    ` space`, or ` onlySpace` when it is the session's only space; id `session|<space id>`. Click runs `herdr.sessions.select <key> <workspaceId>`, which selects the
     session then runs `herdr.openSpace`. Commands given a space row act on its session (`sessionRowOf`) or, for
     Close and Open Host Terminal, on its space.
   - `contextValue` (`sessionTreeContextValue`): `herdr.session.<running|stopped|absent> <host|ssh|container>`, plus
     ` deletable`, plus ` space` on space rows; the inline menus match it by regex (Delete is inline only when the
-    value ends in `deletable`, and in the context menu on space rows; Close is inline on ` space$`). The container `herdr not running` row is
+    value ends in `deletable`, and in the context menu on space rows; Close Space is inline on ` space$`, Close Session
+    (`herdr.sessions.close`) on ` onlySpace$`). A headless herdr server keeps running with no spaces, so closing the
+    last space closes the session instead: after asking, it is stopped and deleted; herdr's default session (not
+    deletable) has the space closed first, then is stopped. `herdr.closeSpace` from Spaces does the same when the
+    snapshot has one space. The container `herdr not running` row is
     `herdr.session.stopped container`, so Start starts devc's session.
   - Icons (`sessionTreeIcon`): the environment's codicon (`ENV_ICON`: `device-desktop`, `remote`, `package`), in the
     worst status's colour for a connected running session (no colour when idle, since gray reads as stopped) and in
@@ -154,6 +159,9 @@ when its session stops and when its environment goes away.
   `shell`. Measured 2026-11-02 (herdr 0.9.5): no pane had `agents[].name` or `display_agent`, every Claude pane
   had `agent: "claude"`, `label` was missing or stale, and `terminal_title_stripped` was the current task. Agent
   pane rows and tile headers show the folder basename after the name (omitted when equal); shell rows the full cwd.
+  Agent pane rows (`paneDescription`) also omit it when the agent's `foreground_cwd ?? cwd` is the space's directory
+  by full path (`spaceHome`: the worktree `checkoutPath`, else the space's first pane's `cwd`; not the focused
+  pane's, which would hide the focused agent's folder and change as focus moves).
 - **Agent marks** (`agentIcon`, `src/status.ts`): for `agent` ∈ `claude`, `copilot`, `pi`, `opencode`, a
   `ThemeIcon('herdr-agent-<agent>')` in the status colour, from `contributes.icons` over
   `resources/agent-icons.woff` (U+E001–U+E004, built by `scripts/build-agent-icons.sh` from the vendored Lobe
@@ -176,7 +184,8 @@ when its session stops and when its environment goes away.
   Title buttons: **New Session…** (`add`) and **Refresh** (`refresh`, `SessionModel.refresh`).
 - **New Session**: where (`newSessionPlaces`: `This machine`, then dev containers with status `ok`; no SSH; skipped
   with one place), then a name (`validateSessionName`: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, not already listed in
-  that place), then start and select.
+  that place), then a working directory (`pickSpaceDirectory` with its own title, no snapshot), then start and select,
+  then `workspace.create { cwd, focus: true }` and open the new space's tab: a new server has no spaces.
 - With no session selected, Spaces (and Agents in session scope) show `No session selected.` and a **Select
   Session** link to `herdr.sessions.switch`.
 - The **session status bar item** (`herdr.session`, left, priority 101) shows `herdr: <row label>`, with

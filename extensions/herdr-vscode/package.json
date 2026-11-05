@@ -339,6 +339,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "herdr.sessions.close",
+        "title": "Close Session",
+        "category": "herdr",
+        "icon": "$(trash)"
+      },
+      {
         "command": "herdr.sessions.new",
         "title": "New Session…",
         "category": "herdr",
@@ -441,12 +447,17 @@
         },
         {
           "command": "herdr.sessions.delete",
-          "when": "view == herdr.sessions && viewItem =~ /deletable space$/",
+          "when": "view == herdr.sessions && viewItem =~ /deletable (space|onlySpace)$/",
           "group": "session@3"
         },
         {
           "command": "herdr.closeSpace",
           "when": "view == herdr.sessions && viewItem =~ / space$/",
+          "group": "inline@4"
+        },
+        {
+          "command": "herdr.sessions.close",
+          "when": "view == herdr.sessions && viewItem =~ / onlySpace$/",
           "group": "inline@4"
         },
         {
@@ -692,6 +703,10 @@
         },
         {
           "command": "herdr.sessions.delete",
+          "when": "false"
+        },
+        {
+          "command": "herdr.sessions.close",
           "when": "false"
         }
       ],

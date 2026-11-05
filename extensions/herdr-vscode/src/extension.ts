@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { AgentReviewController } from './agentReview';
 import { AgentStates } from './agentState';
 import { PaneDecorations } from './decorations';
-import { containerKey, Environments, HOST_KEY, readSettings, sshKey } from './environments';
+import { containerKey, Environment, Environments, HOST_KEY, readSettings, sshKey } from './environments';
 import { HOST_FOLDER_CONTEXT_KEY, hostTerminalFolder, openHostTerminal } from './hostTerminal';
 import { FocusTracker, REVEAL_FOCUSED_COMMAND } from './focus';
 import { GIT_SCHEME, GitHeadContentProvider } from './git';
@@ -239,11 +239,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const warn = (err: unknown) => void vscode.window.showWarningMessage(`herdr: ${(err as Error).message}`);
 
-	/** Starts a stopped session on this machine or in a dev container, then selects it. */
-	const startSession = async (envKey: string, session: string): Promise<void> => {
+	/** Starts a stopped session on this machine or in a dev container, then selects it; whether it started. */
+	const startSession = async (envKey: string, session: string): Promise<boolean> => {
 		const env = environments.get(envKey);
 		if (!env || (env.kind !== 'host' && env.kind !== 'container')) {
-			return;
+			return false;
 		}
 		try {
 			const started = await vscode.window.withProgress(
@@ -252,13 +252,39 @@ export function activate(context: vscode.ExtensionContext): void {
 			);
 			if (started) {
 				sessions.select(sessionKey(env.key, session));
-			} else {
-				const where = env.kind === 'container' ? ` in ${env.label}` : '';
-				void vscode.window.showWarningMessage(`herdr: session "${session}" did not start${where}. Its herdr-server.log says why.`);
+				return true;
 			}
+			const where = env.kind === 'container' ? ` in ${env.label}` : '';
+			void vscode.window.showWarningMessage(`herdr: session "${session}" did not start${where}. Its herdr-server.log says why.`);
 		} catch (err) {
 			warn(err);
 		}
+		return false;
+	};
+	/**
+	 * Ends a session: stops it when running, then deletes it, or, for herdr's
+	 * default session (which cannot be deleted), only stops it.
+	 */
+	const endSession = async (env: Environment, session: string, running: boolean, remove: boolean, verb: string): Promise<void> => {
+		try {
+			await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `herdr: ${verb} session "${session}"…` }, async () => {
+				if (running) {
+					const stopped = await env.shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
+					if (stopped.exitCode !== 0) {
+						throw new Error(stopped.stderr.toString().trim() || `could not stop session "${session}".`);
+					}
+				}
+				if (remove) {
+					const res = await env.shell.run(sessionDeleteArgv(session), { timeoutMs: 15000 });
+					if (res.exitCode !== 0) {
+						throw new Error(res.stderr.toString().trim() || `could not delete session "${session}".`);
+					}
+				}
+			});
+		} catch (err) {
+			warn(err);
+		}
+		await m.relist(env.key);
 	};
 	const sessionActions: SessionActions = {
 		sessions,
@@ -314,23 +340,42 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (answer !== del) {
 				return;
 			}
-			try {
-				await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `herdr: deleting session "${session}"…` }, async () => {
-					if (running) {
-						const stopped = await env.shell.run(sessionStopArgv(session), { timeoutMs: 15000 });
-						if (stopped.exitCode !== 0) {
-							throw new Error(stopped.stderr.toString().trim() || `could not stop session "${session}".`);
-						}
-					}
-					const res = await env.shell.run(sessionDeleteArgv(session), { timeoutMs: 15000 });
-					if (res.exitCode !== 0) {
-						throw new Error(res.stderr.toString().trim() || `could not delete session "${session}".`);
-					}
-				});
-			} catch (err) {
-				warn(err);
+			await endSession(env, session, running, true, 'deleting');
+		},
+		close: async (row, space) => {
+			const session = row.session;
+			const env = environments.get(row.envKey);
+			if (!session || !env || row.contextValue !== 'herdr.session.running') {
+				return;
 			}
-			await m.relist(env.key);
+			const action = 'Close Session';
+			const answer = await vscode.window.showWarningMessage(
+				`Close herdr session "${session}"?`,
+				{
+					modal: true,
+					detail: [
+						space ? `"${space.label}" is its only space, so the session closes with it.` : undefined,
+						'Every pane in it closes, and the agents and programs running there end.',
+						row.deletable ? 'The session is then deleted.' : 'herdr\'s default session is stopped, not deleted.',
+					]
+						.filter((x) => !!x)
+						.join(' '),
+				},
+				action,
+			);
+			if (answer !== action) {
+				return;
+			}
+			if (space && !row.deletable) {
+				// A stopped session keeps its spaces: close this one first so it does not come back.
+				try {
+					await m.request(space.sessionKey, 'workspace.close', { workspace_id: space.workspaceId });
+				} catch (err) {
+					warn(err);
+					return;
+				}
+			}
+			await endSession(env, session, true, !!row.deletable, 'closing');
 		},
 		create: async () => {
 			const states = m.states();
@@ -351,8 +396,30 @@ export function activate(context: vscode.ExtensionContext): void {
 				prompt: 'Session name',
 				validateInput: (value) => validateSessionName(value, existing),
 			});
-			if (name !== undefined && validateSessionName(name, existing) === undefined) {
-				await startSession(place.envKey, name);
+			if (name === undefined || validateSessionName(name, existing) !== undefined) {
+				return;
+			}
+			const env = environments.get(place.envKey);
+			if (!env) {
+				return;
+			}
+			// A new session has no spaces: its first one starts in the directory picked here.
+			let cwd: string | undefined;
+			try {
+				const [mounts, home] = await Promise.all([paths.mounts(env), paths.home(env)]);
+				cwd = await pickSpaceDirectory({ env, snapshot: undefined, mounts, home, title: `New herdr Session "${name}": Working Directory`, openLabel: 'Start Session Here' });
+			} catch (err) {
+				warn(err);
+				return;
+			}
+			if (!cwd || !(await startSession(place.envKey, name))) {
+				return;
+			}
+			const key = sessionKey(place.envKey, name);
+			try {
+				await openCreatedTab(key, await m.request(key, 'workspace.create', { cwd, focus: true }));
+			} catch (err) {
+				warn(err);
 			}
 		},
 	};
@@ -454,9 +521,22 @@ export function activate(context: vscode.ExtensionContext): void {
 			const mounts = node.directory ? await paths.mounts(env).catch(() => []) : [];
 			openHostTerminal(env, { folder: hostTerminalFolder(env.localFolder, node.directory, mounts) });
 		}),
+		// The session's only space: closing it closes the session.
 		vscode.commands.registerCommand('herdr.closeSpace', (arg?: SpaceNode | SessionSpaceNode) => {
 			const node = arg?.type === 'sessionSpace' ? arg.space : arg;
-			return node && closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId });
+			if (!node) {
+				return;
+			}
+			const row = arg?.type === 'sessionSpace' ? arg.row : sessions.row(node.sessionKey);
+			const spaceCount = m.connection(node.sessionKey)?.snapshot?.workspaces.length;
+			if (row && spaceCount === 1) {
+				return sessionActions.close(row, node);
+			}
+			return closeInHerdr(node.sessionKey, 'Space', node.label, 'workspace.close', { workspace_id: node.workspaceId });
+		}),
+		vscode.commands.registerCommand('herdr.sessions.close', (arg?: SessionRowNode | SessionSpaceNode) => {
+			const row = sessionRowOf(arg);
+			return row && sessionActions.close(row, arg?.type === 'sessionSpace' ? arg.space : undefined);
 		}),
 		vscode.commands.registerCommand('herdr.closeTab', (node?: TabNode) =>
 			node && closeInHerdr(node.sessionKey, 'Tab', node.label, 'tab.close', { tab_id: node.tabId }),
@@ -560,6 +640,8 @@ interface SessionActions {
 	start(row: SessionRowNode): Promise<void>;
 	stop(row: SessionRowNode): Promise<void>;
 	remove(row: SessionRowNode): Promise<void>;
+	/** Closes a running session: its last space with it (when given), then stops and deletes it. */
+	close(row: SessionRowNode, space?: SpaceNode): Promise<void>;
 	create(): Promise<void>;
 }
 

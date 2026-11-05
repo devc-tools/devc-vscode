@@ -25,8 +25,8 @@ import {
 	sessionTreeDescription,
 	validateSessionName,
 } from '../views/sessionsView';
-import { SessionSpaceNode, sessionRowOf, sessionsRoots, sessionSpaceTreeItem, sessionTreeIcon, sessionTreeItem } from '../views/sessionsTree';
-import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, paneTreeItem, SpaceNode, spacesTreeItem, tabSummary } from '../views/spacesView';
+import { SessionSpaceNode, sessionRowOf, sessionsRoots, sessionsRootTreeItem, sessionSpaceTreeItem, sessionTreeIcon, sessionTreeItem } from '../views/sessionsTree';
+import { agentTooltip, buildSpaces, paneDescription, paneClickCommand, spaceHome, paneTreeItem, SpaceNode, spacesTreeItem, tabSummary } from '../views/spacesView';
 import { Snapshot, SnapshotPane } from '../sessions';
 import { RAW_SNAPSHOT, snapshot } from './fixtures';
 
@@ -91,6 +91,24 @@ suite('pane identity', () => {
 		assert.strictEqual(paneDescription(base({ agent: 'claude' }), 'claude'), undefined, 'no directory');
 		assert.strictEqual(paneDescription(base({ foreground_cwd: '/src/api/test', cwd: '/src/api' }), 'test'), '/src/api/test');
 		assert.strictEqual(paneDescription(base({ cwd: '/src/api' }), 'api'), '/src/api');
+		// The space's own directory, by full path.
+		assert.strictEqual(paneDescription(agent, 'Task', '/src/api'), undefined, 'in the space\'s directory');
+		assert.strictEqual(paneDescription(agent, 'Task', '/work/api'), 'api', 'same folder name, elsewhere');
+		assert.strictEqual(paneDescription(base({ cwd: '/src/api' }), 'x', '/src/api'), '/src/api', 'shells keep their path');
+	});
+
+	test('spaceHome: the checkout, else the first pane\'s starting cwd (not the focused one\'s)', () => {
+		const snap = (checkoutPath?: string) =>
+			({
+				workspaces: [{ workspace_id: 'w', checkoutPath }],
+				panes: [
+					base({ pane_id: 'p1', cwd: '/src/api', foreground_cwd: '/src/api/web' }),
+					base({ pane_id: 'p2', cwd: '/tmp', focused: true }),
+				],
+			}) as unknown as Snapshot;
+		assert.strictEqual(spaceHome(snap(), 'w'), '/src/api');
+		assert.strictEqual(spaceHome(snap('/wt/api'), 'w'), '/wt/api');
+		assert.strictEqual(spaceHome(snap(), 'other'), undefined);
 	});
 
 	test('agentIcon: the mark coloured by status, the dot for other agents, nothing for a shell', () => {
@@ -154,7 +172,7 @@ suite('Spaces items', () => {
 
 		const [agentPane, shellPane] = spaces[1].children[0].children;
 		const agentItem = spacesTreeItem(agentPane);
-		assert.strictEqual(agentItem.description, 'api', 'the folder');
+		assert.strictEqual(agentItem.description, undefined, 'in the space\'s own directory');
 		assert.strictEqual(agentItem.contextValue, 'herdr.pane.agent');
 		assert.strictEqual((agentItem.iconPath as vscode.ThemeIcon).id, 'herdr-agent-claude');
 		assert.strictEqual(((agentItem.iconPath as vscode.ThemeIcon).color as vscode.ThemeColor).id, 'charts.blue');
@@ -780,6 +798,9 @@ suite('Sessions tree', () => {
 			['running', ['a']],
 			['stopped', ['old', 'devbox']],
 		]);
+		const [runningRoot, stoppedRoot] = sessionsRoots(mixed).map(sessionsRootTreeItem);
+		assert.deepStrictEqual([runningRoot.label, runningRoot.collapsibleState, runningRoot.description], ['Running', vscode.TreeItemCollapsibleState.Expanded, '1']);
+		assert.deepStrictEqual([stoppedRoot.label, stoppedRoot.collapsibleState, stoppedRoot.description], ['Stopped', vscode.TreeItemCollapsibleState.Collapsed, '2']);
 	});
 
 	test('session rows: highlighted when selected, icons, click selects running only', () => {
@@ -843,6 +864,11 @@ suite('Sessions tree', () => {
 		assert.deepStrictEqual((selected.iconPath as vscode.ThemeIcon).id, 'remote');
 		assert.deepStrictEqual((selected.iconPath as vscode.ThemeIcon).color?.id, 'charts.green', 'the space\'s status, not the session\'s');
 		assert.strictEqual(selected.contextValue, 'herdr.session.running ssh space');
+		assert.strictEqual(
+			sessionSpaceTreeItem({ ...node(space({})), only: true }, true).contextValue,
+			'herdr.session.running ssh onlySpace',
+			'the only space: Close closes the session',
+		);
 		assert.deepStrictEqual(selected.command?.arguments, ['ssh:devbox/api', 'w1']);
 		const other = sessionSpaceTreeItem(node(space({ description: undefined, status: undefined, counts: 'idle', focused: false })), false);
 		assert.strictEqual(other.label, 'billing');
