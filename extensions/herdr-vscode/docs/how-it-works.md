@@ -231,7 +231,8 @@ another `v` is ignored.
   becomes visible, the session changes, or a space is added or changes directory; at most 4 at a time,
   skipping a space whose run is still going. A result taken in another directory is dropped. The
   tooltip has the label, repo name, directory and counts.
-- **Tab rows:** the agent kinds in snapshot order (`claude ×2, codex`) and `+ <n> shell(s)`.
+- **Tab rows:** a `window` icon (without it VS Code pulls a leaf pane's icon left into the twistie slot,
+  out of line with the rows around it); the agent kinds in snapshot order (`claude ×2, codex`) and `+ <n> shell(s)`.
 - **Spaces** tab rows run `herdr.openTab`. Pane and agent rows (Spaces, Agents, Pane Context) run
   `herdr.openPaneTab`: the pane's space panel, `tab.focus` when its tab is not active, then its tile
   focused (the webview reports that focus itself, since it may not have the keyboard). Their context

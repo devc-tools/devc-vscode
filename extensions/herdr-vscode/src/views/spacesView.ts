@@ -234,6 +234,9 @@ export function spacesTreeItem(node: SpacesNode): vscode.TreeItem {
 			const item = new vscode.TreeItem(node.label, expand(node.focused));
 			item.id = node.id;
 			item.description = node.description;
+			// VS Code shifts a leaf's icon into the twistie slot when its parent has no icon
+			// and no sibling expands: without one, a tab's pane icons sit left of the next space row's.
+			item.iconPath = new vscode.ThemeIcon('window');
 			item.contextValue = 'herdr.tab';
 			item.command = { command: OPEN_TAB_COMMAND, title: 'Open herdr Tab', arguments: [node.sessionKey, node.tabId] };
 			return item;

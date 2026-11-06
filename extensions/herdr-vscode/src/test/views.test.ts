@@ -169,6 +169,7 @@ suite('Spaces items', () => {
 		assert.strictEqual(web.contextValue, 'herdr.space');
 		assert.strictEqual(spacesTreeItem(spaces[1]).description, undefined, 'repo name equal to the label is hidden');
 		assert.strictEqual(spacesTreeItem(spaces[0].children[0]).contextValue, 'herdr.tab');
+		assert.strictEqual((spacesTreeItem(spaces[0].children[0]).iconPath as vscode.ThemeIcon).id, 'window', 'a tab has an icon: its panes\' icons stay indented');
 
 		const [agentPane, shellPane] = spaces[1].children[0].children;
 		const agentItem = spacesTreeItem(agentPane);
