@@ -155,7 +155,7 @@ suite('Spaces items', () => {
 		);
 		assert.deepStrictEqual(
 			spaces[0].children.map((t) => t.label),
-			['tab · 1', 'tab · logs'],
+			['1', 'logs'],
 		);
 		assert.deepStrictEqual(
 			spaces[1].children[0].children.map((p) => p.label),
@@ -351,9 +351,9 @@ suite('Spaces summaries', () => {
 
 	test('tab summary: agents, shells, mixed, repeated kinds, empty', () => {
 		assert.strictEqual(tabSummary([p('claude'), p('copilot')]), 'claude, copilot');
-		assert.strictEqual(tabSummary([p()]), '1 shell');
-		assert.strictEqual(tabSummary([p(), p()]), '2 shells');
-		assert.strictEqual(tabSummary([p('claude'), p(), p('codex'), p('claude')]), 'claude \u00D72, codex + 1 shell');
+		assert.strictEqual(tabSummary([p()]), 'shell');
+		assert.strictEqual(tabSummary([p(), p()]), 'shell \u00D72');
+		assert.strictEqual(tabSummary([p('claude'), p(), p('codex'), p('claude')]), 'claude \u00D72, codex + shell');
 		assert.strictEqual(tabSummary([p('codex', 'Codex')]), 'Codex');
 		assert.strictEqual(tabSummary([]), undefined);
 	});
@@ -362,7 +362,7 @@ suite('Spaces summaries', () => {
 		const spaces = buildSpaces(snapshot(), 'host/s', (id, dir) => (id === 'w2' && dir === '/src/api' ? '\u2387 main · clean' : undefined));
 		assert.deepStrictEqual(
 			spaces.flatMap((s) => s.children.map((t) => spacesTreeItem(t).description)),
-			['Codex', 'claude', 'claude + 1 shell'],
+			['Codex', 'claude', 'claude + shell'],
 		);
 		const [web, api] = spaces.map(spacesTreeItem);
 		assert.strictEqual(api.description, '\u2387 main · clean', 'git when known');
@@ -851,7 +851,7 @@ suite('Sessions tree', () => {
 			description: '\u2387 main',
 			tooltip: 'billing',
 			focused: true,
-			children: [{ type: 'tab', id: 't', label: 'tab · 1', focused: true, sessionKey: 'ssh:devbox/api', tabId: 't1', children: [] }],
+			children: [{ type: 'tab', id: 't', label: '1', focused: true, sessionKey: 'ssh:devbox/api', tabId: 't1', children: [] }],
 			status: 'done',
 			counts: '1 done',
 			...over,

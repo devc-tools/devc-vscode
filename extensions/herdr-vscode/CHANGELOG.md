@@ -122,7 +122,7 @@ All notable changes to the "herdr-vscode" extension will be documented in this f
   counts) in place of the filter buttons. The view's description shows the counts. **Show Done** in the
   command palette.
 - Spaces: branch and git status on space rows (`⎇ v3_auth ● 4 ↑1`), and a summary on tab rows
-  (`claude, copilot`, `2 shells`).
+  (`claude, copilot`, `shell ×2`).
 - **Start Session** on a dev container's `herdr not running` row (starts `devc`) and on its stopped sessions.
 - Status bar item for the selected session, `herdr: <session>`, with the herdr version in its tooltip.
 

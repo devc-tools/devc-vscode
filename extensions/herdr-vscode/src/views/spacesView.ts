@@ -93,8 +93,8 @@ export function paneDescription(pane: SnapshotPane, name?: string, home?: string
 }
 
 /**
- * A tab row's description: its agent kinds (`<kind> ×<n>` when repeated) and
- * its shell count, e.g. `claude ×2, codex + 1 shell`; undefined with no panes.
+ * A tab row's description: its agent kinds, then its shells, each `<kind>` or
+ * `<kind> ×<n>` when repeated, e.g. `claude ×2, codex + shell`; undefined with no panes.
  */
 export function tabSummary(panes: readonly SnapshotPane[]): string | undefined {
 	const kinds = new Map<string, number>();
@@ -107,8 +107,9 @@ export function tabSummary(panes: readonly SnapshotPane[]): string | undefined {
 			kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
 		}
 	}
-	const agents = [...kinds].map(([kind, n]) => (n > 1 ? `${kind} \u00D7${n}` : kind)).join(', ');
-	const shellText = shells > 0 ? `${shells} ${shells === 1 ? 'shell' : 'shells'}` : '';
+	const counted = (kind: string, n: number) => (n > 1 ? `${kind} \u00D7${n}` : kind);
+	const agents = [...kinds].map(([kind, n]) => counted(kind, n)).join(', ');
+	const shellText = shells > 0 ? counted('shell', shells) : '';
 	return agents && shellText ? `${agents} + ${shellText}` : agents || shellText || undefined;
 }
 
@@ -160,7 +161,7 @@ export function buildSpaces(snapshot: Snapshot, sessionKey: string, git?: SpaceG
 				(t): TabNode => ({
 					type: 'tab',
 					id: `${sessionKey}|tab|${t.tab_id}`,
-					label: `tab · ${t.label}`,
+					label: t.label,
 					description: tabSummary(snapshot.panes.filter((p) => p.tab_id === t.tab_id)),
 					focused: t.focused,
 					sessionKey,

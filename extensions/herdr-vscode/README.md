@@ -33,7 +33,7 @@ and sessions are picked from **Sessions** or **Switch Session**:
   SSH, a box for a dev container), coloured like a status dot while running and gray when stopped.
   - A running session with spaces has one row per space instead: the space name, then the session, where it runs and
     the space's agents (`billing   api · ssh devbox · 1 done`), with the icon coloured by that space's status. A space
-    row expands to its tabs and panes; tab rows sum up their panes (`claude, copilot`, `2 shells`). A running session
+    row expands to its tabs and panes; tab rows sum up their panes (`claude, copilot`, `shell ×2`). A running session
     with no spaces keeps a single session row.
   - Click a space row to select its session and open the space in the editor area (below); click a session row to
     select it. Click a tab to open its space on that tab, or a pane to open its space on the pane's tab and focus its
